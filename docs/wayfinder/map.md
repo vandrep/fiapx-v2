@@ -102,19 +102,27 @@ verificadas por teste, não são sugestão). Projeto original em
   `permissions: read`, então o job precisa declarar `packages: write`; imagens vão para
   `ghcr.io/vandrep/fiapx-<servico>` e nascem **privadas** mesmo em repo público
 
+- [Contrato HTTP do serviço videos](tickets/008-contrato-http-videos.md) — quatro endpoints
+  em português (`/videos`, `pacote` como sub-recurso), `202 Accepted` no envio, **uma**
+  representação de Vídeo para as três respostas; download por **stream, não presigned URL**
+  (presigned é *bearer token* e o host entra na assinatura); `404` para Vídeo alheio, `409`
+  para Pacote indisponível; `problem+json` — com o `413` cortado pelo Vert.x fora dele.
+  `motivo` expõe o **código**, nunca a frase: uma frase aqui duplicaria a tradução que é do
+  `notificacao`. Swagger UI é a demo, com Authorize por fluxo `password`. Contrato em
+  [`docs/contratos/http-videos.md`](../contratos/http-videos.md)
+
 ## Ainda não especificado
 
-- **Implementação do serviço `videos`** — borda HTTP, persistência, publicação de comando,
-  consumo dos eventos de progresso. O contrato de mensagens fechou; falta só o contrato HTTP
-  (ticket 008) para virar tickets.
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
   ordem de subida por health check, seed de buckets, realm e `definitions.json` do RabbitMQ.
   Só especificável depois que as dependências de cada serviço estiverem confirmadas.
 - **Configuração do realm Keycloak** — clients, roles, usuários de demo, `realm-export.json`
   versionado. A pesquisa fechou os mecanismos; falta decidir se há audience mapper (sem ele,
   não configurar `token.audience`) e se o value object de dono valida formato UUID, o que
-  acoplaria o domínio ao Keycloak. O ticket 007 acrescentou um requisito duro: o token
-  **precisa** emitir o claim `email`, senão `VideoFalhou` não fecha.
+  acoplaria o domínio ao Keycloak. Dois requisitos duros já chegaram: o token **precisa**
+  emitir o claim `email` (ticket 007), senão `VideoFalhou` não fecha; e o client **precisa**
+  aceitar *direct access grants* (ticket 008), senão o botão Authorize do Swagger UI não
+  funciona e a demo vira `curl`.
 - **Script de smoke ponta-a-ponta** — o roteiro executável que também vira a demo.
 - **Documentação de arquitetura** — formato (C4? diagrama de sequência?), onde vive, o que
   a banca precisa ver.

@@ -85,5 +85,10 @@ armazenado, nunca o seu conteúdo.
 é escolhida pelo `notificacao`, que é quem conhece o contexto de e-mail; o detalhe técnico
 que acompanha o código serve a diagnóstico e nunca chega ao usuário.
 
-O contrato completo — topologia, campos e versionamento — vive em
-[`docs/contratos/mensagens.md`](docs/contratos/mensagens.md).
+O código do motivo não é vocabulário interno de mensageria: ele também é **público**, porque
+a consulta a um Vídeo `FALHOU` o devolve. O que não se duplica é a *frase* — a API mostra o
+código, e só o `notificacao` o traduz.
+
+Os contratos completos vivem em [`docs/contratos/mensagens.md`](docs/contratos/mensagens.md)
+(entre serviços) e [`docs/contratos/http-videos.md`](docs/contratos/http-videos.md) (borda
+pública).

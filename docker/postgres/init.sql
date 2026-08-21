@@ -11,7 +11,8 @@
 -- entao divergencia entre este script e as entidades derruba o servico no boot. Este
 -- arquivo e verificado, nao e documentacao.
 --
--- Decidido no ticket 009 (docs/wayfinder/tickets/009-modelo-dominio-videos.md).
+-- Decidido no ticket 009 (docs/wayfinder/tickets/009-modelo-dominio-videos.md); as marcas de
+-- publicacao e seus indices parciais vieram do ticket 018 (docs/adr/0003-reconciliacao-por-varredura.md).
 
 CREATE TABLE video (
     -- UUID gerado pelo `videos` no upload; correlaciona todas as mensagens do sistema.
@@ -49,6 +50,15 @@ CREATE TABLE video (
     -- `extracao` mais recente nao pode derrubar o consumidor.
     motivo               VARCHAR(30),
 
+    -- Marcas de publicacao: a tabela `video` E o outbox (ADR 0003). Nulo significa "esta
+    -- mensagem ainda nao saiu daqui", e e o que a varredura de reconciliacao procura.
+    -- Gravadas DEPOIS do publish, de proposito: crash entre os dois republica (inofensivo,
+    -- consumo idempotente), enquanto marcar antes perderia a mensagem de vez.
+    -- Nao se chamam `notificado_em`: o `videos` nao sabe se o e-mail chegou, so sabe que
+    -- publicou.
+    comando_publicado_em TIMESTAMPTZ,
+    falha_publicada_em   TIMESTAMPTZ,
+
     CONSTRAINT pk_video PRIMARY KEY (id),
 
     CONSTRAINT ck_video_estado CHECK (
@@ -66,8 +76,22 @@ CREATE TABLE video (
     )
 );
 
--- Unico indice alem da PK. A listagem e sempre `WHERE dono_sub = ?` com
+-- Indice da listagem. A listagem e sempre `WHERE dono_sub = ?` com
 -- `ORDER BY recebido_em DESC`; o filtro opcional por `estado` tem quatro valores
 -- possiveis e nao merece coluna no indice — ajudaria so o caso filtrado e atrapalharia o
 -- default da API.
 CREATE INDEX ix_video_dono_recebido ON video (dono_sub, recebido_em DESC);
+
+-- Indices da varredura de reconciliacao (ADR 0003). Ela roda a cada 30s sobre uma tabela
+-- que nunca perde linhas, e o indice acima nao serve: o predicado nao tem `dono_sub`.
+-- Parciais porque o predicado e quase sempre falso — custam quase nada em disco e em
+-- escrita.
+CREATE INDEX ix_video_comando_pendente
+    ON video (recebido_em)
+    WHERE comando_publicado_em IS NULL;
+
+-- O `estado` no predicado nao e decoracao: toda linha nao-falhada tem `falha_publicada_em`
+-- nula, entao sem ele este indice parcial indexaria a tabela inteira.
+CREATE INDEX ix_video_falha_pendente
+    ON video (finalizado_em)
+    WHERE estado = 'FALHOU' AND falha_publicada_em IS NULL;

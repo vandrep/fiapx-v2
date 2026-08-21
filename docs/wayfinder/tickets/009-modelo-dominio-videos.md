@@ -222,8 +222,13 @@ protege mensagem que nunca entrou na fila.
 
 O `@Retry` do ADR 0001 cobre a falha transitória do publish; o que sobra é o `videos` morrer
 entre o `INSERT` e o `publish`. A mitigação real é transactional outbox, e ela virou o
-**ticket 018**, em vez de ser decidida de afogadilho aqui. Até o 018 fechar, a ordem acima
-mais o `@Retry` é o comportamento vigente.
+**ticket 018**, em vez de ser decidida de afogadilho aqui.
+
+**Resolvido desde então**: o ticket 018 recusou o outbox canônico e fez da própria tabela
+`video` o outbox — as colunas `comando_publicado_em` e `falha_publicada_em`, mais uma
+varredura de reconciliação ([ADR 0003](../../adr/0003-reconciliacao-por-varredura.md)). A
+ordem fixada acima continua valendo; o que mudou é que agora existe quem repare quando ela
+for interrompida.
 
 ### Fora deste ticket
 

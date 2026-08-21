@@ -38,7 +38,7 @@ test-first por construção); `writing-for-agents` ao editar `AGENTS.md`.
 | Banco | Um Postgres, um database por serviço que precise — na prática **só `videos`** |
 | Dono do status | `videos` é o dono; `extracao` é worker sem estado que publica eventos |
 | Estados do Vídeo | `RECEBIDO` → `PROCESSANDO` → `CONCLUIDO` \| `FALHOU` |
-| Falhas | Fila quorum, `x-delivery-limit=3` (conta **entregas**, crash incluído), `failure-strategy=requeue`, `@Retry` com backoff de segundos nos adapters de I/O. `extracao` consome a própria DLQ; DLQs de `videos` e `notificacao` são terminais. Unicidade da notificação na transição de estado em `videos`. E-mail é *pelo menos uma vez*. Ver [ADR 0001](../adr/0001-politica-de-falhas.md) |
+| Falhas | Fila quorum, `x-delivery-limit=3` (conta **entregas**, crash incluído), `failure-strategy=requeue`, `@Retry` com backoff de segundos nos adapters de I/O. `extracao` consome a própria DLQ; DLQs de `videos` e `notificacao` são terminais. Unicidade da notificação na transição de estado em `videos`. E-mail é *pelo menos uma vez*. Ver [ADR 0001](../adr/0001-politica-de-falhas.md) e, para as janelas não-atômicas entre gravar e publicar, [ADR 0003](../adr/0003-reconciliacao-por-varredura.md) |
 | RabbitMQ | `rabbitmq:4.3.5-management-alpine` fixado nos Dev Services e no Compose; policy `dead-letter-strategy=at-least-once` só no Compose (é policy de broker, não queue argument) |
 | Autenticação | Keycloak, bearer-only via `quarkus-oidc`; dono do vídeo vem do `sub` do token, nunca do request |
 | Notificação | SMTP com MailHog no Compose |
@@ -136,6 +136,17 @@ verificadas por teste, não são sugestão). Projeto original em
   código**: o original **não** é apagado após sucesso, ao contrário do `main.go`. Volumes
   nomeados para o `uploads-directory` e para o scratch do `extracao`, que orça **4 GB** e
   limpa em duas camadas, porque ali o worker morre no meio por desenho
+
+- [Transactional outbox no videos, ou conviver com o Vídeo órfão](tickets/018-outbox-transacional.md)
+  — **nem uma coisa nem outra: a tabela `video` é o outbox**. Duas colunas marcadoras
+  (`comando_publicado_em`, `falha_publicada_em`) mais um `@Scheduled` de reconciliação fecham
+  as duas janelas não-atômicas sem tabela nova, sem payload serializado e sem reescrever o
+  dispatcher. O outbox canônico compraria *exatamente uma vez*, que o ADR 0001 já recusou como
+  regime; "documentar e seguir" deixou de servir porque Vídeo eternamente em `RECEBIDO` é, para
+  o usuário, a requisição perdida que o enunciado proíbe. E a varredura ingênua por idade —
+  o meio-termo óbvio — é **errada** no pico: backlog de fila republicaria comandos já
+  publicados. A marca é o que separa "publicado e esperando" de "nunca publicado". Registrado
+  em [ADR 0003](../adr/0003-reconciliacao-por-varredura.md); o código pousa no ticket 017
 
 ## Ainda não especificado
 

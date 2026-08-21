@@ -4,7 +4,7 @@
 - label: wayfinder:task
 - status: aberto
 - assignee:
-- bloqueado-por: 009, 011
+- bloqueado-por: 009, 011, 019
 
 ## Question
 
@@ -21,7 +21,9 @@ Implementar, test-first, conforme
   `uploads-directory=/var/fiapx/uploads` sobre o volume `fiapx-uploads` (ticket 011).
 - Download em streaming: `RestMulti.fromUniResponse` + `toPublisher()`.
 - Persistência do Vídeo conforme o modelo e o script do ticket 009, incluindo e-mail do
-  dono e nome do arquivo original — o `VideoFalhou` depende dos dois.
+  dono e nome do arquivo original — o `VideoFalhou` depende dos dois. A `VideoEntity` mapeia
+  também `comando_publicado_em` e `falha_publicada_em` (ADR 0003): quem as **usa** é o 017,
+  mas em `%prod` o `validate` derruba o serviço no boot se elas não estiverem mapeadas.
 - Validação de borda do upload: extensão em `mp4`/`avi`/`mov`/`mkv`/`webm` **e**
   content-type `video/*`, devolvendo `415` (ticket 011). É verificação **declarativa** — a
   prova de que o arquivo é decodificável é do `extracao`, e este serviço **não** roda
@@ -34,5 +36,9 @@ Implementar, test-first, conforme
   Services sorteia porta em teste), e as anotações OpenAPI do contrato.
 - Cucumber pela borda HTTP; `ArchitectureConstraintsTest` do módulo passando.
 
+- O `BaixarPacoteUseCase` trata o Pacote expirado conforme o **ticket 019** — a retenção de
+  7 dias do MinIO (ticket 011) contra uma tabela que nunca perde linhas.
+
 Fora deste ticket: publicar `ExtrairVideo`, consumir os eventos de progresso, publicar
-`VideoFalhou` — tudo isso é o 017. Aqui o Vídeo entra e fica em `RECEBIDO`.
+`VideoFalhou` e a varredura de reconciliação — tudo isso é o 017. Aqui o Vídeo entra e fica
+em `RECEBIDO`.

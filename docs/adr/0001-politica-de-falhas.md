@@ -34,6 +34,11 @@ o e-mail é consequência.
 Onde esse `UPDATE` se encaixa nas camadas — e por que o grafo de estados continua no `core`
 apesar dele — está no [ADR 0002](0002-maquina-de-estados-em-duas-camadas.md).
 
+Esse `UPDATE` e o `publish` que o segue, porém, não são atômicos entre si — nem o são o
+`INSERT` do upload e a publicação de `ExtrairVideo`. Como essas duas janelas são fechadas
+sem transactional outbox está no
+[ADR 0003](0003-reconciliacao-por-varredura.md).
+
 ## Consequences
 
 - **"Tentativa" passa a significar "entrega", não "erro".** Fila quorum conta reentregas, e

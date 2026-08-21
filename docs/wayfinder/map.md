@@ -79,6 +79,15 @@ verificadas por teste, não são sugestão). Projeto original em
   de evento idempotente; `extracao` consome a própria DLQ. Registrado em
   [ADR 0001](../adr/0001-politica-de-falhas.md)
 
+- [Contrato de mensagens entre videos, extracao e notificacao](tickets/007-contrato-mensagens.md)
+  — cinco mensagens (comando no imperativo, evento no particípio); `extracao` e `notificacao`
+  **nunca se falam**, toda falha passa pelo `videos`, que é onde mora a unicidade do e-mail.
+  Sem envelope: o tipo vive na routing key, logo uma fila por tipo. O `extracao` recebe as
+  chaves do MinIO prontas e não conhece a convenção. Motivo da falha é código estável, o texto
+  humano é do `notificacao`. Prefetch explícito e obrigatório (`extracao`=1). Consumidor de
+  mensagem é análogo a `Resource` — o template não cobria mensageria. Contrato em
+  [`docs/contratos/mensagens.md`](../contratos/mensagens.md)
+
 - [Esqueleto Maven multi-módulo a partir do template](tickets/002-esqueleto-multi-modulo.md)
   — parent agregador `packaging pom` + três módulos; `init-project.sh` roda uma vez por
   serviço **sem edição**, com `--package br.com.fiapx --modules <servico>`; o
@@ -96,20 +105,16 @@ verificadas por teste, não são sugestão). Projeto original em
 ## Ainda não especificado
 
 - **Implementação do serviço `videos`** — borda HTTP, persistência, publicação de comando,
-  consumo dos eventos de progresso. Vira tickets quando o contrato HTTP e o contrato de
-  mensagens fecharem.
-- **Implementação do serviço `extracao`** — consumo do comando, download do MinIO, ffmpeg,
-  empacotamento, upload do Pacote, publicação de eventos. O ffmpeg já está decidido
-  (processo externo, ticket 006); falta o contrato de mensagens.
-- **Implementação do serviço `notificacao`** — consumo do evento de falha definitiva,
-  template do e-mail, envio SMTP. O mais fino dos três; provavelmente um ticket só.
+  consumo dos eventos de progresso. O contrato de mensagens fechou; falta só o contrato HTTP
+  (ticket 008) para virar tickets.
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
   ordem de subida por health check, seed de buckets, realm e `definitions.json` do RabbitMQ.
   Só especificável depois que as dependências de cada serviço estiverem confirmadas.
 - **Configuração do realm Keycloak** — clients, roles, usuários de demo, `realm-export.json`
   versionado. A pesquisa fechou os mecanismos; falta decidir se há audience mapper (sem ele,
   não configurar `token.audience`) e se o value object de dono valida formato UUID, o que
-  acoplaria o domínio ao Keycloak.
+  acoplaria o domínio ao Keycloak. O ticket 007 acrescentou um requisito duro: o token
+  **precisa** emitir o claim `email`, senão `VideoFalhou` não fecha.
 - **Script de smoke ponta-a-ponta** — o roteiro executável que também vira a demo.
 - **Documentação de arquitetura** — formato (C4? diagrama de sequência?), onde vive, o que
   a banca precisa ver.

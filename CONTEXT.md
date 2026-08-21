@@ -56,3 +56,34 @@ usuário baixa. Um Vídeo `CONCLUIDO` tem exatamente um Pacote.
 | `videos` | Borda pública. Recebe o Vídeo, é dono do seu estado, lista os Vídeos do usuário e entrega o Pacote |
 | `extracao` | Worker sem estado. Executa a Extração e publica o que aconteceu |
 | `notificacao` | Avisa o usuário quando a Extração do seu Vídeo falha definitivamente |
+
+## Mensagens
+
+Os serviços conversam por cinco mensagens, e os nomes delas são vocabulário de domínio —
+usados igualmente em conversa, código e documentação. Comandos são nomeados no imperativo,
+porque são uma ordem com destinatário; eventos no particípio, porque são um fato consumado.
+
+| Mensagem | O que significa |
+|---|---|
+| `ExtrairVideo` | `videos` pede ao `extracao` que execute a Extração de um Vídeo |
+| `ExtracaoIniciada` | o `extracao` de fato começou a trabalhar num Vídeo |
+| `ExtracaoConcluida` | a Extração terminou e produziu um Pacote |
+| `ExtracaoFalhou` | a Extração de um Vídeo falhou definitivamente |
+| `VideoFalhou` | um Vídeo caiu para `FALHOU` — é o que faz o usuário ser avisado |
+
+`ExtracaoFalhou` e `VideoFalhou` descrevem o mesmo acidente vistos de lugares diferentes: o
+primeiro é o worker relatando o que aconteceu com o trabalho, o segundo é o dono do estado
+anunciando que o Vídeo mudou. Só o segundo gera e-mail, e ele só existe quando a transição
+de estado de fato ocorreu — é aí que mora a garantia de que a notificação não se multiplica.
+
+O `extracao` e o `notificacao` nunca conversam entre si: tudo passa pelo `videos`.
+
+O Vídeo em si nunca trafega numa mensagem. O que circula é a referência ao arquivo
+armazenado, nunca o seu conteúdo.
+
+**Motivo da falha** é um código estável e pequeno, não uma frase. A frase que o usuário lê
+é escolhida pelo `notificacao`, que é quem conhece o contexto de e-mail; o detalhe técnico
+que acompanha o código serve a diagnóstico e nunca chega ao usuário.
+
+O contrato completo — topologia, campos e versionamento — vive em
+[`docs/contratos/mensagens.md`](docs/contratos/mensagens.md).

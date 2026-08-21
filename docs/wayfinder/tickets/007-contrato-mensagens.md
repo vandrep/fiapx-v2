@@ -2,8 +2,8 @@
 
 - id: 007
 - label: wayfinder:grilling
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: vandrep
 - bloqueado-por: 003, 006, 010
 
 ## Question
@@ -29,3 +29,57 @@ A decidir:
 
 Este ticket gradua boa parte da névoa de implementação — espere criar tickets novos ao
 fechá-lo.
+
+## Resolução
+
+Contrato completo em [`docs/contratos/mensagens.md`](../../contratos/mensagens.md);
+vocabulário das mensagens acrescentado ao [`CONTEXT.md`](../../../CONTEXT.md). Sem ADR — o
+trade-off duro já está registrado no [ADR 0001](../../adr/0001-politica-de-falhas.md), e
+isto é especificação viva, não decisão surpreendente.
+
+**Cinco mensagens**, comando no imperativo e evento no particípio: `ExtrairVideo`
+(`videos`→`extracao`); `ExtracaoIniciada`, `ExtracaoConcluida`, `ExtracaoFalhou`
+(`extracao`→`videos`); `VideoFalhou` (`videos`→`notificacao`). **`extracao` e `notificacao`
+nunca se falam** — a mediação por `videos` é o que dá unicidade ao e-mail sem dar banco ao
+serviço mais fino. `ExtracaoIniciada` não é opcional: o `CONTEXT.md` define "na fila" como
+`RECEBIDO`, então o `videos` não pode marcar `PROCESSANDO` ao publicar o comando.
+
+**Sem envelope** — o tipo da mensagem existe só na routing key e na fila, o que empurra para
+uma fila por tipo, casando 1:1 com um canal SmallRye e um `record`. Dois exchanges topic
+(`fiapx.comandos`, `fiapx.eventos`), filas prefixadas pelo consumidor, topologia declarada
+pelo conector (o `definitions.json` só tem policy e usuários, porque os Dev Services sobem
+broker limpo em teste).
+
+**DLQs assimétricas**: dedicada onde há consumidor (`extracao.extrair.dlq`), compartilhada
+por serviço onde é terminal (`videos.dlq`, `notificacao.dlq`).
+
+**O `extracao` não conhece a convenção de chaves do MinIO**: recebe `chaveVideo` e
+`chaveDestinoPacote` prontos no comando. O formato fica inteiro dentro do `videos`, e mudá-lo
+depois (ticket 011) não toca dois serviços.
+
+**Motivo da falha é código estável**, não frase: `ARQUIVO_INVALIDO`, `FORMATO_NAO_SUPORTADO`,
+`SEM_FLUXO_DE_VIDEO`, `TENTATIVAS_ESGOTADAS`, mais um `detalheTecnico` só para log — o stderr
+do ffmpeg nunca chega ao usuário. `TENTATIVAS_ESGOTADAS` existe porque o consumidor da DLQ
+não sabe *por que* falhou, só que o `x-delivery-limit` estourou. Falha permanente publica
+direto e dá ack; transitória esgotada atravessa a DLQ. Dois sítios de publicação, um só use
+case.
+
+**Prefetch explícito e obrigatório** em todo canal: `extracao`=1, `videos`=20,
+`notificacao`=10.
+
+**Camadas**: o template não cobre mensageria (`framework.dispatcher` e
+`core.interfaces.sender` estão documentados no `AGENTS.md` dele, mas vazios — sem exemplo e
+sem regra de teste). Decidido espelhar a borda HTTP: consumidor é análogo a `Resource`, vive
+em `framework.dispatcher`, chama controller, chama use case; os `record` do contrato ficam lá
+e nunca cruzam para o `core`. Cada serviço acrescenta ao seu `ArchitectureConstraintsTest` a
+regra de que `@Incoming`/`@Outgoing` só aparecem em `framework`.
+
+**Versionamento**: só aditivo + tolerant reader (`@JsonIgnoreProperties(ignoreUnknown = true)`),
+sem campo `versao`; mudança incompatível vira routing key nova.
+
+**Restrições que este ticket impõe a outros:**
+
+- **Ticket 009**: `videos` precisa persistir `emailDono` e `nomeArquivoOriginal`, senão
+  `VideoFalhou` não fecha.
+- **Realm do Keycloak** (ainda na névoa): o token precisa emitir o claim `email`.
+- **Ticket 011** segue dono do *formato* da chave de objeto; o contrato só diz que ela trafega.

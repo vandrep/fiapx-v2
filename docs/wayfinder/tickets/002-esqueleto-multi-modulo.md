@@ -3,7 +3,7 @@
 - id: 002
 - label: wayfinder:prototype
 - status: aberto
-- assignee:
+- assignee: vandrep (sessao de 2026-08-21)
 - bloqueado-por: 001
 
 ## Question

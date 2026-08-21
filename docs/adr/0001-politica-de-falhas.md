@@ -31,6 +31,9 @@ atualização que de fato mudou a linha publica o evento. Isso não é uma regra
 dentro do dono do estado; é o invariante "um Vídeo cai para `FALHOU` uma única vez", do qual
 o e-mail é consequência.
 
+Onde esse `UPDATE` se encaixa nas camadas — e por que o grafo de estados continua no `core`
+apesar dele — está no [ADR 0002](0002-maquina-de-estados-em-duas-camadas.md).
+
 ## Consequences
 
 - **"Tentativa" passa a significar "entrega", não "erro".** Fila quorum conta reentregas, e

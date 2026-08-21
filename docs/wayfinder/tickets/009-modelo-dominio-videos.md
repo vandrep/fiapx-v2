@@ -72,6 +72,9 @@ atomicidade; o banco não consegue explicar o domínio. O gateway devolve
 O grafo continua declarado **uma vez**: `EstadoVideo` sabe qual estado cada transição exige
 como predecessor, e o use case passa esse predecessor ao gateway, que o usa no `WHERE`.
 
+Registrado no [ADR 0002](../../adr/0002-maquina-de-estados-em-duas-camadas.md), porque a
+tentação de "consertar" a duplicação aparente removendo uma das duas camadas é real.
+
 ### Transição ilegal é retorno, não exceção
 
 `ExtracaoIniciada` chegando num Vídeo já `CONCLUIDO` devolve "não mudou nada" e o consumidor

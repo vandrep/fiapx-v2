@@ -115,7 +115,8 @@ verificadas por teste, não são sugestão). Projeto original em
   — **uma tabela**, `video`: a Extração não é entidade porque o `videos` não vê tentativas,
   só entregas. A máquina de estados fica em **dois lugares com papéis distintos** — a
   entidade responde "esta transição é legal?", o `UPDATE` condicional responde "fui eu quem
-  mudou a linha?"; transição ilegal é retorno, não exceção. A guarda de propriedade é
+  mudou a linha?" ([ADR 0002](../adr/0002-maquina-de-estados-em-duas-camadas.md)); transição
+  ilegal é retorno, não exceção. A guarda de propriedade é
   **estrutural**: não existe `buscarPorId` sem dono na interface do gateway. **Sem Flyway**
   (é JDBC, custaria um datasource Agroal só para migrar): o entregável é
   [`docker/postgres/init.sql`](../../docker/postgres/init.sql), mantido honesto pelo

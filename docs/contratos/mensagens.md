@@ -174,6 +174,7 @@ Enum estável e pequeno. O texto voltado ao usuário mora no template do `notifi
 | `ARQUIVO_INVALIDO` | não é vídeo, ou está corrompido/truncado | exit 183, `ffprobe` rc≠0, contagem de frames abaixo da duração |
 | `FORMATO_NAO_SUPORTADO` | codec ou container que o ffmpeg não decodifica | exit 8 + `Unknown encoder/decoder` no stderr |
 | `SEM_FLUXO_DE_VIDEO` | o arquivo abre, mas não tem stream de vídeo | exit 234 + `does not contain any stream` |
+| `DURACAO_EXCEDIDA` | o vídeo passa do teto de duração aceito | duração do `ffprobe` acima de 20 min (ticket 011) |
 | `TENTATIVAS_ESGOTADAS` | `x-delivery-limit` estourou | publicado pelo consumidor da própria DLQ |
 
 O `videos` conhece um sexto valor, `DESCONHECIDO`, que **nenhum serviço publica**: é onde
@@ -182,6 +183,11 @@ acima extensível sem quebrar consumidor antigo (ticket 009).
 
 `TENTATIVAS_ESGOTADAS` não é enfeite: o consumidor da DLQ **não sabe** por que falhou — só
 que a mensagem foi entregue três vezes sem ack. É o único código que ele pode publicar.
+
+`DURACAO_EXCEDIDA` é o único código que não vem de um exit code: vem do `ffprobe` que o
+`extracao` já roda para conferir a contagem de frames. É falha **permanente** — ack imediato,
+sem gastar as três entregas. O teto existe porque bytes não limitam frames, e a borda não
+pode medir duração sem instalar ffmpeg no `videos` (ticket 011).
 
 ## Caminhos de falha
 

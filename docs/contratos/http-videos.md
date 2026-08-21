@@ -66,7 +66,7 @@ que é quem conhece o contexto de e-mail. Se esta API devolvesse uma frase, o `v
 passaria a manter uma **segunda** tradução do mesmo enum, e as duas divergiriam.
 
 Então o campo carrega o código cru — `ARQUIVO_INVALIDO`, `FORMATO_NAO_SUPORTADO`,
-`SEM_FLUXO_DE_VIDEO`, `TENTATIVAS_ESGOTADAS`, `DESCONHECIDO` — declarado como enum no
+`SEM_FLUXO_DE_VIDEO`, `DURACAO_EXCEDIDA`, `TENTATIVAS_ESGOTADAS`, `DESCONHECIDO` — declarado como enum no
 OpenAPI, que é onde o significado de cada um fica documentado.
 
 `DESCONHECIDO` não é publicado por ninguém: é o valor em que o `videos` pousa um código que
@@ -92,14 +92,19 @@ como monitor de status. A escolha é reversível e não custa nada mudar.
 
 ### Rejeições na borda
 
-Este contrato fixa **quais rejeições existem e qual a forma delas**; os *valores* (teto de
-tamanho, lista de extensões, teto de duração) são decisão do ticket 011.
+Este contrato fixa **quais rejeições existem e qual a forma delas**; os *valores* foram
+fixados pelo ticket 011 e estão na tabela.
 
-| Situação | Status |
-|---|---|
-| campo `arquivo` ausente ou vazio | `400` |
-| content-type ou extensão fora da lista | `415` |
-| corpo acima do teto | `413` |
+| Situação | Status | Valor (ticket 011) |
+|---|---|---|
+| campo `arquivo` ausente ou vazio | `400` | — |
+| content-type ou extensão fora da lista | `415` | extensões `mp4`, `avi`, `mov`, `mkv`, `webm`; content-type `video/*` |
+| corpo acima do teto | `413` | `quarkus.http.limits.max-body-size=200M` |
+
+A validação da borda é **declarativa, não probatória**: ela pergunta "você quis mesmo mandar
+isso?". A prova de que o arquivo é um vídeo decodificável mora no `extracao`, porque medir
+isso aqui exigiria ffmpeg na imagem do `videos`. Pelo mesmo motivo, o **teto de duração**
+(20 min) não é cobrado nesta borda — ele vira `DURACAO_EXCEDIDA` depois do `202`, por e-mail.
 
 ## `GET /videos` — listagem
 

@@ -10,7 +10,7 @@
 
 Worker sem estado. O ffmpeg já está decidido (ticket 006: processo externo, `-xerror`, ZIP
 `STORED`, classificação por exit code) e o contrato de mensagens fechou (ticket 007). Falta
-o teto de frames/duração que o ticket 011 decide — é ele que este serviço tem de impor.
+o teto de duração, que o ticket 011 já decidiu — é este serviço que tem de impô-lo.
 
 Implementar, test-first, conforme
 [`docs/contratos/mensagens.md`](../../contratos/mensagens.md) e o `AGENTS.md` do template:
@@ -27,6 +27,17 @@ Implementar, test-first, conforme
   sem ele o Vídeo trava em `PROCESSANDO`.
 - `@Retry` com backoff de segundos nos adapters de I/O (MinIO), conforme ADR 0001.
 - `max-outstanding-messages=1`.
-- Imagem `eclipse-temurin:21-jre-alpine` + `apk add --no-cache ffmpeg`, diretório temporário
-  de trabalho e sua limpeza.
+- **Teto de duração de 20 minutos** (ticket 011), lido do `ffprobe` que já roda para
+  conferir a contagem de frames. Acima dele, falha **permanente**: publica
+  `DURACAO_EXCEDIDA` e dá ack, sem gastar as três entregas.
+- Imagem `eclipse-temurin:21-jre-alpine` + `apk add --no-cache ffmpeg`. Scratch em
+  `/var/fiapx/extracao/{idVideo}` sobre o volume `fiapx-extracao-scratch`, orçado em 4 GB
+  (ticket 011): diretório **apagado-e-recriado** no início de cada tentativa, `finally` por
+  mensagem e **varredura no boot** — o worker morre no meio por desenho, então limpeza no
+  fim do processo não basta. Frames em disco é o caminho orçado; `image2pipe` alimentando o
+  `ZipOutputStream` corta o pico pela metade e fica como otimização **opcional** desta
+  implementação, com a ressalva de que fatiar PNGs concatenados briga com a classificação
+  por exit code e com a contagem de frames.
+- Chaves de objeto chegam prontas nas mensagens — este serviço **não** conhece a convenção
+  do ticket 011 nem os nomes dos buckets.
 - Health check e a regra nova no `ArchitectureConstraintsTest`.

@@ -124,14 +124,30 @@ verificadas por teste, não são sugestão). Projeto original em
   o tolerant reader não derrubar mensagem. O `Video` guarda a chave do MinIO como string
   opaca — quem a **constrói** é o `ArquivoGateway`, então a decisão do 011 pousa no adapter
 
+- [Limites operacionais: tamanho, duração, formatos e retenção](tickets/011-limites-operacionais.md)
+  — upload em **200 MB**, porque bytes não limitam frames; a guarda fina é um teto de
+  **20 minutos** cobrado no `extracao`, onde o `ffprobe` já roda, e não na borda — pôr
+  `ffprobe` no `videos` seria instalar ffmpeg num serviço que não conhece codecs. Daí o
+  código novo `DURACAO_EXCEDIDA` (aditivo, o `DESCONHECIDO` existe para isso) e o preço
+  aceito de o usuário só saber depois do `202`. A borda valida extensão e content-type de
+  forma **declarativa, não probatória**: a prova é do `extracao`, via exit code. Dois
+  buckets (`videos`, `pacotes`), chave **sem dono** — a autoridade sobre propriedade é o
+  `dono_sub` no Postgres. Retenção é regra de ciclo de vida do MinIO (7 dias), **zero
+  código**: o original **não** é apagado após sucesso, ao contrário do `main.go`. Volumes
+  nomeados para o `uploads-directory` e para o scratch do `extracao`, que orça **4 GB** e
+  limpa em duas camadas, porque ali o worker morre no meio por desenho
+
 ## Ainda não especificado
 
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
   ordem de subida por health check, seed de buckets, realm e `definitions.json` do RabbitMQ.
-  Só especificável depois que as dependências de cada serviço estiverem confirmadas. Dois
-  requisitos duros já chegaram do ticket 009: `POSTGRES_DB=fiapx_videos` (é o que cria o
-  único database, antes dos scripts de init) e `docker/postgres/init.sql` montado em
-  `docker-entrypoint-initdb.d`.
+  Só especificável depois que as dependências de cada serviço estiverem confirmadas. Requisitos
+  duros já chegaram. Do ticket 009: `POSTGRES_DB=fiapx_videos` (é o que cria o único
+  database, antes dos scripts de init) e `docker/postgres/init.sql` montado em
+  `docker-entrypoint-initdb.d`. Do ticket 011: seed do MinIO cria **dois** buckets
+  (`videos` e `pacotes`) com regra de ciclo de vida de 7 dias em ambos; volume nomeado
+  `fiapx-uploads` em `/var/fiapx/uploads` no `videos`; volume nomeado
+  `fiapx-extracao-scratch` em `/var/fiapx/extracao` no `extracao`, com folga de **4 GB**.
 - **Configuração do realm Keycloak** — clients, roles, usuários de demo, `realm-export.json`
   versionado. A pesquisa fechou os mecanismos; falta decidir se há audience mapper (sem ele,
   não configurar `token.audience`). O ticket 009 já retirou daqui a pergunta do formato do

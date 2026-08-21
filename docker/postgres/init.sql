@@ -59,6 +59,7 @@ CREATE TABLE video (
             'ARQUIVO_INVALIDO',
             'FORMATO_NAO_SUPORTADO',
             'SEM_FLUXO_DE_VIDEO',
+            'DURACAO_EXCEDIDA',
             'TENTATIVAS_ESGOTADAS',
             'DESCONHECIDO'
         )

@@ -1,0 +1,22 @@
+# Maven
+target/
+.mvn/timing.properties
+
+# Quarkus
+.quarkus/
+*.war
+*.jar
+*.class
+# o wrapper é versionado de propósito
+!.mvn/wrapper/maven-wrapper.jar
+
+# Logs e temporários
+*.log
+*.tmp
+
+# macOS / metadados de zip
+.DS_Store
+__MACOSX/
+
+# Ambiente local
+.env

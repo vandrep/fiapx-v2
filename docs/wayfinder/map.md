@@ -79,6 +79,12 @@ verificadas por teste, não são sugestão). Projeto original em
   de evento idempotente; `extracao` consome a própria DLQ. Registrado em
   [ADR 0001](../adr/0001-politica-de-falhas.md)
 
+- [Repositório próprio e remote no GitHub](tickets/001-repositorio-github.md) — repo
+  público em `vandrep/fiapx-v2`, `main` publicada, fora do índice do repo pai; o CI **não
+  precisa de segredo novo** (o `GITHUB_TOKEN` autentica no GHCR), mas o default do repo é
+  `permissions: read`, então o job precisa declarar `packages: write`; imagens vão para
+  `ghcr.io/vandrep/fiapx-<servico>` e nascem **privadas** mesmo em repo público
+
 ## Ainda não especificado
 
 - **Implementação do serviço `videos`** — borda HTTP, persistência, publicação de comando,
@@ -96,6 +102,10 @@ verificadas por teste, não são sugestão). Projeto original em
   versionado. A pesquisa fechou os mecanismos; falta decidir se há audience mapper (sem ele,
   não configurar `token.audience`) e se o value object de dono valida formato UUID, o que
   acoplaria o domínio ao Keycloak.
+- **Pipeline de CI/CD** — o workflow `verify` + build + push das três imagens para o GHCR.
+  Os fatos de autenticação e permissão já estão fechados (ticket 001); falta o que só se vê
+  com o esqueleto de pé: um job por módulo ou um só, cache do Maven, se o push roda em todo
+  commit de `main` ou só em tag, e quem torna os packages públicos.
 - **Script de smoke ponta-a-ponta** — o roteiro executável que também vira a demo.
 - **Documentação de arquitetura** — formato (C4? diagrama de sequência?), onde vive, o que
   a banca precisa ver.

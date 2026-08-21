@@ -66,9 +66,16 @@ que é quem conhece o contexto de e-mail. Se esta API devolvesse uma frase, o `v
 passaria a manter uma **segunda** tradução do mesmo enum, e as duas divergiriam.
 
 Então o campo carrega o código cru — `ARQUIVO_INVALIDO`, `FORMATO_NAO_SUPORTADO`,
-`SEM_FLUXO_DE_VIDEO`, `TENTATIVAS_ESGOTADAS` — declarado como enum no OpenAPI, que é onde
-o significado de cada um fica documentado. Um usuário que vê `FALHOU` sem nenhuma pista é
-uma demo ruim; o código resolve isso sem o `videos` reivindicar o texto do usuário.
+`SEM_FLUXO_DE_VIDEO`, `TENTATIVAS_ESGOTADAS`, `DESCONHECIDO` — declarado como enum no
+OpenAPI, que é onde o significado de cada um fica documentado.
+
+`DESCONHECIDO` não é publicado por ninguém: é o valor em que o `videos` pousa um código que
+não reconhece, para que a estratégia aditiva do contrato de mensagens não derrube uma
+mensagem vinda de um `extracao` mais novo (ticket 009). Ele aparece na API porque mentir
+sobre a causa seria pior que admitir desconhecê-la.
+
+Um usuário que vê `FALHOU` sem nenhuma pista é uma demo ruim; o código resolve isso sem o
+`videos` reivindicar o texto do usuário.
 
 `detalheTecnico` do `ExtracaoFalhou` **nunca** aparece aqui: é log, não contrato.
 

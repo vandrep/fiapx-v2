@@ -12,6 +12,11 @@ ele: quem é o dono, quando chegou, em que estado está e qual Pacote produziu.
 Todo Vídeo tem exatamente um dono, identificado pelo `sub` do token de acesso. Um usuário
 só enxerga os próprios Vídeos.
 
+O **Dono** de um Vídeo é o par identidade + endereço de e-mail, ambos vindos do token no
+momento do envio. Os dois andam sempre juntos: a identidade é por quem se pergunta, o
+e-mail é para onde o aviso de falha vai. O sistema não trata o formato da identidade como
+significativo — ela é uma string opaca vinda de quem autentica.
+
 Estados de um Vídeo:
 
 | Estado | Significado |

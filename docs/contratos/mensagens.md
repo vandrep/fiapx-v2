@@ -176,6 +176,10 @@ Enum estável e pequeno. O texto voltado ao usuário mora no template do `notifi
 | `SEM_FLUXO_DE_VIDEO` | o arquivo abre, mas não tem stream de vídeo | exit 234 + `does not contain any stream` |
 | `TENTATIVAS_ESGOTADAS` | `x-delivery-limit` estourou | publicado pelo consumidor da própria DLQ |
 
+O `videos` conhece um sexto valor, `DESCONHECIDO`, que **nenhum serviço publica**: é onde
+ele pousa um código que não reconhece, em vez de derrubar a mensagem. É o que torna a tabela
+acima extensível sem quebrar consumidor antigo (ticket 009).
+
 `TENTATIVAS_ESGOTADAS` não é enfeite: o consumidor da DLQ **não sabe** por que falhou — só
 que a mensagem foi entregue três vezes sem ack. É o único código que ele pode publicar.
 

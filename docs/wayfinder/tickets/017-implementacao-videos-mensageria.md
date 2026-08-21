@@ -4,7 +4,7 @@
 - label: wayfinder:task
 - status: aberto
 - assignee:
-- bloqueado-por: 016
+- bloqueado-por: 016, 018
 
 ## Question
 

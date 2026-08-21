@@ -111,15 +111,31 @@ verificadas por teste, não são sugestão). Projeto original em
   `notificacao`. Swagger UI é a demo, com Authorize por fluxo `password`. Contrato em
   [`docs/contratos/http-videos.md`](../contratos/http-videos.md)
 
+- [Modelo de domínio e script de banco do serviço videos](tickets/009-modelo-dominio-videos.md)
+  — **uma tabela**, `video`: a Extração não é entidade porque o `videos` não vê tentativas,
+  só entregas. A máquina de estados fica em **dois lugares com papéis distintos** — a
+  entidade responde "esta transição é legal?", o `UPDATE` condicional responde "fui eu quem
+  mudou a linha?"; transição ilegal é retorno, não exceção. A guarda de propriedade é
+  **estrutural**: não existe `buscarPorId` sem dono na interface do gateway. **Sem Flyway**
+  (é JDBC, custaria um datasource Agroal só para migrar): o entregável é
+  [`docker/postgres/init.sql`](../../docker/postgres/init.sql), mantido honesto pelo
+  `validate` em `%prod`. O `core` ganha `MotivoFalha.DESCONHECIDO`, que ninguém publica, para
+  o tolerant reader não derrubar mensagem. O `Video` guarda a chave do MinIO como string
+  opaca — quem a **constrói** é o `ArquivoGateway`, então a decisão do 011 pousa no adapter
+
 ## Ainda não especificado
 
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
   ordem de subida por health check, seed de buckets, realm e `definitions.json` do RabbitMQ.
-  Só especificável depois que as dependências de cada serviço estiverem confirmadas.
+  Só especificável depois que as dependências de cada serviço estiverem confirmadas. Dois
+  requisitos duros já chegaram do ticket 009: `POSTGRES_DB=fiapx_videos` (é o que cria o
+  único database, antes dos scripts de init) e `docker/postgres/init.sql` montado em
+  `docker-entrypoint-initdb.d`.
 - **Configuração do realm Keycloak** — clients, roles, usuários de demo, `realm-export.json`
   versionado. A pesquisa fechou os mecanismos; falta decidir se há audience mapper (sem ele,
-  não configurar `token.audience`) e se o value object de dono valida formato UUID, o que
-  acoplaria o domínio ao Keycloak. Dois requisitos duros já chegaram: o token **precisa**
+  não configurar `token.audience`). O ticket 009 já retirou daqui a pergunta do formato do
+  `sub`: o value object `Dono` **não** valida UUID, então o realm pode emitir o que quiser.
+  Dois requisitos duros já chegaram: o token **precisa**
   emitir o claim `email` (ticket 007), senão `VideoFalhou` não fecha; e o client **precisa**
   aceitar *direct access grants* (ticket 008), senão o botão Authorize do Swagger UI não
   funciona e a demo vira `curl`.

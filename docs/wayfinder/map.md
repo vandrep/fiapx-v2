@@ -32,7 +32,7 @@ test-first por construção); `writing-for-agents` ao editar `AGENTS.md`.
 | Interface de usuário | Nenhuma — demo via Swagger UI e `curl` |
 | Serviços | `videos`, `extracao`, `notificacao` (+ Keycloak como infra) |
 | Layout | Maven multi-módulo com parent agregador, **sem** módulo `shared` |
-| Package base | `br.com.fiapx.<servico>`; artefatos `fiapx`, `fiapx-videos`, `fiapx-extracao`, `fiapx-notificacao` |
+| Package base | `br.com.fiapx`, com **um** modulo de negocio homonimo do servico (`br.com.fiapx.videos.core`); artefatos `fiapx`, `fiapx-videos`, `fiapx-extracao`, `fiapx-notificacao` |
 | Mensageria | RabbitMQ (SmallRye Reactive Messaging) |
 | Armazenamento de arquivos | MinIO (S3-compatível); serviços trocam chaves de objeto |
 | Banco | Um Postgres, um database por serviço que precise — na prática **só `videos`** |
@@ -79,6 +79,14 @@ verificadas por teste, não são sugestão). Projeto original em
   de evento idempotente; `extracao` consome a própria DLQ. Registrado em
   [ADR 0001](../adr/0001-politica-de-falhas.md)
 
+- [Esqueleto Maven multi-módulo a partir do template](tickets/002-esqueleto-multi-modulo.md)
+  — parent agregador `packaging pom` + três módulos; `init-project.sh` roda uma vez por
+  serviço **sem edição**, com `--package br.com.fiapx --modules <servico>`; o
+  `ArchitectureConstraintsTest` é **reapontado, não reescrito** — uma cópia por módulo,
+  com `MODULO_DO_SERVICO` e as guardas de "nenhum resource/adapter" relaxadas, porque por
+  serviço elas viram falhas falsas; Dockerfile single-stage sobre o `quarkus-app` já
+  empacotado, uma compilação Maven para as três imagens
+
 - [Repositório próprio e remote no GitHub](tickets/001-repositorio-github.md) — repo
   público em `vandrep/fiapx-v2`, `main` publicada, fora do índice do repo pai; o CI **não
   precisa de segredo novo** (o `GITHUB_TOKEN` autentica no GHCR), mas o default do repo é
@@ -91,8 +99,8 @@ verificadas por teste, não são sugestão). Projeto original em
   consumo dos eventos de progresso. Vira tickets quando o contrato HTTP e o contrato de
   mensagens fecharem.
 - **Implementação do serviço `extracao`** — consumo do comando, download do MinIO, ffmpeg,
-  empacotamento, upload do Pacote, publicação de eventos. Depende da decisão de como
-  invocar o ffmpeg.
+  empacotamento, upload do Pacote, publicação de eventos. O ffmpeg já está decidido
+  (processo externo, ticket 006); falta o contrato de mensagens.
 - **Implementação do serviço `notificacao`** — consumo do evento de falha definitiva,
   template do e-mail, envio SMTP. O mais fino dos três; provavelmente um ticket só.
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
@@ -102,10 +110,6 @@ verificadas por teste, não são sugestão). Projeto original em
   versionado. A pesquisa fechou os mecanismos; falta decidir se há audience mapper (sem ele,
   não configurar `token.audience`) e se o value object de dono valida formato UUID, o que
   acoplaria o domínio ao Keycloak.
-- **Pipeline de CI/CD** — o workflow `verify` + build + push das três imagens para o GHCR.
-  Os fatos de autenticação e permissão já estão fechados (ticket 001); falta o que só se vê
-  com o esqueleto de pé: um job por módulo ou um só, cache do Maven, se o push roda em todo
-  commit de `main` ou só em tag, e quem torna os packages públicos.
 - **Script de smoke ponta-a-ponta** — o roteiro executável que também vira a demo.
 - **Documentação de arquitetura** — formato (C4? diagrama de sequência?), onde vive, o que
   a banca precisa ver.

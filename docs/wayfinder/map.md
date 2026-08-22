@@ -178,6 +178,19 @@ verificadas por teste, não são sugestão). Projeto original em
   protegida por ruleset com PR obrigatório e **zero aprovações** (exigir uma travaria o repo:
   ninguém aprova o próprio PR)
 
+- [O que a API responde quando o Pacote já expirou](tickets/019-pacote-expirado.md) — o Pacote
+  expira em 7 dias e a API **não finge que sabe disso**: `410 Gone` no download, e nada mais.
+  O `409` fica sendo *ainda não*, o `410` é *não mais* — a diferença é operacional, porque
+  `409` convida a repetir a requisição e `410` diz para parar. Expiração **não** entra no enum
+  `motivo` (aquilo é falha de Extração; expirar não é falhar). Recusado dissolver o ticket
+  tirando a expiração do bucket `pacotes`: o objeto some por motivos que a policy não controla
+  — volume do MinIO recriado sem o do Postgres —, e sem expiração o ramo `NoSuchKey` só
+  deixaria de ser exercitado. Recusado também o campo calculado `pacoteDisponivelAte`, que era
+  conservador por construção (o MinIO apaga sempre *depois* do prazo, nunca antes) mas poria na
+  borda um número que o `videos` não controla. Descoberta preguiçosa, e o `GET` **não escreve**:
+  a tabela `video` é o registro do que aconteceu, não espelho do bucket. Sem ADR — a escolha é
+  reversível e o porquê cabe no contrato HTTP
+
 ## Ainda não especificado
 
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,

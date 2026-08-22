@@ -42,3 +42,16 @@ Implementar, test-first, conforme
 Fora deste ticket: publicar `ExtrairVideo`, consumir os eventos de progresso, publicar
 `VideoFalhou` e a varredura de reconciliação — tudo isso é o 017. Aqui o Vídeo entra e fica
 em `RECEBIDO`.
+
+## Notas herdadas do ticket 019
+
+O `BaixarPacoteUseCase` tem **dois** caminhos de indisponibilidade, não um: `409` quando o
+Vídeo não está `CONCLUIDO`, `410 Gone` quando está mas o objeto não existe mais no MinIO
+(retenção de 7 dias do ticket 011).
+
+1. O adapter precisa distinguir `NoSuchKey` de erro genérico do S3. Mapear qualquer falha do
+   MinIO para `410` faria um MinIO fora do ar mandar o cliente desistir para sempre. Erro de
+   infraestrutura continua `500`.
+2. O `GET` que descobre a ausência **não grava nada** no Postgres — sem write-back, sem
+   anular `chave_pacote`.
+3. O cenário BDD do `410` apaga o objeto do bucket pelo step; não há como esperar sete dias.

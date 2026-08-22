@@ -52,7 +52,12 @@ suas tentativas e falha definitivamente.
 ## Pacote
 
 O arquivo `.zip` contendo os frames produzidos por uma Extração bem-sucedida. É o que o
-usuário baixa. Um Vídeo `CONCLUIDO` tem exatamente um Pacote.
+usuário baixa. Um Vídeo `CONCLUIDO` produziu exatamente um Pacote.
+
+O Pacote tem **prazo**: ele fica disponível por um tempo e depois deixa de existir. Isso não
+desfaz nada do que se sabe sobre o Vídeo — ele continua `CONCLUIDO`, porque o estado conta o
+que aconteceu com a Extração, não o que ainda está guardado. "Não está pronto" e "não existe
+mais" são situações diferentes, e o sistema as distingue para quem pede o download.
 
 ## Serviços
 

@@ -165,7 +165,7 @@ verificadas por teste, não são sugestão). Projeto original em
   — **um job só**, `./mvnw verify` na raiz: a matriz por módulo não cai por preço (repo
   público tem runner de 4 vCPU e minutos gratuitos), cai porque precisaria de um quarto job
   na raiz para a guarda do ticket 012 e porque a velocidade que ela compra ninguém está
-  gastando — medido, o `verify` leva 1m14s local, 4–7 min estimados no runner. Imagens saem
+  gastando — medido: `verify` em 1m14s local e 1m30s no runner, run inteiro em 2m40s. Imagens saem
   do mesmo runner, sem artifact, depois dos testes passarem. **Multi-arch `amd64`+`arm64`** é
   a decisão de maior valor: a avaliação é na máquina do avaliador, que pode ser Apple
   Silicon, e `ffmpeg` emulado inviabiliza o `extracao` — e o custo é quase zero porque os

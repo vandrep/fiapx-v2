@@ -53,9 +53,10 @@ as três cópias idênticas de `ArchitectureConstraintsTest` está presa à fase
 **agregador**, então `mvn -f <servico>/pom.xml` a pula em silêncio — a matriz precisaria de
 um quarto job na raiz só para isso, o que a torna estritamente mais cara que a alternativa.
 Segundo, e decisivo: **a velocidade que ela compra ninguém está gastando.** Medição local do
-`verify` na raiz: **1m14s** (`user 8m31s` — o build já usa ~7 núcleos), estimado em 4 a 7
-minutos num runner de 4 vCPU com pull frio do `postgres:17`. Num projeto de uma pessoa, isso
-não é gargalo. Se passar de ~10 minutos, a matriz se justifica; hoje não.
+`verify` na raiz: **1m14s** local (`user 8m31s` — o build já usa ~7 núcleos). Medido depois
+no runner de 4 vCPU, com pull frio do `postgres:17`: **1m30s**, contra os 4 a 7 minutos que
+eu havia estimado. Num projeto de uma pessoa isso não é gargalo nem de longe. Se passar de
+~10 minutos, a matriz se justifica; hoje não.
 
 Cache do Maven por `setup-java` com `cache: maven` — uma linha, e resolve o caso que dói
 (baixar o BOM do Quarkus a cada run).
@@ -177,3 +178,14 @@ de grupo exige de fato é revisão antes de entrar na `main`, e isso o PR entreg
 sendo versionados junto do código é vantagem que Issue nenhuma tem: a resolução do 013 e o
 `ci.yml` entram no mesmo commit, e quem revisa o PR lê a decisão ao lado da mudança. Migrar 19
 tickets com referências cruzadas sairia direto das 5,5 semanas.
+
+### Verificação por push real
+
+Run [32571128525](https://github.com/vandrep/fiapx-v2/actions/runs/32571128525): **verde em
+2m40s** no total. `verify` 1m30s; os três builds multi-arch somaram ~50s, e o log confirma
+camadas `linux/amd64` **e** `linux/arm64` resolvidas nas três imagens. O multi-arch saiu ainda
+mais barato do que o argumento previa — o que era esperado, já que ele não compila nada.
+
+Uma anotação não-fatal no run: as actions `docker/*` ainda declaram Node.js 20, que o runner
+força para Node 24. É aviso do ecossistema, não do nosso YAML; some quando a Docker publicar
+as versões novas.

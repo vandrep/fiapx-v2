@@ -92,8 +92,15 @@ Docker o build falha por timeout de container, não por código quebrado.
 Rodar Maven na raiz também é o que dispara a guarda das três cópias: ela está presa ao
 agregador, então `mvn -f videos/pom.xml` a pula silenciosamente.
 
-Use `./mvnw verify` quando a mudança tocar integração, configuração, persistência,
-segurança ou contrato HTTP.
+**Não escreva `*IT.java`.** Não existe nenhum, e é de propósito: `skipITs` é `true` no
+parent, então o failsafe não roda e `verify` não acrescenta nada a `test`. Teste integrado
+aqui é `@QuarkusTest` no surefire — ele sobe os Dev Services de verdade, que é o que
+importa. O failsafe só ganharia sentido para testar o artefato **empacotado**
+(`@QuarkusIntegrationTest`, imagem nativa), que está fora de escopo.
+
+O CI (`.github/workflows/ci.yml`) roda `./mvnw verify` a partir da raiz num job só, e
+publica as três imagens no GHCR quando o commit entra na `main`. `verify` em vez de `test`
+porque o CI precisa do `package` para construir as imagens no mesmo runner.
 
 ## Commits
 

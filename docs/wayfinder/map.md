@@ -43,7 +43,7 @@ test-first por construção); `writing-for-agents` ao editar `AGENTS.md`.
 | Autenticação | Keycloak, bearer-only via `quarkus-oidc`; dono do vídeo vem do `sub` do token, nunca do request |
 | Notificação | SMTP com MailHog no Compose |
 | Health checks | Sim (`quarkus-smallrye-health`), para `depends_on: service_healthy` |
-| CI/CD | GitHub Actions: `verify` + build das imagens + push para o GHCR com tag do commit |
+| CI/CD | GitHub Actions: `verify` + build das imagens + push para o GHCR, tag do commit **e `latest`**, `amd64`+`arm64` (ticket 013). `main` protegida por ruleset: PR obrigatório, zero aprovações |
 | Testes | Por serviço e isolado (unitário do `core`, Cucumber pela borda HTTP, `ArchitectureConstraintsTest`); fluxo ponta-a-ponta por script de smoke versionado, não automatizado no CI |
 
 **Base de código**: template em `/home/vandrep/projetos/oficina-soat/quarkus-clean-architecture-template`
@@ -161,6 +161,22 @@ verificadas por teste, não são sugestão). Projeto original em
   recusado: build não-hermético valida o servidor, não o working tree. `CLAUDE.md` de uma
   linha aponta para o `AGENTS.md`
 
+- [Pipeline de CI/CD: verify e push das três imagens para o GHCR](tickets/013-pipeline-ci-cd.md)
+  — **um job só**, `./mvnw verify` na raiz: a matriz por módulo não cai por preço (repo
+  público tem runner de 4 vCPU e minutos gratuitos), cai porque precisaria de um quarto job
+  na raiz para a guarda do ticket 012 e porque a velocidade que ela compra ninguém está
+  gastando — medido, o `verify` leva 1m14s local, 4–7 min estimados no runner. Imagens saem
+  do mesmo runner, sem artifact, depois dos testes passarem. **Multi-arch `amd64`+`arm64`** é
+  a decisão de maior valor: a avaliação é na máquina do avaliador, que pode ser Apple
+  Silicon, e `ffmpeg` emulado inviabiliza o `extracao` — e o custo é quase zero porque os
+  Dockerfiles só copiam um `quarkus-app` que é Java puro. `latest` além do SHA, porque é o
+  que torna o Compose demonstrável; `concurrency` **assimétrico** (`main` nunca cancela, ou
+  o `latest` fica para trás em silêncio). Fica proibido escrever `*IT.java`: `skipITs` é
+  `true`, teste integrado aqui é `@QuarkusTest` no surefire. Packages públicos são passo
+  **manual** — automatizar exigiria o PAT que o ticket 001 comemorou não precisar. `main`
+  protegida por ruleset com PR obrigatório e **zero aprovações** (exigir uma travaria o repo:
+  ninguém aprova o próprio PR)
+
 ## Ainda não especificado
 
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
@@ -172,6 +188,9 @@ verificadas por teste, não são sugestão). Projeto original em
   (`videos` e `pacotes`) com regra de ciclo de vida de 7 dias em ambos; volume nomeado
   `fiapx-uploads` em `/var/fiapx/uploads` no `videos`; volume nomeado
   `fiapx-extracao-scratch` em `/var/fiapx/extracao` no `extracao`, com folga de **4 GB**.
+  Do ticket 013: os serviços entram como `image: ghcr.io/vandrep/fiapx-<servico>:latest`,
+  **sem chave `build:`** — num clone limpo `docker compose build` falha, porque `target/`
+  está no `.gitignore` e os Dockerfiles são single-stage sobre um `quarkus-app` pronto.
 - **Configuração do realm Keycloak** — clients, roles, usuários de demo, `realm-export.json`
   versionado. A pesquisa fechou os mecanismos; falta decidir se há audience mapper (sem ele,
   não configurar `token.audience`). O ticket 009 já retirou daqui a pergunta do formato do
@@ -180,6 +199,9 @@ verificadas por teste, não são sugestão). Projeto original em
   emitir o claim `email` (ticket 007), senão `VideoFalhou` não fecha; e o client **precisa**
   aceitar *direct access grants* (ticket 008), senão o botão Authorize do Swagger UI não
   funciona e a demo vira `curl`.
+- **`README.md`** — o repositório não tem um. Entregável de banca: o `docker compose up` da
+  demo, o procedimento único de tornar os packages do GHCR públicos (ticket 013) e o mapa
+  de leitura do repo. Só especificável depois do Compose.
 - **Script de smoke ponta-a-ponta** — o roteiro executável que também vira a demo.
 - **Documentação de arquitetura** — formato (C4? diagrama de sequência?), onde vive, o que
   a banca precisa ver.

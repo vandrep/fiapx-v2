@@ -178,6 +178,25 @@ verificadas por teste, não são sugestão). Projeto original em
   protegida por ruleset com PR obrigatório e **zero aprovações** (exigir uma travaria o repo:
   ninguém aprova o próprio PR)
 
+- [Implementação do serviço notificacao](tickets/014-implementacao-notificacao.md) — 21 testes
+  verdes, **14 sem Docker**; sem HTTP e sem banco, o `NotificacaoController` é a fronteira que o
+  `CucumberTest` exercita, e o e-mail "enviado" é verificado por `io.quarkus.mailer.MockMailbox`
+  (mock automático fora de `%prod`), não por um Dev Service de MailHog. Achado real: `DESCONHECIDO`
+  chega aqui como valor **legítimo**, não hipotético — o `videos` (ticket 017, ainda não
+  mesclado) publica `motivo.name()` já passado pelo seu próprio tolerant reader, então um
+  `extracao` mais novo vira a string `"DESCONHECIDO"` antes mesmo de chegar. A tradução do
+  código para frase mora inteira no `core` (`MotivoFalha.paraFrase()`, `NotificacaoDeFalha`);
+  `donoSub` do contrato não entra no e-mail nem no use case, só em log de suporte no
+  consumidor. Decisão nova: o **texto do e-mail usa acentos**, ao contrário de comentários e
+  nomes de código no resto do repositório — é prosa para o usuário final, não para quem lê o
+  fonte. Achado de API: `MockMailbox.getMessagesSentTo` está deprecated,
+  `getMailMessagesSentTo` devolve o tipo errado (`MailMessage` do Vert.x); o certo é
+  `getMailsSentTo`. Regra nova no `ArchitectureConstraintsTest` (`@Incoming`/`@Outgoing` só em
+  `framework`), aplicada às três cópias — sem o `RestMulti` do 016 nem o `ProcessBuilder` do
+  015, que pertencem a outros branches ainda não mesclados. Topologia (fila quorum,
+  `x-delivery-limit=3`, DLX, DLQ terminal classic, prefetch 10) verificada de ponta a ponta
+  contra RabbitMQ real via management API
+
 ## Ainda não especificado
 
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
@@ -192,6 +211,12 @@ verificadas por teste, não são sugestão). Projeto original em
   Do ticket 013: os serviços entram como `image: ghcr.io/vandrep/fiapx-<servico>:latest`,
   **sem chave `build:`** — num clone limpo `docker compose build` falha, porque `target/`
   está no `.gitignore` e os Dockerfiles são single-stage sobre um `quarkus-app` pronto.
+  Do ticket 014: o `notificacao` sobe com `rabbitmq-host=rabbitmq` (mesma imagem
+  `rabbitmq:4.3.5-management-alpine`), `%prod.quarkus.mailer.host=mailhog`,
+  `%prod.quarkus.mailer.port=1025` e `%prod.quarkus.mailer.mock=false` — sem essa última
+  linha o serviço voltaria a mockar o envio mesmo em produção. Sem `POSTGRES_DB` nem OIDC:
+  não tem banco nem borda HTTP. Declara sua própria topologia na subida, igual ao `extracao`
+  — nenhuma linha nova no `definitions.json` além do que os tickets 010/017 já previram.
 - **Configuração do realm Keycloak** — clients, roles, usuários de demo, `realm-export.json`
   versionado. A pesquisa fechou os mecanismos; falta decidir se há audience mapper (sem ele,
   não configurar `token.audience`). O ticket 009 já retirou daqui a pergunta do formato do

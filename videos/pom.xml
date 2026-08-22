@@ -32,6 +32,46 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-reactive-pg-client</artifactId>
         </dependency>
+
+        <!-- Mensageria com extracao/notificacao (contrato em docs/contratos/mensagens.md,
+             ticket 017). O conector RabbitMQ declara topologia (exchange, fila, DLQ,
+             x-delivery-limit) via configuracao dos canais. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-messaging-rabbitmq</artifactId>
+        </dependency>
+
+        <!-- Varredura de reconciliacao (ADR 0003): o @Scheduled que republica comando/falha
+             pendente. O esqueleto do ticket 002 nao trouxe esta extensao. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-scheduler</artifactId>
+        </dependency>
+
+        <!-- Borda sob OIDC: o dono do Video vem do `sub` do bearer token (ticket 004). -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-oidc</artifactId>
+        </dependency>
+
+        <!-- MinIO por API S3. O netty-nio-client nao e opcional: sem ele o
+             S3AsyncClient nao encontra HTTP client no classpath (ticket 005). -->
+        <dependency>
+            <groupId>io.quarkiverse.amazonservices</groupId>
+            <artifactId>quarkus-amazon-s3</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>netty-nio-client</artifactId>
+        </dependency>
+
+        <!-- Token real, assinatura real, `sub` real na borda: @TestSecurity fabrica
+             identidade e nao cobre o fluxo do Keycloak (ticket 004). -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-keycloak-server</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

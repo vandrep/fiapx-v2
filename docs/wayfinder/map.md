@@ -205,6 +205,20 @@ verificadas por teste, não são sugestão). Projeto original em
   ticket 009 sobre quem gera o id: `Video.novo` gera identidade, `armazenadoEm` fecha a criação
   com a chave que o gateway devolveu
 
+- [Implementação do serviço videos: mensageria e máquina de estados](tickets/017-implementacao-videos-mensageria.md)
+  — 82 testes verdes, **63 sem Docker**: as três transições, o envio e a varredura de
+  reconciliação rodam com dublês em memória. Achado real: `EstadoVideo.transitaPara` lançava
+  exceção também para terminal-para-**si mesmo** (`FALHOU.transitaPara(FALHOU)`), não só para
+  o cruzamento entre os dois terminais — a segunda e a terceira entrega do mesmo
+  `ExtracaoFalhou`, cenário central da política de falhas, derrubariam a mensagem em vez de
+  dar ack. A varredura de reconciliação roda em **sequência**, não em paralelo: duas queries
+  concorrentes na mesma sessão reativa do Hibernate corrompem sua pilha interna (medido em
+  `quarkus dev`), o que ADR 0003 não previa ao tolerar duas réplicas varrendo ao mesmo tempo.
+  `auto-bind-dlq=true` sozinho não declara a dead-letter exchange — precisa de
+  `dlx.declare=true` também. Topologia (3 filas quorum, `x-delivery-limit=3`, DLQ
+  compartilhada) verificada de ponta a ponta contra RabbitMQ real via management API, não só
+  assumida a partir da config
+
 ## Ainda não especificado
 
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
@@ -222,6 +236,10 @@ verificadas por teste, não são sugestão). Projeto original em
   Do ticket 016: o `videos` precisa de `POSTGRES_DB`, MinIO, RabbitMQ e Keycloak de pé, e sobe
   com `%prod` — onde `schema-management.strategy=validate` derruba o boot se o `init.sql`
   divergir das entidades. O Keycloak importa o mesmo `realm-export.json` que os testes usam.
+  Do ticket 017: `rabbitmq-host=rabbitmq` e a imagem `rabbitmq:4.3.5-management-alpine` (a
+  mesma dos Dev Services). Topologia (exchanges, filas quorum, DLQ) é toda declarada pelo
+  próprio `videos` na subida — o `definitions.json` do Compose só carrega o que não é queue
+  argument, a policy `dead-letter-strategy=at-least-once` e os usuários do broker.
 - **Configuração do realm Keycloak** — o arquivo **já existe**:
   [`docker/keycloak/realm-export.json`](../../docker/keycloak/realm-export.json), criado pelo
   ticket 016 porque sem ele nenhum teste de borda existiria — o realm padrão do Dev Services

@@ -30,10 +30,16 @@ public enum EstadoVideo {
     }
 
     /**
-     * Falso para reentrega fora de ordem, que e caminho esperado. Transicao que o grafo nao
-     * preve de jeito nenhum (de um terminal para o outro) e bug, e levanta excecao.
+     * Falso para reentrega fora de ordem, que e caminho esperado — inclusive quando a
+     * reentrega repete o proprio terminal ja alcancado (duas entregas do mesmo
+     * {@code ExtracaoFalhou} apos o Vídeo ja estar FALHOU, por exemplo). Transicao que o
+     * grafo nao preve de jeito nenhum (de um terminal para o <b>outro</b>) e bug, e levanta
+     * excecao.
      */
     public boolean transitaPara(EstadoVideo destino) {
+        if (this == destino) {
+            return false;
+        }
         if (terminal() && destino.terminal()) {
             throw new IllegalStateException("Transição inexistente no grafo: " + this + " → " + destino);
         }

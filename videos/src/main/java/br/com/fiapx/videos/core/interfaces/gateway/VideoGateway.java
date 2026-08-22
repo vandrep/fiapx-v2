@@ -2,9 +2,12 @@ package br.com.fiapx.videos.core.interfaces.gateway;
 
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
+import br.com.fiapx.videos.core.entities.MotivoFalha;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.presenter.dto.Pagina;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -33,4 +36,48 @@ public interface VideoGateway {
                                                    Optional<EstadoVideo> estado,
                                                    int pagina,
                                                    int tamanho);
+
+    /**
+     * A Extracao comecou. {@code true} so quando esta chamada de fato tirou a linha de
+     * RECEBIDO — reentrega fora de ordem devolve {@code false} e o consumidor da ack do
+     * mesmo jeito (ADR 0002). O predecessor exigido no {@code WHERE} vem de
+     * {@link EstadoVideo#predecessor()}, nao de um literal aqui: o grafo continua declarado
+     * uma vez so.
+     */
+    CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm);
+
+    /** Mesma guarda de {@link #marcarIniciada}, agora saindo de PROCESSANDO para CONCLUIDO. */
+    CompletableFuture<Boolean> marcarConcluida(UUID id,
+                                               Instant concluidaEm,
+                                               String chavePacote,
+                                               int quantidadeFrames,
+                                               long tamanhoPacoteBytes);
+
+    /**
+     * A guarda de unicidade do e-mail: so quando o {@code UPDATE} de fato mudou a linha o
+     * Optional volta preenchido, com os dados que {@code VideoFalhou} precisa (dono, e-mail,
+     * nome do arquivo). Vazio significa "reentrega, nao publique de novo" — nao ha por que o
+     * chamador buscar o Video de novo so para descobrir isso (ADR 0001, ADR 0002).
+     */
+    CompletableFuture<Optional<Video>> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo);
+
+    /** A tabela `video` e o outbox (ADR 0003): grava a marca depois do publish ter saido. */
+    CompletableFuture<Void> marcarComandoPublicado(UUID id, Instant publicadoEm);
+
+    /** Idem, para o outro lado da politica de falhas: a publicacao de VideoFalhou. */
+    CompletableFuture<Void> marcarFalhaPublicada(UUID id, Instant publicadoEm);
+
+    /**
+     * Vídeos RECEBIDO cujo {@code ExtrairVideo} nunca foi publicado, com folga contra o
+     * crash entre o INSERT e o publish: so entram aqui os recebidos antes de
+     * {@code recebidosAntesDe} (ADR 0003). Ordenado por {@code recebidoEm}, lote limitado.
+     */
+    CompletableFuture<List<Video>> buscarComandosPendentes(Instant recebidosAntesDe, int tamanhoDoLote);
+
+    /**
+     * Vídeos FALHOU cujo {@code VideoFalhou} nunca foi publicado. Sem folga de tempo: a
+     * transicao para FALHOU e a publicacao sao consecutivas no mesmo caminho, e o risco de
+     * corrida com uma varredura concorrente e tolerado (ADR 0003).
+     */
+    CompletableFuture<List<Video>> buscarFalhasPendentes(int tamanhoDoLote);
 }

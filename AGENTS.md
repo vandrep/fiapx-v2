@@ -83,6 +83,12 @@ embrulhado em `Response` pendura a conexão, e embrulhado em `Uni` sai serializa
 `toString()` do objeto. Os dois foram medidos. O que a regra protege — nada de retorno
 bloqueante na borda — os dois tipos cumprem igualmente.
 
+Uma quarta regra chegou no ticket 017, endurecendo em vez de relaxar: `@Incoming`,
+`@Outgoing` e `@Scheduled` só podem aparecer em `framework` (mensageria e agendamento são
+infraestrutura, igual a `@ApplicationScoped` ou `@Path`). O template não trazia essa regra
+porque não cobria mensageria nem scheduler — ver
+[`docs/contratos/mensagens.md` § Camadas](docs/contratos/mensagens.md).
+
 ## BDD
 
 Cenários de aceite em Gherkin **em português** (`# language: pt` na primeira linha), em

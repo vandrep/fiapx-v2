@@ -38,6 +38,14 @@ class EstadoVideoTest {
     }
 
     @Test
+    void reentregaDoMesmoTerminalENegadaSemExcecao() {
+        // Distinto do teste acima: aqui e o MESMO terminal, nao o outro. Tres entregas do
+        // mesmo ExtracaoFalhou apos o Vídeo ja estar FALHOU nao podem lancar excecao (ADR 0001).
+        assertFalse(EstadoVideo.CONCLUIDO.transitaPara(EstadoVideo.CONCLUIDO));
+        assertFalse(EstadoVideo.FALHOU.transitaPara(EstadoVideo.FALHOU));
+    }
+
+    @Test
     void deUmTerminalParaOOutroEBugENaoReentrega() {
         assertThrows(IllegalStateException.class,
                 () -> EstadoVideo.FALHOU.transitaPara(EstadoVideo.CONCLUIDO));

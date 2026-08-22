@@ -2,6 +2,7 @@ package br.com.fiapx.videos.framework.db;
 
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
+import br.com.fiapx.videos.core.entities.MotivoFalha;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
 import br.com.fiapx.videos.core.interfaces.presenter.dto.Pagina;
@@ -12,6 +13,8 @@ import io.quarkus.panache.common.Sort;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -71,6 +74,92 @@ public class VideoDataSourceAdapter implements VideoGateway {
                             tamanho,
                             total));
         }).subscribeAsCompletionStage();
+    }
+
+    /**
+     * O predecessor exigido no {@code WHERE} vem de {@link EstadoVideo#predecessor()}, nao de
+     * um literal aqui: o grafo de transicoes continua declarado uma vez so, no {@code core}
+     * (ADR 0002).
+     */
+    @Override
+    public CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm) {
+        return Panache.withTransaction(() -> VideoEntity.update(
+                        "estado = ?1 where id = ?2 and estado = ?3",
+                        EstadoVideo.PROCESSANDO, id, EstadoVideo.PROCESSANDO.predecessor())
+                        .map(linhasAlteradas -> linhasAlteradas > 0))
+                .subscribeAsCompletionStage();
+    }
+
+    @Override
+    public CompletableFuture<Boolean> marcarConcluida(UUID id,
+                                                       Instant concluidaEm,
+                                                       String chavePacote,
+                                                       int quantidadeFrames,
+                                                       long tamanhoPacoteBytes) {
+        return Panache.withTransaction(() -> VideoEntity.update(
+                        "estado = ?1, finalizadoEm = ?2, chavePacote = ?3, quantidadeFrames = ?4,"
+                                + " tamanhoPacoteBytes = ?5 where id = ?6 and estado = ?7",
+                        EstadoVideo.CONCLUIDO, concluidaEm, chavePacote, quantidadeFrames, tamanhoPacoteBytes,
+                        id, EstadoVideo.CONCLUIDO.predecessor())
+                        .map(linhasAlteradas -> linhasAlteradas > 0))
+                .subscribeAsCompletionStage();
+    }
+
+    /**
+     * A guarda de unicidade do e-mail (ADR 0001): so quando o {@code UPDATE} muda a linha e
+     * que o Optional volta preenchido, buscado <b>na mesma transacao</b> — dispensa
+     * {@code RETURNING} e garante ver a propria escrita.
+     */
+    @Override
+    public CompletableFuture<Optional<Video>> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
+        return Panache.withTransaction(() -> VideoEntity.update(
+                        "estado = ?1, finalizadoEm = ?2, motivo = ?3 where id = ?4 and estado = ?5",
+                        EstadoVideo.FALHOU, falhouEm, motivo, id, EstadoVideo.FALHOU.predecessor())
+                        .chain(linhasAlteradas -> linhasAlteradas > 0
+                                ? VideoEntity.<VideoEntity>findById(id)
+                                        .map(entity -> Optional.of(paraDominio(entity)))
+                                : Uni.createFrom().item(Optional.<Video>empty())))
+                .subscribeAsCompletionStage();
+    }
+
+    @Override
+    public CompletableFuture<Void> marcarComandoPublicado(UUID id, Instant publicadoEm) {
+        return Panache.withTransaction(() -> VideoEntity.update(
+                        "comandoPublicadoEm = ?1 where id = ?2", publicadoEm, id))
+                .replaceWithVoid()
+                .subscribeAsCompletionStage();
+    }
+
+    @Override
+    public CompletableFuture<Void> marcarFalhaPublicada(UUID id, Instant publicadoEm) {
+        return Panache.withTransaction(() -> VideoEntity.update(
+                        "falhaPublicadaEm = ?1 where id = ?2", publicadoEm, id))
+                .replaceWithVoid()
+                .subscribeAsCompletionStage();
+    }
+
+    @Override
+    public CompletableFuture<List<Video>> buscarComandosPendentes(Instant recebidosAntesDe, int tamanhoDoLote) {
+        return Panache.withSession(() -> VideoEntity.<VideoEntity>find(
+                        "estado = ?1 and comandoPublicadoEm is null and recebidoEm < ?2",
+                        Sort.by("recebidoEm"),
+                        EstadoVideo.RECEBIDO, recebidosAntesDe)
+                        .range(0, tamanhoDoLote - 1)
+                        .list()
+                        .map(entidades -> entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList()))
+                .subscribeAsCompletionStage();
+    }
+
+    @Override
+    public CompletableFuture<List<Video>> buscarFalhasPendentes(int tamanhoDoLote) {
+        return Panache.withSession(() -> VideoEntity.<VideoEntity>find(
+                        "estado = ?1 and falhaPublicadaEm is null",
+                        Sort.by("recebidoEm"),
+                        EstadoVideo.FALHOU)
+                        .range(0, tamanhoDoLote - 1)
+                        .list()
+                        .map(entidades -> entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList()))
+                .subscribeAsCompletionStage();
     }
 
     private static VideoEntity paraEntity(Video video) {

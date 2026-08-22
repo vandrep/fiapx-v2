@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,6 +22,7 @@ class EnviarVideoUseCaseTest {
 
     private GatewaysEmMemoria.Videos videos;
     private GatewaysEmMemoria.Arquivos arquivos;
+    private GatewaysEmMemoria.ExtracaoEnvios extracao;
     private GatewaysEmMemoria.Presenter presenter;
     private EnviarVideoUseCase useCase;
 
@@ -28,8 +30,9 @@ class EnviarVideoUseCaseTest {
     void montar() {
         videos = new GatewaysEmMemoria.Videos();
         arquivos = new GatewaysEmMemoria.Arquivos();
+        extracao = new GatewaysEmMemoria.ExtracaoEnvios();
         presenter = new GatewaysEmMemoria.Presenter();
-        useCase = new EnviarVideoUseCase(arquivos, videos, presenter);
+        useCase = new EnviarVideoUseCase(arquivos, videos, extracao, presenter);
     }
 
     @Test
@@ -41,6 +44,15 @@ class EnviarVideoUseCaseTest {
         assertEquals(video.id() + "/original.mp4", video.chaveVideo());
         assertNotNull(presenter.recebido);
         assertEquals(video.id(), presenter.recebido.id());
+    }
+
+    @Test
+    void publicaExtrairVideoEMarcaOComandoComoPublicado() {
+        // ADR 0003: INSERT com marca nula -> publica -> UPDATE da marca.
+        var video = useCase.executar(comando("ferias.mp4", "video/mp4")).join();
+
+        assertEquals(List.of(video.id()), extracao.idsEnviados);
+        assertNotNull(videos.comandoPublicadoEm.get(video.id()));
     }
 
     @Test

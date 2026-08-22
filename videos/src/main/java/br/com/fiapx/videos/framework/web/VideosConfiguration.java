@@ -4,10 +4,18 @@ import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
 import br.com.fiapx.videos.core.interfaces.presenter.VideoPresenter;
 import br.com.fiapx.videos.core.interfaces.presenter.VideosPaginadosPresenter;
+import br.com.fiapx.videos.core.interfaces.sender.ExtracaoSender;
+import br.com.fiapx.videos.core.interfaces.sender.NotificacaoSender;
 import br.com.fiapx.videos.core.usecases.video.BaixarPacoteUseCase;
 import br.com.fiapx.videos.core.usecases.video.ConsultarVideoUseCase;
 import br.com.fiapx.videos.core.usecases.video.EnviarVideoUseCase;
 import br.com.fiapx.videos.core.usecases.video.ListarVideosDoDonoUseCase;
+import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoConcluidaUseCase;
+import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoFalhouUseCase;
+import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoIniciadaUseCase;
+import br.com.fiapx.videos.core.usecases.video.ReconciliarPublicacoesPendentesUseCase;
+import br.com.fiapx.videos.interfaces.controllers.ExtracaoEventosController;
+import br.com.fiapx.videos.interfaces.controllers.ReconciliacaoController;
 import br.com.fiapx.videos.interfaces.controllers.VideosController;
 import br.com.fiapx.videos.interfaces.presenters.VideoPresenterAdapter;
 import br.com.fiapx.videos.interfaces.presenters.VideosPaginadosPresenterAdapter;
@@ -25,13 +33,32 @@ public class VideosConfiguration {
     @Produces
     VideosController videosController(VideoGateway videoGateway,
                                       ArquivoGateway arquivoGateway,
+                                      ExtracaoSender extracaoSender,
                                       VideoPresenter videoPresenter,
                                       VideosPaginadosPresenter videosPaginadosPresenter) {
         return new VideosController(
-                new EnviarVideoUseCase(arquivoGateway, videoGateway, videoPresenter),
+                new EnviarVideoUseCase(arquivoGateway, videoGateway, extracaoSender, videoPresenter),
                 new ListarVideosDoDonoUseCase(videoGateway, videosPaginadosPresenter),
                 new ConsultarVideoUseCase(videoGateway, videoPresenter),
                 new BaixarPacoteUseCase(videoGateway, arquivoGateway));
+    }
+
+    @Produces
+    ExtracaoEventosController extracaoEventosController(VideoGateway videoGateway,
+                                                        NotificacaoSender notificacaoSender) {
+        return new ExtracaoEventosController(
+                new ProcessarExtracaoIniciadaUseCase(videoGateway),
+                new ProcessarExtracaoConcluidaUseCase(videoGateway),
+                new ProcessarExtracaoFalhouUseCase(videoGateway, notificacaoSender));
+    }
+
+    @Produces
+    ReconciliacaoController reconciliacaoController(VideoGateway videoGateway,
+                                                    ArquivoGateway arquivoGateway,
+                                                    ExtracaoSender extracaoSender,
+                                                    NotificacaoSender notificacaoSender) {
+        return new ReconciliacaoController(new ReconciliarPublicacoesPendentesUseCase(
+                videoGateway, arquivoGateway, extracaoSender, notificacaoSender));
     }
 
     /** Request-scoped: o presenter guarda o resultado de <b>uma</b> requisicao. */

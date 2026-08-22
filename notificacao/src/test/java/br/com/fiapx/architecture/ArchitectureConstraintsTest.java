@@ -64,6 +64,12 @@ class ArchitectureConstraintsTest {
     private static final Set<String> RESOURCE_RETURN_TYPES = Set.of("Uni<", "RestMulti<");
     private static final Pattern PUBLIC_RESOURCE_METHOD = Pattern.compile(
             "(?m)^\\s+public\\s+(?!record\\b|class\\b|interface\\b|enum\\b)([^\\s(]+(?:<[^\\n{;()]*>)?)\\s+([a-zA-Z_$][\\w$]*)\\s*\\(");
+    /**
+     * Mensageria e agendamento sao infraestrutura: o consumidor/publicador/gatilho mora em
+     * framework.dispatcher, nunca em core ou interfaces (contrato de mensagens, ticket 017).
+     */
+    private static final Pattern MENSAGERIA_OU_AGENDAMENTO_ANOTACAO = Pattern.compile(
+            "@(Incoming|Outgoing|Scheduled)\\(");
 
     @Test
     void deveManterLayoutModularComCoreInterfacesEFramework() {
@@ -280,6 +286,23 @@ class ArchitectureConstraintsTest {
             }
             if (!source.content().contains("subscribeAsCompletionStage()")) {
                 violations.add(source.relativePath() + " deve converter Uni para CompletionStage na saida");
+            }
+        }
+
+        assertNoViolations(violations);
+    }
+
+    @Test
+    void mensageriaEAgendamentoSoDevemApareceEmFramework() {
+        var violations = new ArrayList<String>();
+
+        for (SourceFile source : javaSources()) {
+            if (isLayer(source, "framework")) {
+                continue;
+            }
+            if (MENSAGERIA_OU_AGENDAMENTO_ANOTACAO.matcher(source.content()).find()) {
+                violations.add(source.relativePath()
+                        + ": @Incoming/@Outgoing/@Scheduled so podem aparecer em framework");
             }
         }
 

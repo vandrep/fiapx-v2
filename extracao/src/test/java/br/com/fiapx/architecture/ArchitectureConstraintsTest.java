@@ -28,8 +28,14 @@ class ArchitectureConstraintsTest {
 
     private static final Path MAIN_SOURCES = Path.of("src/main/java");
     private static final String BASE_PACKAGE = "br.com.fiapx";
-    /** Cada servico deployavel carrega exatamente um modulo de negocio, homonimo do servico. */
-    private static final String MODULO_DO_SERVICO = "extracao";
+    /**
+     * Cada servico deployavel carrega exatamente um modulo de negocio, homonimo do servico.
+     * Derivado do nome do diretorio do modulo, e nao fixado: o CWD do surefire e o basedir,
+     * o mesmo pressuposto de MAIN_SOURCES logo acima. Isso mantem as tres copias deste
+     * arquivo byte a byte identicas, o que o script scripts/verifica-testes-arquiteturais.sh
+     * cobra no build. Ver AGENTS.md.
+     */
+    private static final String MODULO_DO_SERVICO = Path.of("").toAbsolutePath().getFileName().toString();
     private static final Set<String> REQUIRED_MODULE_LAYERS = Set.of("core", "interfaces", "framework");
     private static final Set<String> SHARED_PACKAGES_WITHOUT_LAYER = Set.of(
             BASE_PACKAGE + ".common",

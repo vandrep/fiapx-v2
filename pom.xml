@@ -26,6 +26,7 @@
         <quarkus.platform.version>3.31.3</quarkus.platform.version>
 
         <compiler-plugin.version>3.14.1</compiler-plugin.version>
+        <exec-plugin.version>3.5.1</exec-plugin.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
         <failsafe-plugin.version>3.5.4</failsafe-plugin.version>
 
@@ -106,6 +107,31 @@
         </pluginManagement>
 
         <plugins>
+            <!-- Guarda de repositorio, nao de modulo: cobra que as tres copias de
+                 ArchitectureConstraintsTest sejam identicas. Roda so no agregador
+                 (inherited false) e na primeira fase do ciclo, para o feedback chegar
+                 antes de qualquer compilacao. Ver AGENTS.md. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>${exec-plugin.version}</version>
+                <inherited>false</inherited>
+                <executions>
+                    <execution>
+                        <id>verifica-testes-arquiteturais</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>bash</executable>
+                            <arguments>
+                                <argument>${project.basedir}/scripts/verifica-testes-arquiteturais.sh</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>

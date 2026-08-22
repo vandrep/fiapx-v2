@@ -27,4 +27,10 @@ Falta decidir a forma do workflow:
 - Quem torna os packages públicos, e isso é passo manual único ou entra no workflow?
 - O build das imagens depende do `verify` ter passado, ou são jobs independentes?
 
+Requisito duro vindo do ticket 012: a guarda que cobra as três cópias idênticas de
+`ArchitectureConstraintsTest` está presa à fase `validate` do **parent agregador**. Se o
+workflow adotar matriz por módulo com `mvn -f <servico>/pom.xml`, o parent sai do reator e a
+guarda é **silenciosamente pulada** — pelo menos um job precisa rodar Maven a partir da raiz.
+Em compensação, `./mvnw verify` na raiz já a executa: não é preciso step de YAML separado.
+
 O produto é o `.github/workflows/*.yml` funcionando, verificado por um push real.

@@ -148,6 +148,19 @@ verificadas por teste, não são sugestão). Projeto original em
   publicados. A marca é o que separa "publicado e esperando" de "nunca publicado". Registrado
   em [ADR 0003](../adr/0003-reconciliacao-por-varredura.md); o código pousa no ticket 017
 
+- [AGENTS.md da raiz para o layout multi-módulo](tickets/012-agents-md-raiz.md) — **um
+  arquivo, 108 linhas contra as ~400 do template**, porque ele **não reescreve as regras de
+  camada**: aponta para o `ArchitectureConstraintsTest`, que está dentro do repo e é
+  executável. Duplicar seria cache de um lookup barato; apontar para o template seria link
+  morto para quem clona. Ponteiros são "quando você for X, leia Y", não lista de arquivos.
+  O ffmpeg **não virou ADR** — a pesquisa do 006 já o registra, faltava o ponteiro. E a
+  regra "editar uma cópia é editar as três" deixou de ser prosa e virou build: derivar
+  `MODULO_DO_SERVICO` do diretório do módulo torna as três cópias **byte a byte idênticas**,
+  e um `cmp` na fase `validate` do **agregador** (não dos módulos, que não devem enxergar o
+  vizinho) reprova a divergência em segundos. Baixar o arquivo em tempo de build foi
+  recusado: build não-hermético valida o servidor, não o working tree. `CLAUDE.md` de uma
+  linha aponta para o `AGENTS.md`
+
 ## Ainda não especificado
 
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,

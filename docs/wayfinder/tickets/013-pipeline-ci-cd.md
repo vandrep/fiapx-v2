@@ -128,10 +128,15 @@ limpo `docker compose build` **falha**: `target/` está no `.gitignore` e os Doc
 compilam nada. O avaliador ou instala JDK 21 + Maven, ou puxa imagem pronta. Puxar é o único
 caminho digno de uma demo.
 
-Continua manual: automatizar exigiria um PAT com `write:packages` — isto é, exatamente o
+Não foi preciso: **as imagens nasceram públicas**, e automatizar exigiria um PAT com `write:packages` — isto é, exatamente o
 segredo novo que o ticket 001 comemorou não precisar. O `GITHUB_TOKEN` não muda visibilidade
-de package. **Procedimento, uma vez, após o primeiro run verde**, para cada um de
-`fiapx-videos`, `fiapx-extracao`, `fiapx-notificacao`:
+de package. **Correção ao ticket 001.** Ele registrou que as imagens nascem **privadas** mesmo em repo
+público. Está errado: verificado por `GET https://ghcr.io/v2/vandrep/fiapx-<servico>/manifests/latest`
+com token **anônimo**, as três responderam `200`, cada uma como índice multi-arch com
+`linux/amd64` e `linux/arm64`. O GHCR herda a visibilidade do repositório quando o package é
+criado pelo `GITHUB_TOKEN` de um repo público — o passo manual nunca precisou acontecer.
+
+Fica o procedimento, caso alguma imagem futura nasça privada:
 
 > github.com/vandrep?tab=packages → o package → *Package settings* → *Danger Zone* →
 > *Change visibility* → **Public**.

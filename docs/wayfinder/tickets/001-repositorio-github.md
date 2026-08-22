@@ -75,3 +75,14 @@ no índice no primeiro build.
 **Sobrou versionado, de propósito ou não**: `.idea/` e
 `docs/referencia/referencia/projeto-original/__MACOSX/` já estão rastreados — o
 `.gitignore` não os remove retroativamente. Decisão deixada para o dono do repo.
+
+## Correção (ticket 013)
+
+A afirmação de que as imagens **nascem privadas** mesmo em repositório público está errada.
+Verificado na primeira publicação real, com token anônimo no GHCR: `fiapx-videos`,
+`fiapx-extracao` e `fiapx-notificacao` responderam `200` a `GET /v2/.../manifests/latest` sem
+credencial nenhuma. O package criado pelo `GITHUB_TOKEN` de um repo público **herda a
+visibilidade do repositório**. O passo manual que este ticket previa não é necessário.
+
+O resto do ticket se sustenta: o `GITHUB_TOKEN` autentica no GHCR sem segredo novo, e o job
+precisa mesmo declarar `packages: write`, porque o default do repo é `read`.

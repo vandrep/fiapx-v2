@@ -172,8 +172,9 @@ verificadas por teste, não são sugestão). Projeto original em
   Dockerfiles só copiam um `quarkus-app` que é Java puro. `latest` além do SHA, porque é o
   que torna o Compose demonstrável; `concurrency` **assimétrico** (`main` nunca cancela, ou
   o `latest` fica para trás em silêncio). Fica proibido escrever `*IT.java`: `skipITs` é
-  `true`, teste integrado aqui é `@QuarkusTest` no surefire. Packages públicos são passo
-  **manual** — automatizar exigiria o PAT que o ticket 001 comemorou não precisar. `main`
+  `true`, teste integrado aqui é `@QuarkusTest` no surefire. E **corrige o ticket 001**: as imagens
+  **não** nascem privadas — o package criado pelo `GITHUB_TOKEN` num repo público herda a
+  visibilidade dele, verificado por pull anônimo no GHCR. `main`
   protegida por ruleset com PR obrigatório e **zero aprovações** (exigir uma travaria o repo:
   ninguém aprova o próprio PR)
 

@@ -66,7 +66,7 @@ class ArchitectureConstraintsTest {
             "(?m)^\\s+public\\s+(?!record\\b|class\\b|interface\\b|enum\\b)([^\\s(]+(?:<[^\\n{;()]*>)?)\\s+([a-zA-Z_$][\\w$]*)\\s*\\(");
     /**
      * Mensageria e agendamento sao infraestrutura: o consumidor/publicador/gatilho mora em
-     * framework.dispatcher, nunca em core ou interfaces (contrato de mensagens, ticket 017).
+     * framework.dispatcher, nunca em core ou interfaces (contrato de mensagens, tickets 014 e 017).
      */
     private static final Pattern MENSAGERIA_OU_AGENDAMENTO_ANOTACAO = Pattern.compile(
             "@(Incoming|Outgoing|Scheduled)\\(");

@@ -236,6 +236,24 @@ verificadas por teste, não são sugestão). Projeto original em
   `framework`. Fora do automatizado: o caminho `TENTATIVAS_ESGOTADAS` de ponta a ponta contra
   um broker de verdade (exigiria derrubar o consumidor no meio de três tentativas)
 
+- [Implementação do serviço notificacao](tickets/014-implementacao-notificacao.md) — 21 testes
+  verdes, **14 sem Docker**; sem HTTP e sem banco, o `NotificacaoController` é a fronteira que o
+  `CucumberTest` exercita, e o e-mail "enviado" é verificado por `io.quarkus.mailer.MockMailbox`
+  (mock automático fora de `%prod`), não por um Dev Service de MailHog. Achado real: `DESCONHECIDO`
+  chega aqui como valor **legítimo**, não hipotético — o `videos` (ticket 017) publica
+  `motivo.name()` já passado pelo seu próprio tolerant reader, então um `extracao` mais novo
+  vira a string `"DESCONHECIDO"` antes mesmo de chegar. A tradução do código para frase mora
+  inteira no `core` (`MotivoFalha.paraFrase()`, `NotificacaoDeFalha`); `donoSub` do contrato não
+  entra no e-mail nem no use case, só em log de suporte no consumidor. Decisão nova: o **texto
+  do e-mail usa acentos**, ao contrário de comentários e nomes de código no resto do
+  repositório — é prosa para o usuário final, não para quem lê o fonte. Achado de API:
+  `MockMailbox.getMessagesSentTo` está deprecated, `getMailMessagesSentTo` devolve o tipo
+  errado (`MailMessage` do Vert.x); o certo é `getMailsSentTo`. Regra nova no
+  `ArchitectureConstraintsTest` (`@Incoming`/`@Outgoing` só em `framework`), aplicada às três
+  cópias — adicionada de forma independente em paralelo ao ticket 017, que chegou à mesma regra
+  pelo lado do `videos`. Topologia (fila quorum, `x-delivery-limit=3`, DLX, DLQ terminal
+  classic, prefetch 10) verificada de ponta a ponta contra RabbitMQ real via management API
+
 ## Ainda não especificado
 
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
@@ -263,6 +281,12 @@ verificadas por teste, não são sugestão). Projeto original em
   Precisa do volume nomeado `fiapx-extracao-scratch` em `/var/fiapx/extracao`, dono 185 (o
   Dockerfile já cria e ajusta a permissão). Declara sua própria topologia na subida, igual ao
   `videos` — nenhuma linha nova no `definitions.json` além do que o ticket 017 já previu.
+  Do ticket 014: o `notificacao` sobe com `rabbitmq-host=rabbitmq` (mesma imagem
+  `rabbitmq:4.3.5-management-alpine`), `%prod.quarkus.mailer.host=mailhog`,
+  `%prod.quarkus.mailer.port=1025` e `%prod.quarkus.mailer.mock=false` — sem essa última
+  linha o serviço voltaria a mockar o envio mesmo em produção. Sem `POSTGRES_DB` nem OIDC:
+  não tem banco nem borda HTTP. Declara sua própria topologia na subida, igual ao `extracao`
+  — nenhuma linha nova no `definitions.json` além do que os tickets 010/017 já previram.
 - **Configuração do realm Keycloak** — o arquivo **já existe**:
   [`docker/keycloak/realm-export.json`](../../docker/keycloak/realm-export.json), criado pelo
   ticket 016 porque sem ele nenhum teste de borda existiria — o realm padrão do Dev Services

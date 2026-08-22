@@ -39,6 +39,13 @@ jobs:
           java-version: '21'
           cache: maven
 
+      # O `extracao` roda o ffmpeg como processo externo mesmo em teste (ticket 006, ticket
+      # 015): o `runner-images` do ubuntu-latest nao o traz por padrao (conferido no manifesto
+      # oficial). Sem este passo, todo teste que exercita o pipeline de verdade falharia por
+      # binario ausente, nao por codigo quebrado.
+      - name: Instala ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       # A partir da raiz, sempre. `mvn -f <servico>/pom.xml` tira o agregador do reator e
       # pula em silencio a guarda das tres copias de ArchitectureConstraintsTest, que esta
       # presa a fase `validate` dele. Ver AGENTS.md.

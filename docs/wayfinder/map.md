@@ -219,6 +219,23 @@ verificadas por teste, não são sugestão). Projeto original em
   compartilhada) verificada de ponta a ponta contra RabbitMQ real via management API, não só
   assumida a partir da config
 
+- [Implementação do serviço extracao](tickets/015-implementacao-extracao.md) — 25 testes
+  verdes, **17 sem Docker**; o `CucumberTest` roda **ffmpeg de verdade** contra um vídeo real
+  de 3s checado no repo, sem dublê nenhum no pipeline de extração. Três achados que a
+  especificação não tinha como prever: a sintaxe `-loglevel +level+repeat:error` da pesquisa
+  006 não compila no ffmpeg 7.1.5 (o certo é `level+repeat+error`, sem `+` inicial nem `:`);
+  `@Retry` do SmallRye só intercepta `CompletionStage` exato, nunca `CompletableFuture`
+  (subtipo não conta), e não pode ser chamado do próprio bean — o retry mora num bean à
+  parte, `ArquivoMinioClient`; e `@Blocking("pool nomeado")` da pesquisa 006 não existe nesta
+  versão do SmallRye Reactive Messaging, só o marcador sem parâmetro. Achado operacional: o
+  `ubuntu-latest` do GitHub Actions não traz ffmpeg — `.github/workflows/ci.yml` ganhou um
+  passo de instalação antes do `verify`. Topologia (fila quorum, `x-delivery-limit=3`, DLX,
+  DLQ com uma única binding apesar de dois canais declararem a mesma fila) verificada de
+  ponta a ponta contra RabbitMQ real via management API em `quarkus dev`, não só assumida a
+  partir da config. Regra nova no `ArchitectureConstraintsTest`: `ProcessBuilder` só em
+  `framework`. Fora do automatizado: o caminho `TENTATIVAS_ESGOTADAS` de ponta a ponta contra
+  um broker de verdade (exigiria derrubar o consumidor no meio de três tentativas)
+
 ## Ainda não especificado
 
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
@@ -240,6 +257,12 @@ verificadas por teste, não são sugestão). Projeto original em
   mesma dos Dev Services). Topologia (exchanges, filas quorum, DLQ) é toda declarada pelo
   próprio `videos` na subida — o `definitions.json` do Compose só carrega o que não é queue
   argument, a policy `dead-letter-strategy=at-least-once` e os usuários do broker.
+  Do ticket 015: o `extracao` sobe com as mesmas variáveis de RabbitMQ e MinIO que o
+  `videos`, mas **sem** `POSTGRES_DB` nem OIDC — não tem banco nem borda HTTP. A imagem final
+  já carrega ffmpeg (`eclipse-temurin:21-jre-alpine` + `apk add ffmpeg`, ~467 MB, ticket 006).
+  Precisa do volume nomeado `fiapx-extracao-scratch` em `/var/fiapx/extracao`, dono 185 (o
+  Dockerfile já cria e ajusta a permissão). Declara sua própria topologia na subida, igual ao
+  `videos` — nenhuma linha nova no `definitions.json` além do que o ticket 017 já previu.
 - **Configuração do realm Keycloak** — o arquivo **já existe**:
   [`docker/keycloak/realm-export.json`](../../docker/keycloak/realm-export.json), criado pelo
   ticket 016 porque sem ele nenhum teste de borda existiria — o realm padrão do Dev Services

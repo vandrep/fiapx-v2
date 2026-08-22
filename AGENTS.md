@@ -102,6 +102,11 @@ fora. Cada fluxo principal ganha ao menos um `.feature` antes de ser considerado
 de Postgres, e cada extensão nova (RabbitMQ, Keycloak, S3) acrescenta um container. Sem
 Docker o build falha por timeout de container, não por código quebrado.
 
+O `extracao` também precisa de **`ffmpeg`/`ffprobe` no `PATH` do host** que roda o teste
+(ticket 006, ticket 015): o pipeline chama o binário via `ProcessBuilder`, mesmo em teste —
+não há dublê. O `runner-images` do `ubuntu-latest` não traz ffmpeg por padrão, por isso o CI
+o instala explicitamente antes do `verify` (`.github/workflows/ci.yml`).
+
 Rodar Maven na raiz também é o que dispara a guarda das três cópias: ela está presa ao
 agregador, então `mvn -f videos/pom.xml` a pula silenciosamente.
 

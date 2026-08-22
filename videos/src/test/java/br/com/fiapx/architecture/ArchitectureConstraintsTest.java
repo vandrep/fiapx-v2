@@ -70,6 +70,12 @@ class ArchitectureConstraintsTest {
      */
     private static final Pattern MENSAGERIA_OU_AGENDAMENTO_ANOTACAO = Pattern.compile(
             "@(Incoming|Outgoing|Scheduled)\\(");
+    /**
+     * Executar um processo externo (o ffmpeg do `extracao`, ticket 006 e 015) e infraestrutura
+     * igual a mensageria: so framework.service pode instanciar um ProcessBuilder. O core fala
+     * em ExtracaoDeFramesGateway, nunca em processo.
+     */
+    private static final Pattern PROCESSO_EXTERNO = Pattern.compile("\\bnew\\s+ProcessBuilder\\b");
 
     @Test
     void deveManterLayoutModularComCoreInterfacesEFramework() {
@@ -303,6 +309,22 @@ class ArchitectureConstraintsTest {
             if (MENSAGERIA_OU_AGENDAMENTO_ANOTACAO.matcher(source.content()).find()) {
                 violations.add(source.relativePath()
                         + ": @Incoming/@Outgoing/@Scheduled so podem aparecer em framework");
+            }
+        }
+
+        assertNoViolations(violations);
+    }
+
+    @Test
+    void processoExternoSoDeveApareceEmFramework() {
+        var violations = new ArrayList<String>();
+
+        for (SourceFile source : javaSources()) {
+            if (isLayer(source, "framework")) {
+                continue;
+            }
+            if (PROCESSO_EXTERNO.matcher(source.content()).find()) {
+                violations.add(source.relativePath() + ": ProcessBuilder so pode aparecer em framework");
             }
         }
 

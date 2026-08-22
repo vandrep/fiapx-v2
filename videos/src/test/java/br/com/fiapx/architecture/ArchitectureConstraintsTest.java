@@ -54,6 +54,14 @@ class ArchitectureConstraintsTest {
     private static final Pattern FRAMEWORK_IMPORT = Pattern.compile("(?m)^import\\s+br\\.com\\.fiapx\\.[a-z0-9_]+\\.framework\\.");
     private static final Pattern PUBLIC_INSTANCE_METHOD = Pattern.compile(
             "(?m)^\\s+public\\s+(?!static\\b|record\\b|class\\b|interface\\b|enum\\b)([^\\s(]+(?:<[^\\n{;()]*>)?)\\s+([a-zA-Z_$][\\w$]*)\\s*\\(");
+    /**
+     * O que a borda pode devolver. Uni e a regra; RestMulti e a excecao do download em
+     * streaming, e nao um afrouxamento da regra: o handler de streaming do RESTEasy Reactive
+     * olha o retorno <b>direto</b> do metodo, entao um Multi embrulhado em Uni ou em Response
+     * nao stream-a (medido: o primeiro sai como toString() do objeto, o segundo pendura a
+     * conexao). Os dois tipos sao igualmente nao-bloqueantes, que e o que esta regra protege.
+     */
+    private static final Set<String> RESOURCE_RETURN_TYPES = Set.of("Uni<", "RestMulti<");
     private static final Pattern PUBLIC_RESOURCE_METHOD = Pattern.compile(
             "(?m)^\\s+public\\s+(?!record\\b|class\\b|interface\\b|enum\\b)([^\\s(]+(?:<[^\\n{;()]*>)?)\\s+([a-zA-Z_$][\\w$]*)\\s*\\(");
 
@@ -240,9 +248,9 @@ class ArchitectureConstraintsTest {
             while (matcher.find()) {
                 var returnType = matcher.group(1);
                 var methodName = matcher.group(2);
-                if (!returnType.startsWith("Uni<")) {
+                if (RESOURCE_RETURN_TYPES.stream().noneMatch(returnType::startsWith)) {
                     violations.add(source.relativePath() + ": metodo publico " + methodName
-                            + " deve retornar Uni, mas retorna " + returnType);
+                            + " deve retornar " + RESOURCE_RETURN_TYPES + ", mas retorna " + returnType);
                 }
             }
         }

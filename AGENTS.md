@@ -76,6 +76,13 @@ onde toda camada está sempre populada; por serviço, elas acusam `notificacao` 
 borda HTTP e os dois workers por não terem banco. As guardas de `core`, controller e use case
 seguem duras.
 
+Uma terceira mudou no ticket 016: método de `Resource` pode devolver **`Uni` ou `RestMulti`**,
+não só `Uni`. Não é afrouxamento — o handler de streaming do RESTEasy Reactive olha o retorno
+**direto** do método, então o download do Pacote não tem como devolver `Uni`: um `Multi`
+embrulhado em `Response` pendura a conexão, e embrulhado em `Uni` sai serializado pelo
+`toString()` do objeto. Os dois foram medidos. O que a regra protege — nada de retorno
+bloqueante na borda — os dois tipos cumprem igualmente.
+
 ## BDD
 
 Cenários de aceite em Gherkin **em português** (`# language: pt` na primeira linha), em

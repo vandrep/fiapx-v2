@@ -32,6 +32,31 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-reactive-pg-client</artifactId>
         </dependency>
+
+        <!-- Borda sob OIDC: o dono do Video vem do `sub` do bearer token (ticket 004). -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-oidc</artifactId>
+        </dependency>
+
+        <!-- MinIO por API S3. O netty-nio-client nao e opcional: sem ele o
+             S3AsyncClient nao encontra HTTP client no classpath (ticket 005). -->
+        <dependency>
+            <groupId>io.quarkiverse.amazonservices</groupId>
+            <artifactId>quarkus-amazon-s3</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>netty-nio-client</artifactId>
+        </dependency>
+
+        <!-- Token real, assinatura real, `sub` real na borda: @TestSecurity fabrica
+             identidade e nao cobre o fluxo do Keycloak (ticket 004). -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-keycloak-server</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

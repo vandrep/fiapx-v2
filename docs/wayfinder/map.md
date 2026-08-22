@@ -191,6 +191,20 @@ verificadas por teste, não são sugestão). Projeto original em
   a tabela `video` é o registro do que aconteceu, não espelho do bucket. Sem ADR — a escolha é
   reversível e o porquê cabe no contrato HTTP
 
+- [Implementação do serviço videos: borda HTTP e persistência](tickets/016-implementacao-videos-borda.md)
+  — 66 testes verdes, **34 sem Docker**: o `core` inteiro roda com dublês em memória. Três
+  achados que a especificação não tinha como prever. **O download não pode devolver `Uni`** —
+  o handler de streaming do RESTEasy olha o retorno *direto* do método, e foi medido que
+  `Multi` em `Response` pendura a conexão e em `Uni` sai como `toString()` do objeto (60
+  bytes); a regra do `ArchitectureConstraintsTest` cedeu pela **terceira** vez, agora por fato
+  medido e não por topologia. Daí a sessão do Hibernate saiu do Resource para o adapter
+  (`@WithSession` exige `Uni`), o que por acaso é melhor: ela fecha antes do streaming em vez
+  de segurar conexão por 1,5 GB. E **o future do `S3AsyncClient` completa na event loop do
+  SDK**, o que fazia o `INSERT` seguinte morrer com `No current Vertx context found` — a ponte
+  ficou no adapter, que é onde a thread estranha aparece. Resolvida também a contradição do
+  ticket 009 sobre quem gera o id: `Video.novo` gera identidade, `armazenadoEm` fecha a criação
+  com a chave que o gateway devolveu
+
 ## Ainda não especificado
 
 - **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
@@ -205,14 +219,18 @@ verificadas por teste, não são sugestão). Projeto original em
   Do ticket 013: os serviços entram como `image: ghcr.io/vandrep/fiapx-<servico>:latest`,
   **sem chave `build:`** — num clone limpo `docker compose build` falha, porque `target/`
   está no `.gitignore` e os Dockerfiles são single-stage sobre um `quarkus-app` pronto.
-- **Configuração do realm Keycloak** — clients, roles, usuários de demo, `realm-export.json`
-  versionado. A pesquisa fechou os mecanismos; falta decidir se há audience mapper (sem ele,
-  não configurar `token.audience`). O ticket 009 já retirou daqui a pergunta do formato do
-  `sub`: o value object `Dono` **não** valida UUID, então o realm pode emitir o que quiser.
-  Dois requisitos duros já chegaram: o token **precisa**
-  emitir o claim `email` (ticket 007), senão `VideoFalhou` não fecha; e o client **precisa**
-  aceitar *direct access grants* (ticket 008), senão o botão Authorize do Swagger UI não
-  funciona e a demo vira `curl`.
+  Do ticket 016: o `videos` precisa de `POSTGRES_DB`, MinIO, RabbitMQ e Keycloak de pé, e sobe
+  com `%prod` — onde `schema-management.strategy=validate` derruba o boot se o `init.sql`
+  divergir das entidades. O Keycloak importa o mesmo `realm-export.json` que os testes usam.
+- **Configuração do realm Keycloak** — o arquivo **já existe**:
+  [`docker/keycloak/realm-export.json`](../../docker/keycloak/realm-export.json), criado pelo
+  ticket 016 porque sem ele nenhum teste de borda existiria — o realm padrão do Dev Services
+  não emite o claim `email`. Ele é mínimo e só carrega o que já estava decidido: claim `email`
+  (ticket 007), *direct access grants* (ticket 008), a role `usuario` e dois usuários de
+  demonstração (`demo`, `outro`). **Continua aberto**: se há audience mapper (sem ele, não
+  configurar `token.audience`), e o elenco final de clients e usuários que a banca vê. O
+  ticket 009 já retirou daqui a pergunta do formato do `sub`: o value object `Dono` **não**
+  valida UUID, então o realm pode emitir o que quiser.
 - **`README.md`** — o repositório não tem um. Entregável de banca: o `docker compose up` da
   demo, o procedimento único de tornar os packages do GHCR públicos (ticket 013) e o mapa
   de leitura do repo. Só especificável depois do Compose.

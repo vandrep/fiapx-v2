@@ -178,24 +178,81 @@ verificadas por teste, não são sugestão). Projeto original em
   protegida por ruleset com PR obrigatório e **zero aprovações** (exigir uma travaria o repo:
   ninguém aprova o próprio PR)
 
+- [O que a API responde quando o Pacote já expirou](tickets/019-pacote-expirado.md) — o Pacote
+  expira em 7 dias e a API **não finge que sabe disso**: `410 Gone` no download, e nada mais.
+  O `409` fica sendo *ainda não*, o `410` é *não mais* — a diferença é operacional, porque
+  `409` convida a repetir a requisição e `410` diz para parar. Expiração **não** entra no enum
+  `motivo` (aquilo é falha de Extração; expirar não é falhar). Recusado dissolver o ticket
+  tirando a expiração do bucket `pacotes`: o objeto some por motivos que a policy não controla
+  — volume do MinIO recriado sem o do Postgres —, e sem expiração o ramo `NoSuchKey` só
+  deixaria de ser exercitado. Recusado também o campo calculado `pacoteDisponivelAte`, que era
+  conservador por construção (o MinIO apaga sempre *depois* do prazo, nunca antes) mas poria na
+  borda um número que o `videos` não controla. Descoberta preguiçosa, e o `GET` **não escreve**:
+  a tabela `video` é o registro do que aconteceu, não espelho do bucket. Sem ADR — a escolha é
+  reversível e o porquê cabe no contrato HTTP
+
+- [Implementação do serviço videos: borda HTTP e persistência](tickets/016-implementacao-videos-borda.md)
+  — 66 testes verdes, **34 sem Docker**: o `core` inteiro roda com dublês em memória. Três
+  achados que a especificação não tinha como prever. **O download não pode devolver `Uni`** —
+  o handler de streaming do RESTEasy olha o retorno *direto* do método, e foi medido que
+  `Multi` em `Response` pendura a conexão e em `Uni` sai como `toString()` do objeto (60
+  bytes); a regra do `ArchitectureConstraintsTest` cedeu pela **terceira** vez, agora por fato
+  medido e não por topologia. Daí a sessão do Hibernate saiu do Resource para o adapter
+  (`@WithSession` exige `Uni`), o que por acaso é melhor: ela fecha antes do streaming em vez
+  de segurar conexão por 1,5 GB. E **o future do `S3AsyncClient` completa na event loop do
+  SDK**, o que fazia o `INSERT` seguinte morrer com `No current Vertx context found` — a ponte
+  ficou no adapter, que é onde a thread estranha aparece. Resolvida também a contradição do
+  ticket 009 sobre quem gera o id: `Video.novo` gera identidade, `armazenadoEm` fecha a criação
+  com a chave que o gateway devolveu
+
+- [Implementação do serviço videos: mensageria e máquina de estados](tickets/017-implementacao-videos-mensageria.md)
+  — 82 testes verdes, **63 sem Docker**: as três transições, o envio e a varredura de
+  reconciliação rodam com dublês em memória. Achado real: `EstadoVideo.transitaPara` lançava
+  exceção também para terminal-para-**si mesmo** (`FALHOU.transitaPara(FALHOU)`), não só para
+  o cruzamento entre os dois terminais — a segunda e a terceira entrega do mesmo
+  `ExtracaoFalhou`, cenário central da política de falhas, derrubariam a mensagem em vez de
+  dar ack. A varredura de reconciliação roda em **sequência**, não em paralelo: duas queries
+  concorrentes na mesma sessão reativa do Hibernate corrompem sua pilha interna (medido em
+  `quarkus dev`), o que ADR 0003 não previa ao tolerar duas réplicas varrendo ao mesmo tempo.
+  `auto-bind-dlq=true` sozinho não declara a dead-letter exchange — precisa de
+  `dlx.declare=true` também. Topologia (3 filas quorum, `x-delivery-limit=3`, DLQ
+  compartilhada) verificada de ponta a ponta contra RabbitMQ real via management API, não só
+  assumida a partir da config
+
+- [Implementação do serviço extracao](tickets/015-implementacao-extracao.md) — 25 testes
+  verdes, **17 sem Docker**; o `CucumberTest` roda **ffmpeg de verdade** contra um vídeo real
+  de 3s checado no repo, sem dublê nenhum no pipeline de extração. Três achados que a
+  especificação não tinha como prever: a sintaxe `-loglevel +level+repeat:error` da pesquisa
+  006 não compila no ffmpeg 7.1.5 (o certo é `level+repeat+error`, sem `+` inicial nem `:`);
+  `@Retry` do SmallRye só intercepta `CompletionStage` exato, nunca `CompletableFuture`
+  (subtipo não conta), e não pode ser chamado do próprio bean — o retry mora num bean à
+  parte, `ArquivoMinioClient`; e `@Blocking("pool nomeado")` da pesquisa 006 não existe nesta
+  versão do SmallRye Reactive Messaging, só o marcador sem parâmetro. Achado operacional: o
+  `ubuntu-latest` do GitHub Actions não traz ffmpeg — `.github/workflows/ci.yml` ganhou um
+  passo de instalação antes do `verify`. Topologia (fila quorum, `x-delivery-limit=3`, DLX,
+  DLQ com uma única binding apesar de dois canais declararem a mesma fila) verificada de
+  ponta a ponta contra RabbitMQ real via management API em `quarkus dev`, não só assumida a
+  partir da config. Regra nova no `ArchitectureConstraintsTest`: `ProcessBuilder` só em
+  `framework`. Fora do automatizado: o caminho `TENTATIVAS_ESGOTADAS` de ponta a ponta contra
+  um broker de verdade (exigiria derrubar o consumidor no meio de três tentativas)
+
 - [Implementação do serviço notificacao](tickets/014-implementacao-notificacao.md) — 21 testes
   verdes, **14 sem Docker**; sem HTTP e sem banco, o `NotificacaoController` é a fronteira que o
   `CucumberTest` exercita, e o e-mail "enviado" é verificado por `io.quarkus.mailer.MockMailbox`
   (mock automático fora de `%prod`), não por um Dev Service de MailHog. Achado real: `DESCONHECIDO`
-  chega aqui como valor **legítimo**, não hipotético — o `videos` (ticket 017, ainda não
-  mesclado) publica `motivo.name()` já passado pelo seu próprio tolerant reader, então um
-  `extracao` mais novo vira a string `"DESCONHECIDO"` antes mesmo de chegar. A tradução do
-  código para frase mora inteira no `core` (`MotivoFalha.paraFrase()`, `NotificacaoDeFalha`);
-  `donoSub` do contrato não entra no e-mail nem no use case, só em log de suporte no
-  consumidor. Decisão nova: o **texto do e-mail usa acentos**, ao contrário de comentários e
-  nomes de código no resto do repositório — é prosa para o usuário final, não para quem lê o
-  fonte. Achado de API: `MockMailbox.getMessagesSentTo` está deprecated,
-  `getMailMessagesSentTo` devolve o tipo errado (`MailMessage` do Vert.x); o certo é
-  `getMailsSentTo`. Regra nova no `ArchitectureConstraintsTest` (`@Incoming`/`@Outgoing` só em
-  `framework`), aplicada às três cópias — sem o `RestMulti` do 016 nem o `ProcessBuilder` do
-  015, que pertencem a outros branches ainda não mesclados. Topologia (fila quorum,
-  `x-delivery-limit=3`, DLX, DLQ terminal classic, prefetch 10) verificada de ponta a ponta
-  contra RabbitMQ real via management API
+  chega aqui como valor **legítimo**, não hipotético — o `videos` (ticket 017) publica
+  `motivo.name()` já passado pelo seu próprio tolerant reader, então um `extracao` mais novo
+  vira a string `"DESCONHECIDO"` antes mesmo de chegar. A tradução do código para frase mora
+  inteira no `core` (`MotivoFalha.paraFrase()`, `NotificacaoDeFalha`); `donoSub` do contrato não
+  entra no e-mail nem no use case, só em log de suporte no consumidor. Decisão nova: o **texto
+  do e-mail usa acentos**, ao contrário de comentários e nomes de código no resto do
+  repositório — é prosa para o usuário final, não para quem lê o fonte. Achado de API:
+  `MockMailbox.getMessagesSentTo` está deprecated, `getMailMessagesSentTo` devolve o tipo
+  errado (`MailMessage` do Vert.x); o certo é `getMailsSentTo`. Regra nova no
+  `ArchitectureConstraintsTest` (`@Incoming`/`@Outgoing` só em `framework`), aplicada às três
+  cópias — adicionada de forma independente em paralelo ao ticket 017, que chegou à mesma regra
+  pelo lado do `videos`. Topologia (fila quorum, `x-delivery-limit=3`, DLX, DLQ terminal
+  classic, prefetch 10) verificada de ponta a ponta contra RabbitMQ real via management API
 
 ## Ainda não especificado
 
@@ -211,20 +268,34 @@ verificadas por teste, não são sugestão). Projeto original em
   Do ticket 013: os serviços entram como `image: ghcr.io/vandrep/fiapx-<servico>:latest`,
   **sem chave `build:`** — num clone limpo `docker compose build` falha, porque `target/`
   está no `.gitignore` e os Dockerfiles são single-stage sobre um `quarkus-app` pronto.
+  Do ticket 016: o `videos` precisa de `POSTGRES_DB`, MinIO, RabbitMQ e Keycloak de pé, e sobe
+  com `%prod` — onde `schema-management.strategy=validate` derruba o boot se o `init.sql`
+  divergir das entidades. O Keycloak importa o mesmo `realm-export.json` que os testes usam.
+  Do ticket 017: `rabbitmq-host=rabbitmq` e a imagem `rabbitmq:4.3.5-management-alpine` (a
+  mesma dos Dev Services). Topologia (exchanges, filas quorum, DLQ) é toda declarada pelo
+  próprio `videos` na subida — o `definitions.json` do Compose só carrega o que não é queue
+  argument, a policy `dead-letter-strategy=at-least-once` e os usuários do broker.
+  Do ticket 015: o `extracao` sobe com as mesmas variáveis de RabbitMQ e MinIO que o
+  `videos`, mas **sem** `POSTGRES_DB` nem OIDC — não tem banco nem borda HTTP. A imagem final
+  já carrega ffmpeg (`eclipse-temurin:21-jre-alpine` + `apk add ffmpeg`, ~467 MB, ticket 006).
+  Precisa do volume nomeado `fiapx-extracao-scratch` em `/var/fiapx/extracao`, dono 185 (o
+  Dockerfile já cria e ajusta a permissão). Declara sua própria topologia na subida, igual ao
+  `videos` — nenhuma linha nova no `definitions.json` além do que o ticket 017 já previu.
   Do ticket 014: o `notificacao` sobe com `rabbitmq-host=rabbitmq` (mesma imagem
   `rabbitmq:4.3.5-management-alpine`), `%prod.quarkus.mailer.host=mailhog`,
   `%prod.quarkus.mailer.port=1025` e `%prod.quarkus.mailer.mock=false` — sem essa última
   linha o serviço voltaria a mockar o envio mesmo em produção. Sem `POSTGRES_DB` nem OIDC:
   não tem banco nem borda HTTP. Declara sua própria topologia na subida, igual ao `extracao`
   — nenhuma linha nova no `definitions.json` além do que os tickets 010/017 já previram.
-- **Configuração do realm Keycloak** — clients, roles, usuários de demo, `realm-export.json`
-  versionado. A pesquisa fechou os mecanismos; falta decidir se há audience mapper (sem ele,
-  não configurar `token.audience`). O ticket 009 já retirou daqui a pergunta do formato do
-  `sub`: o value object `Dono` **não** valida UUID, então o realm pode emitir o que quiser.
-  Dois requisitos duros já chegaram: o token **precisa**
-  emitir o claim `email` (ticket 007), senão `VideoFalhou` não fecha; e o client **precisa**
-  aceitar *direct access grants* (ticket 008), senão o botão Authorize do Swagger UI não
-  funciona e a demo vira `curl`.
+- **Configuração do realm Keycloak** — o arquivo **já existe**:
+  [`docker/keycloak/realm-export.json`](../../docker/keycloak/realm-export.json), criado pelo
+  ticket 016 porque sem ele nenhum teste de borda existiria — o realm padrão do Dev Services
+  não emite o claim `email`. Ele é mínimo e só carrega o que já estava decidido: claim `email`
+  (ticket 007), *direct access grants* (ticket 008), a role `usuario` e dois usuários de
+  demonstração (`demo`, `outro`). **Continua aberto**: se há audience mapper (sem ele, não
+  configurar `token.audience`), e o elenco final de clients e usuários que a banca vê. O
+  ticket 009 já retirou daqui a pergunta do formato do `sub`: o value object `Dono` **não**
+  valida UUID, então o realm pode emitir o que quiser.
 - **`README.md`** — o repositório não tem um. Entregável de banca: o `docker compose up` da
   demo, o procedimento único de tornar os packages do GHCR públicos (ticket 013) e o mapa
   de leitura do repo. Só especificável depois do Compose.

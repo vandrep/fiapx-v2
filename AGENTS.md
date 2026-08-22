@@ -76,6 +76,19 @@ onde toda camada está sempre populada; por serviço, elas acusam `notificacao` 
 borda HTTP e os dois workers por não terem banco. As guardas de `core`, controller e use case
 seguem duras.
 
+Uma terceira mudou no ticket 016: método de `Resource` pode devolver **`Uni` ou `RestMulti`**,
+não só `Uni`. Não é afrouxamento — o handler de streaming do RESTEasy Reactive olha o retorno
+**direto** do método, então o download do Pacote não tem como devolver `Uni`: um `Multi`
+embrulhado em `Response` pendura a conexão, e embrulhado em `Uni` sai serializado pelo
+`toString()` do objeto. Os dois foram medidos. O que a regra protege — nada de retorno
+bloqueante na borda — os dois tipos cumprem igualmente.
+
+Uma quarta regra chegou no ticket 017, endurecendo em vez de relaxar: `@Incoming`,
+`@Outgoing` e `@Scheduled` só podem aparecer em `framework` (mensageria e agendamento são
+infraestrutura, igual a `@ApplicationScoped` ou `@Path`). O template não trazia essa regra
+porque não cobria mensageria nem scheduler — ver
+[`docs/contratos/mensagens.md` § Camadas](docs/contratos/mensagens.md).
+
 ## BDD
 
 Cenários de aceite em Gherkin **em português** (`# language: pt` na primeira linha), em
@@ -88,6 +101,11 @@ fora. Cada fluxo principal ganha ao menos um `.feature` antes de ser considerado
 `./mvnw test` **a partir da raiz**, e com **Docker de pé** — hoje `videos` sobe Dev Services
 de Postgres, e cada extensão nova (RabbitMQ, Keycloak, S3) acrescenta um container. Sem
 Docker o build falha por timeout de container, não por código quebrado.
+
+O `extracao` também precisa de **`ffmpeg`/`ffprobe` no `PATH` do host** que roda o teste
+(ticket 006, ticket 015): o pipeline chama o binário via `ProcessBuilder`, mesmo em teste —
+não há dublê. O `runner-images` do `ubuntu-latest` não traz ffmpeg por padrão, por isso o CI
+o instala explicitamente antes do `verify` (`.github/workflows/ci.yml`).
 
 Rodar Maven na raiz também é o que dispara a guarda das três cópias: ela está presa ao
 agregador, então `mvn -f videos/pom.xml` a pula silenciosamente.

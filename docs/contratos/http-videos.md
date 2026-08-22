@@ -28,7 +28,7 @@ Vocabulário em [`CONTEXT.md`](../../CONTEXT.md). Fronteira entre serviços em
 | `GET` | `/videos/{id}/pacote` | baixa o Pacote |
 
 O Pacote é **sub-recurso do Vídeo**, e não `/pacotes/{id}`, porque o glossário diz que um
-Vídeo `CONCLUIDO` tem exatamente um Pacote — ele não tem identidade própria.
+Vídeo `CONCLUIDO` produziu exatamente um Pacote — ele não tem identidade própria.
 
 Não há `DELETE`: o enunciado não pede, e retenção é assunto do ticket 011.
 
@@ -152,8 +152,30 @@ não como caminho implementado.
 
 ### Quando o Pacote não existe
 
-`409 Conflict`, não `404` — o Vídeo existe; o que falta é o Pacote. Vale para `RECEBIDO`,
-`PROCESSANDO` e `FALHOU`.
+Dois casos, e eles não são o mesmo (ticket 019):
+
+| Caso | Status | Sentido |
+|---|---|---|
+| Vídeo não está `CONCLUIDO` (`RECEBIDO`, `PROCESSANDO`, `FALHOU`) | `409 Conflict` | **ainda não** |
+| Vídeo `CONCLUIDO`, mas o objeto expirou no MinIO | `410 Gone` | **não mais** |
+
+`404` está errado nos dois: o Vídeo existe e é do usuário; o que falta é o Pacote.
+
+A separação existe porque um cliente que recebe `409` racionalmente **repete** a requisição
+— o trabalho pode terminar a qualquer momento — e um que recebe `410` sabe que insistir não
+adianta. Reusar o `409` para os dois obrigaria a distinguir os sentidos pelo texto do
+`detail`, que não é contrato. E o código de expiração **não** entra no enum `motivo`: aquele
+enum é de falha de Extração, e expirar não é falhar — a Extração concluiu.
+
+O prazo é a regra de ciclo de vida de 7 dias do bucket `pacotes` (ticket 011). Ele aparece na
+descrição do OpenAPI e no `detail` do `410`, e **não** vira campo da representação de Vídeo:
+quem apaga é o MinIO, então um instante calculado pela aplicação mentiria com precisão de
+segundos no dia em que os dois divergissem. O `estado` também não ganha valor novo — ele
+responde o que aconteceu com a Extração, e `CONCLUIDO` segue verdadeiro para sempre.
+
+A descoberta é **preguiçosa**: ninguém varre o MinIO, e o `GET` que descobre a ausência
+**não grava nada** no Postgres. A tabela `video` é o registro do que aconteceu, não um
+espelho do bucket.
 
 ## Vídeo de outro usuário
 
@@ -169,6 +191,7 @@ casos, que é exatamente o ponto.
 |---|---|---|
 | Vídeo não é seu, ou não existe | `404` | `Video nao encontrado` |
 | Pacote pedido e Vídeo não está `CONCLUIDO` | `409` | `Pacote indisponivel` |
+| Pacote de Vídeo `CONCLUIDO` expirou no MinIO | `410` | `Pacote expirado` |
 | Content-type ou extensão recusada | `415` | `Formato nao suportado` |
 | Campo `arquivo` ausente ou vazio | `400` | `Requisicao invalida` |
 | Corpo acima do teto | `413` | — gerado pelo Vert.x |

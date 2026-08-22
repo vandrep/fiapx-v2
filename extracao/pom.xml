@@ -12,17 +12,33 @@
     <name>FIAP X :: extracao</name>
 
     <dependencies>
+        <!-- Health check para o depends_on: service_healthy do Compose ja vem do agregador
+             (pom.xml raiz), igual aos outros dois servicos: expoe /q/health sem exigir
+             borda HTTP publica nenhuma.
+
+             Mensageria com videos (contrato em docs/contratos/mensagens.md, ticket 015). O
+             conector RabbitMQ declara topologia (exchange, fila, DLQ, x-delivery-limit) via
+             configuracao dos canais. -->
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-rest</artifactId>
+            <artifactId>quarkus-messaging-rabbitmq</artifactId>
+        </dependency>
+
+        <!-- MinIO por API S3. O netty-nio-client nao e opcional: sem ele o S3AsyncClient nao
+             encontra HTTP client no classpath (ticket 005). -->
+        <dependency>
+            <groupId>io.quarkiverse.amazonservices</groupId>
+            <artifactId>quarkus-amazon-s3</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-rest-jackson</artifactId>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>netty-nio-client</artifactId>
         </dependency>
+
+        <!-- @Retry nos adapters de I/O do MinIO (ADR 0001). Territorio novo neste repo. -->
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-smallrye-openapi</artifactId>
+            <artifactId>quarkus-smallrye-fault-tolerance</artifactId>
         </dependency>
     </dependencies>
 

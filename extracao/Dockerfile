@@ -12,6 +12,11 @@ COPY target/quarkus-app/*.jar /app/
 COPY target/quarkus-app/app/ /app/app/
 COPY target/quarkus-app/quarkus/ /app/quarkus/
 
+# Scratch por Video (ticket 011, ticket 015): o volume nomeado `fiapx-extracao-scratch` monta
+# aqui. Dono 185 de proposito -- um volume nomeado vazio herda dono e permissao do ponto de
+# montagem da imagem, e sem isso ele nasceria de root e o worker nao conseguiria gravar frames.
+RUN mkdir -p /var/fiapx/extracao && chown -R 185:185 /var/fiapx
+
 EXPOSE 8080
 USER 185
 ENTRYPOINT ["java", "-jar", "/app/quarkus-run.jar"]

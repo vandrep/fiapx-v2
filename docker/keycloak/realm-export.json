@@ -1,0 +1,43 @@
+{
+  "realm": "fiapx",
+  "enabled": true,
+  "sslRequired": "none",
+  "roles": {
+    "realm": [
+      { "name": "usuario", "description": "Pode enviar e consultar os proprios Videos" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "fiapx-videos",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["*"],
+      "webOrigins": ["*"]
+    }
+  ],
+  "users": [
+    {
+      "username": "demo",
+      "enabled": true,
+      "email": "demo@fiapx.local",
+      "emailVerified": true,
+      "firstName": "Usuario",
+      "lastName": "Demo",
+      "credentials": [{ "type": "password", "value": "demo" }],
+      "realmRoles": ["usuario"]
+    },
+    {
+      "username": "outro",
+      "enabled": true,
+      "email": "outro@fiapx.local",
+      "emailVerified": true,
+      "firstName": "Outro",
+      "lastName": "Usuario",
+      "credentials": [{ "type": "password", "value": "outro" }],
+      "realmRoles": ["usuario"]
+    }
+  ]
+}

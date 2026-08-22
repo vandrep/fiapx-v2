@@ -25,6 +25,10 @@
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.version>3.31.3</quarkus.platform.version>
 
+        <!-- Extensoes AWS (S3) vivem num BOM proprio da plataforma, alinhado pela mesma
+             versao do quarkus-bom. Ver docs/pesquisa/upload-download-minio.md. -->
+        <quarkus.amazon.services.bom.artifact-id>quarkus-amazon-services-bom</quarkus.amazon.services.bom.artifact-id>
+
         <compiler-plugin.version>3.14.1</compiler-plugin.version>
         <exec-plugin.version>3.5.1</exec-plugin.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
@@ -43,6 +47,13 @@
             <dependency>
                 <groupId>${quarkus.platform.group-id}</groupId>
                 <artifactId>${quarkus.platform.artifact-id}</artifactId>
+                <version>${quarkus.platform.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>${quarkus.amazon.services.bom.artifact-id}</artifactId>
                 <version>${quarkus.platform.version}</version>
                 <type>pom</type>
                 <scope>import</scope>

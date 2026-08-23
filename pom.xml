@@ -78,6 +78,15 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-smallrye-health</artifactId>
         </dependency>
+        <!-- Sem isto, o SmallRye Reactive Messaging nao tem como desserializar o payload JSON
+             de um comando/evento no parametro do metodo @Incoming: cai num ClassCastException
+             silencioso ate o primeiro consumo real (achado do ticket 020, testando o Compose
+             ponta a ponta — nenhum teste unitario ou Cucumber publica mensagem de verdade pela
+             fila, todos chamam o controller direto). Comum aos tres porque todos consomem. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jackson</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>

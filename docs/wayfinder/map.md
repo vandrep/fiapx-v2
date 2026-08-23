@@ -254,52 +254,22 @@ verificadas por teste, não são sugestão). Projeto original em
   pelo lado do `videos`. Topologia (fila quorum, `x-delivery-limit=3`, DLX, DLQ terminal
   classic, prefetch 10) verificada de ponta a ponta contra RabbitMQ real via management API
 
+- [Compose completo: orquestração dos cinco serviços](tickets/020-compose-completo.md) —
+  `docker-compose.yml` na raiz + seed do RabbitMQ (usuário `fiapx`, `guest` não autentica
+  entre containers) e do MinIO (buckets + lifecycle via `minio/mc` one-shot); Keycloak com
+  `KC_HOSTNAME` fixo para o issuer sobreviver a um cliente externo. Verificado com os cinco
+  serviços de verdade, não só `docker compose config`: upload → ffmpeg real → `CONCLUIDO` →
+  download do Pacote, e o caminho de falha até o e-mail no MailHog. Achado central: nenhum
+  dos seis consumidores `@Incoming` sobrevivia a uma mensagem publicada de verdade — o
+  conector RabbitMQ decodifica JSON em `JsonObject`, nunca no record do canal, e faltava um
+  `MessageConverter` (`io.smallrye.reactive.messaging.MessageConverter`, não o da spec
+  MicroProfile) em cada serviço. Dois gaps de config também só apareciam em runtime real:
+  `videos` sem nenhuma credencial de Postgres (era Hibernate Reactive, a chave é
+  `quarkus.datasource.reactive.url`, não `jdbc.url`) e `videos`/`extracao` com
+  `credentials.type=static` do MinIO sem as chaves de credencial declaradas
+
 ## Ainda não especificado
 
-- **Compose completo** — Postgres, RabbitMQ, MinIO, Keycloak, MailHog, os três serviços,
-  ordem de subida por health check, seed de buckets, realm e `definitions.json` do RabbitMQ.
-  Só especificável depois que as dependências de cada serviço estiverem confirmadas. Requisitos
-  duros já chegaram. Do ticket 009: `POSTGRES_DB=fiapx_videos` (é o que cria o único
-  database, antes dos scripts de init) e `docker/postgres/init.sql` montado em
-  `docker-entrypoint-initdb.d`. Do ticket 011: seed do MinIO cria **dois** buckets
-  (`videos` e `pacotes`) com regra de ciclo de vida de 7 dias em ambos; volume nomeado
-  `fiapx-uploads` em `/var/fiapx/uploads` no `videos`; volume nomeado
-  `fiapx-extracao-scratch` em `/var/fiapx/extracao` no `extracao`, com folga de **4 GB**.
-  Do ticket 013: os serviços entram como `image: ghcr.io/vandrep/fiapx-<servico>:latest`,
-  **sem chave `build:`** — num clone limpo `docker compose build` falha, porque `target/`
-  está no `.gitignore` e os Dockerfiles são single-stage sobre um `quarkus-app` pronto.
-  Do ticket 016: o `videos` precisa de `POSTGRES_DB`, MinIO, RabbitMQ e Keycloak de pé, e sobe
-  com `%prod` — onde `schema-management.strategy=validate` derruba o boot se o `init.sql`
-  divergir das entidades. O Keycloak importa o mesmo `realm-export.json` que os testes usam.
-  Do ticket 017: `rabbitmq-host=rabbitmq` e a imagem `rabbitmq:4.3.5-management-alpine` (a
-  mesma dos Dev Services). Topologia (exchanges, filas quorum, DLQ) é toda declarada pelo
-  próprio `videos` na subida — o `definitions.json` do Compose só carrega o que não é queue
-  argument, a policy `dead-letter-strategy=at-least-once` e os usuários do broker.
-  Do ticket 015: o `extracao` sobe com as mesmas variáveis de RabbitMQ e MinIO que o
-  `videos`, mas **sem** `POSTGRES_DB` nem OIDC — não tem banco nem borda HTTP. A imagem final
-  já carrega ffmpeg (`eclipse-temurin:21-jre-alpine` + `apk add ffmpeg`, ~467 MB, ticket 006).
-  Precisa do volume nomeado `fiapx-extracao-scratch` em `/var/fiapx/extracao`, dono 185 (o
-  Dockerfile já cria e ajusta a permissão). Declara sua própria topologia na subida, igual ao
-  `videos` — nenhuma linha nova no `definitions.json` além do que o ticket 017 já previu.
-  Do ticket 014: o `notificacao` sobe com `rabbitmq-host=rabbitmq` (mesma imagem
-  `rabbitmq:4.3.5-management-alpine`), `%prod.quarkus.mailer.host=mailhog`,
-  `%prod.quarkus.mailer.port=1025` e `%prod.quarkus.mailer.mock=false` — sem essa última
-  linha o serviço voltaria a mockar o envio mesmo em produção. Sem `POSTGRES_DB` nem OIDC:
-  não tem banco nem borda HTTP. Declara sua própria topologia na subida, igual ao `extracao`
-  — nenhuma linha nova no `definitions.json` além do que os tickets 010/017 já previram.
-- **Configuração do realm Keycloak** — o arquivo **já existe**:
-  [`docker/keycloak/realm-export.json`](../../docker/keycloak/realm-export.json), criado pelo
-  ticket 016 porque sem ele nenhum teste de borda existiria — o realm padrão do Dev Services
-  não emite o claim `email`. Ele é mínimo e só carrega o que já estava decidido: claim `email`
-  (ticket 007), *direct access grants* (ticket 008), a role `usuario` e dois usuários de
-  demonstração (`demo`, `outro`). **Continua aberto**: se há audience mapper (sem ele, não
-  configurar `token.audience`), e o elenco final de clients e usuários que a banca vê. O
-  ticket 009 já retirou daqui a pergunta do formato do `sub`: o value object `Dono` **não**
-  valida UUID, então o realm pode emitir o que quiser.
-- **`README.md`** — o repositório não tem um. Entregável de banca: o `docker compose up` da
-  demo, o procedimento único de tornar os packages do GHCR públicos (ticket 013) e o mapa
-  de leitura do repo. Só especificável depois do Compose.
-- **Script de smoke ponta-a-ponta** — o roteiro executável que também vira a demo.
 - **Documentação de arquitetura** — formato (C4? diagrama de sequência?), onde vive, o que
   a banca precisa ver.
 - **Roteiro do vídeo de até 10 minutos** — o que mostrar, em que ordem, o que não mostrar.

@@ -1,0 +1,21 @@
+{
+  "users": [
+    { "name": "fiapx", "password": "fiapx", "tags": "administrator" }
+  ],
+  "vhosts": [
+    { "name": "/" }
+  ],
+  "permissions": [
+    { "user": "fiapx", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" }
+  ],
+  "policies": [
+    {
+      "name": "dead-letter-at-least-once",
+      "vhost": "/",
+      "pattern": ".*",
+      "apply-to": "queues",
+      "definition": { "dead-letter-strategy": "at-least-once" },
+      "priority": 0
+    }
+  ]
+}

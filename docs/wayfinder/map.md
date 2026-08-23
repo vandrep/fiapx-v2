@@ -268,6 +268,19 @@ verificadas por teste, não são sugestão). Projeto original em
   `quarkus.datasource.reactive.url`, não `jdbc.url`) e `videos`/`extracao` com
   `credentials.type=static` do MinIO sem as chaves de credencial declaradas
 
+- [README.md do repositório](tickets/021-readme.md) — 148 linhas, e **todo comando publicado
+  nele foi executado contra o Compose de verdade** antes de entrar no arquivo. Dois achados só
+  apareceram por isso: `curl -F "arquivo=@video.mp4"` responde **`415`** (o `curl` manda
+  `application/octet-stream`, a borda exige `video/*`) — o primeiro comando que o avaliador
+  copiasse falharia parecendo bug; e a premissa do próprio ticket estava errada — **não existe
+  procedimento de tornar os packages do GHCR públicos**, os três já são anonimamente puxáveis
+  (verificado por manifest anônimo, `200` nos três, `amd64`+`arm64`), exatamente como o ticket 013
+  já havia corrigido do 001. A seção foi cortada em vez de escrita. O README **não repete**
+  contrato, ADR nem regra de camada — aponta, na mesma disciplina do `AGENTS.md`; documenta o
+  assíncrono como fluxo (`202` → polling → `409` antes da hora), que é o que confunde quem chega
+  esperando resposta síncrona; e dá receita reproduzível para o caminho de falha, sem a qual a
+  notificação de erro que o enunciado pede não seria demonstrável
+
 ## Ainda não especificado
 
 - **Documentação de arquitetura** — formato (C4? diagrama de sequência?), onde vive, o que

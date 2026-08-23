@@ -295,6 +295,22 @@ verificadas por teste, não são sugestão). Projeto original em
   ponteiro que justifica o script existir: **`./mvnw verify` não prova que os três serviços
   conversam**
 
+- [Documentacao de arquitetura](tickets/023-documentacao-arquitetura.md) —
+  [`docs/arquitetura.md`](../arquitetura.md), 341 linhas e cinco diagramas Mermaid, escrito
+  **para a banca e não para o próximo dev**: os documentos existentes são todos locais e
+  pressupõem contexto, e nenhum responde *por que três serviços*, *como escala* ou *como isto
+  atende o enunciado*. O C3 de **um** serviço é o que justifica o C4 inteiro — Clean
+  Architecture é invisível em C2, onde cada serviço é caixa opaca, e é justamente a resposta ao
+  "sem nenhuma das boas práticas" com que o desafio abre. O ASCII do README **fica**: é a única
+  duplicação aceita. Achado de renderização: o diagrama de containers com `subgraph` compila e
+  não comunica — a separação espacial forçada cruza quase todas as arestas —, resolvido sem
+  subgraphs e com `classDef`, verificado renderizando de verdade com `mermaid-cli`. E três
+  afirmações minhas caíram na conferência contra o código: o `UPDATE` da unicidade casa o
+  **predecessor** (`estado = 'PROCESSANDO'`), não `estado <> 'FALHOU'`; a DLQ é
+  `extracao.extrair.dlq`; a chave é `schema-management.strategy`, não `database.generation`. A
+  contagem de testes do próprio mapa estava velha — o real, medido no CI verde, é **130
+  (96 sem Docker)**, não os 128 que a soma dos tickets dava
+
 ## Ainda não especificado
 
 <!-- vazia: a névoa que restava graduou nos tickets 023 e 024 quando o 022 fechou a última

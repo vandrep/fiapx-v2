@@ -151,6 +151,7 @@ O CI roda o mesmo `verify` num job só e publica as três imagens no GHCR a part
 
 | O que | Onde |
 |---|---|
+| Visão de conjunto: por que três serviços, como escala, o que foi recusado | [`docs/arquitetura.md`](docs/arquitetura.md) |
 | Regras de trabalho no repo, layout, branches | [`AGENTS.md`](AGENTS.md) |
 | Glossário do domínio | [`CONTEXT.md`](CONTEXT.md) |
 | Contrato HTTP do `videos` | [`docs/contratos/http-videos.md`](docs/contratos/http-videos.md) |

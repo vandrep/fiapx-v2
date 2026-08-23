@@ -42,6 +42,20 @@ RabbitMQ e Keycloak estão saudáveis e o seed do MinIO terminou. Cerca de um mi
 docker compose ps           # todos devem ficar (healthy)
 ```
 
+### O caminho inteiro em um comando
+
+```bash
+./scripts/smoke.sh          # sobe o Compose se preciso e verifica tudo, ~1 min do zero
+```
+
+O script é a verificação ponta-a-ponta e o roteiro da demo na mesma peça: sobe a stack, pega
+um token, envia o vídeo de fixture, espera `CONCLUIDO`, baixa e valida o ZIP, força uma falha
+até o e-mail no MailHog e confere que o Vídeo de um usuário responde `404` para o outro. Cada
+passo é conferido — estado errado, status HTTP errado ou ZIP corrompido param o script no
+ponto exato. Precisa de `jq` e `unzip` além do Docker.
+
+A seção [Usar](#usar) é o mesmo percurso passo a passo, para quem quiser conduzir na mão.
+
 | Console | Endereço | Credenciais |
 |---|---|---|
 | **Swagger UI** (a demo) | http://localhost:8080/q/swagger-ui | `demo` / `demo` |

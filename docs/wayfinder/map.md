@@ -281,11 +281,24 @@ verificadas por teste, não são sugestão). Projeto original em
   esperando resposta síncrona; e dá receita reproduzível para o caminho de falha, sem a qual a
   notificação de erro que o enunciado pede não seria demonstrável
 
+- [Script de smoke ponta-a-ponta](tickets/022-script-smoke.md) — 9 passos, e a verificação e o
+  roteiro da demo na **mesma peça**: um smoke mudo verificaria igual, mas ninguém o projetaria
+  numa apresentação — e como este fluxo não vai para o CI, ele só prova algo se alguém rodar.
+  Verificado do zero absoluto (`down -v` antes) em **1m08s**. Três achados de execução:
+  `docker compose up --wait` **não serve** (o `minio-seed` é one-shot e sai com 0, o que o
+  `--wait` lê como serviço morto); contar e-mails no MailHog daria **falso verde**, porque a
+  caixa sobrevive entre rodadas — a asserção procura o `idVideo` no corpo, e precisa remover as
+  quebras leves de quoted-printable antes, senão o UUID vem partido ao meio pelos acentos do
+  ticket 014; e `set -euo pipefail` matava o script no `exit 7` do `curl` **antes** da linha
+  que diz o que era esperado. Não encontrou defeito nenhum, e não era para encontrar: o ticket
+  020 já percorrera o fluxo à mão — o que ele acrescenta é a repetição. `AGENTS.md` ganhou o
+  ponteiro que justifica o script existir: **`./mvnw verify` não prova que os três serviços
+  conversam**
+
 ## Ainda não especificado
 
-- **Documentação de arquitetura** — formato (C4? diagrama de sequência?), onde vive, o que
-  a banca precisa ver.
-- **Roteiro do vídeo de até 10 minutos** — o que mostrar, em que ordem, o que não mostrar.
+<!-- vazia: a névoa que restava graduou nos tickets 023 e 024 quando o 022 fechou a última
+     peça de construção — não há mais nada em escopo cuja pergunta ainda não caiba num ticket -->
 
 ## Fora de escopo
 

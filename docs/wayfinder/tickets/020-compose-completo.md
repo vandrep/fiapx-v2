@@ -117,4 +117,4 @@ publica mensagem real pela fila, nem todos os três serviços sobem juntos antes
 
 Fora do automatizado: não há teste de integração do Compose no CI (ticket 020 não altera a
 decisão do mapa de não rodar e2e no GitHub Actions). Os três achados acima não têm regressão
-automatizada — ver ticket 021 (script de smoke) para fechar essa lacuna.
+automatizada — ver ticket 022 (script de smoke) para fechar essa lacuna.

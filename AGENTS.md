@@ -117,7 +117,13 @@ importa. O failsafe só ganharia sentido para testar o artefato **empacotado**
 (`@QuarkusIntegrationTest`, imagem nativa), que está fora de escopo.
 
 O CI (`.github/workflows/ci.yml`) roda `./mvnw verify` a partir da raiz num job só, e
-publica as três imagens no GHCR quando o commit entra na `main`. `verify` em vez de `test`
+publica as três imagens no GHCR quando o commit entra na `main`.
+
+**O `verify` não prova que os três serviços conversam** — cada suíte testa um serviço
+isolado, com Dev Services próprios. O fluxo ponta-a-ponta contra o Compose de verdade é
+`scripts/smoke.sh`, e ele fica fora do CI de propósito. Rode-o quando mexer em contrato,
+mensageria, config de Compose ou imagem: é a única coisa no repo que reprova um serviço que
+passa nos próprios testes e mesmo assim não fala com o vizinho. `verify` em vez de `test`
 porque o CI precisa do `package` para construir as imagens no mesmo runner.
 
 ## Commits

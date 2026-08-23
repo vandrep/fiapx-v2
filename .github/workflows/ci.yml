@@ -4,7 +4,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `develop` entra aqui para o CI falar cedo: e branch de vida longa, acumula varios
+    # tickets antes do PR para `main`. Publicar imagem continua preso a `main` (`PUBLICA`).
+    branches: [main, develop]
   pull_request:
 
 concurrency:

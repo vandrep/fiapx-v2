@@ -1,0 +1,21 @@
+/*
+ * Branding do Swagger UI (o Quarkus serve META-INF/branding/smallrye-open-api-ui.css como
+ * folha extra da pagina do OpenAPI UI).
+ *
+ * Esconde do dialogo Authorize os campos que so tem uma resposta possivel nesta demo e que
+ * na pratica so geram erro: `client_id` (preenchido em runtime por
+ * quarkus.swagger-ui.oauth-client-id), `client_secret` (o client `fiapx-videos` e publico,
+ * nao tem segredo) e o seletor "Client credentials location" (o default `basic` funciona,
+ * e o Keycloak aceita as duas formas para client publico).
+ *
+ * E CSS, e nao configuracao, porque o Swagger UI sempre renderiza esses campos no fluxo
+ * password: nao ha opcao de initOAuth que os remova. O valor do `client_id` nao depende do
+ * campo visivel — ele vive no estado do componente, inicializado pelo initOAuth.
+ *
+ * O seletor casa a Row (`div.wrapper`) que envolve cada label, senao sobraria a linha vazia.
+ */
+.swagger-ui .wrapper:has(> label[for^="client_id_"]),
+.swagger-ui .wrapper:has(> label[for^="client_secret_"]),
+.swagger-ui .wrapper:has(> label[for="password_type"]) {
+    display: none;
+}

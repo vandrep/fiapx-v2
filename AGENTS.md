@@ -131,3 +131,17 @@ docs: resolve ticket 012, agents md da raiz
 ```
 
 Commits de wayfinding citam o ticket no assunto, como acima.
+
+## Branches
+
+O trabalho vai todo na **`develop`** — branch única, de vida longa. **Não crie branch por
+ticket.** Commit direto na `develop`; PR `develop` → `main` quando a fatia estiver pronta.
+
+A `main` é protegida por ruleset: push direto é rejeitado, PR é obrigatório (zero
+aprovações) e o status check `build` precisa passar. Por isso `develop` também dispara o
+CI no push — sem isso o primeiro sinal de quebra só chegaria ao abrir o PR, com vários
+tickets acumulados. Imagem no GHCR só é publicada a partir da `main`.
+
+Branch por ticket dava de graça um ponto fixo para o `/code-review` (a merge-base com a
+`main`). Numa `develop` de vida longa esse ponto some: anote o SHA com `git rev-parse HEAD`
+**antes** de começar o ticket e revise com `/code-review <sha>`.

@@ -15,6 +15,7 @@ O resto do contexto está atrás de ponteiros, cada um com o seu gatilho:
 
 | Quando você for | Leia |
 |---|---|
+| precisar da visão de conjunto do sistema, ou explicá-lo a alguém de fora | [`docs/arquitetura.md`](docs/arquitetura.md) — aponta, não repete |
 | usar qualquer termo do domínio em código, endpoint ou mensagem | [`CONTEXT.md`](CONTEXT.md) — glossário canônico |
 | mexer em endpoint, status HTTP ou corpo de resposta do `videos` | [`docs/contratos/http-videos.md`](docs/contratos/http-videos.md) |
 | publicar ou consumir mensagem, ou mexer em fila, exchange ou DLQ | [`docs/contratos/mensagens.md`](docs/contratos/mensagens.md) |

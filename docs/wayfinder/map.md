@@ -295,10 +295,46 @@ verificadas por teste, não são sugestão). Projeto original em
   ponteiro que justifica o script existir: **`./mvnw verify` não prova que os três serviços
   conversam**
 
+- [Documentacao de arquitetura](tickets/023-documentacao-arquitetura.md) —
+  [`docs/arquitetura.md`](../arquitetura.md), 341 linhas e cinco diagramas Mermaid, escrito
+  **para a banca e não para o próximo dev**: os documentos existentes são todos locais e
+  pressupõem contexto, e nenhum responde *por que três serviços*, *como escala* ou *como isto
+  atende o enunciado*. O C3 de **um** serviço é o que justifica o C4 inteiro — Clean
+  Architecture é invisível em C2, onde cada serviço é caixa opaca, e é justamente a resposta ao
+  "sem nenhuma das boas práticas" com que o desafio abre. O ASCII do README **fica**: é a única
+  duplicação aceita. Achado de renderização: o diagrama de containers com `subgraph` compila e
+  não comunica — a separação espacial forçada cruza quase todas as arestas —, resolvido sem
+  subgraphs e com `classDef`, verificado renderizando de verdade com `mermaid-cli`. E três
+  afirmações minhas caíram na conferência contra o código: o `UPDATE` da unicidade casa o
+  **predecessor** (`estado = 'PROCESSANDO'`), não `estado <> 'FALHOU'`; a DLQ é
+  `extracao.extrair.dlq`; a chave é `schema-management.strategy`, não `database.generation`. A
+  contagem de testes do próprio mapa estava velha — o real, medido no CI verde, é **130
+  (96 sem Docker)**, não os 128 que a soma dos tickets dava
+
+- [Roteiro do vídeo de até 10 minutos](tickets/024-roteiro-video.md) —
+  [`docs/roteiro-video.md`](../roteiro-video.md), narração **integral** que fecha em **9:19**
+  medidos. O formato veio do fluxo de produção: filmar, editar, dublar por cima desacopla a
+  narração do tempo de execução, então o vídeo é acelerável e o **áudio** é o único com teto —
+  logo a unidade de orçamento é a palavra, não o segundo, e quem dubla lê em vez de improvisar
+  sobre tópicos. Isso pagou na hora: a primeira versão media 9:42 e o corte saiu no editor de
+  texto, não numa regravação. Medindo tomada a tomada, o estouro não estava distribuído —
+  estava quase todo no diagrama de caminho de falha, que é justamente onde moram as duas
+  garantias que nenhuma demonstração mostra, então ela foi enxugada e **ganhou** tempo, tirado
+  das tomadas que só descrevem o que já está na tela. Ordem invertida em relação ao enunciado
+  (**funcionando antes de arquitetura**: quem vê o `202` entende por que os diagramas são
+  assim), e "Documentação" **não é bloco** — a documentação é o que está na tela durante a
+  arquitetura. Dentro da demo, **acelerar com marca `4×`, nunca cortar**: acelerar preserva a
+  continuidade, e um corte dentro de uma verificação levanta a dúvida que a demonstração existe
+  para fechar. O fechamento **admite duas limitações em voz alta**, que já estavam no
+  `arquitetura.md`. Toda afirmação numérica foi conferida contra o código, e a tomada da árvore
+  de módulos filma `git ls-files` porque o `init-project.sh` deixou `com/example/` vazios que o
+  git não rastreia mas um `tree` local mostraria
+
 ## Ainda não especificado
 
-<!-- vazia: a névoa que restava graduou nos tickets 023 e 024 quando o 022 fechou a última
-     peça de construção — não há mais nada em escopo cuja pergunta ainda não caiba num ticket -->
+<!-- vazia, e agora definitivamente: o 024 era o último ticket aberto do mapa. Não há névoa
+     em escopo, não há ticket aberto, e o caminho até o destino está percorrido — o que resta
+     é gravar o vídeo, que é execução do roteiro, não decisão. -->
 
 ## Fora de escopo
 

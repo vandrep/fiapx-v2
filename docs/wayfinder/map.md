@@ -332,9 +332,26 @@ verificadas por teste, não são sugestão). Projeto original em
 
 ## Ainda não especificado
 
-<!-- vazia, e agora definitivamente: o 024 era o último ticket aberto do mapa. Não há névoa
-     em escopo, não há ticket aberto, e o caminho até o destino está percorrido — o que resta
-     é gravar o vídeo, que é execução do roteiro, não decisão. -->
+<!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue, e o que
+     restava era gravar o vídeo. A fronteira reabriu por escolha, não por pendência — o próprio
+     `docs/arquitetura.md` § Limitações conhecidas declara que "a escalabilidade é argumentada,
+     não medida", e sobra prazo para converter essa frase em número. Os três tickets abaixo
+     existem para isso, e só o 025 está na fronteira. -->
+
+- [025 — Harness de carga e prova de conservação sob pico](tickets/025-carga-conservacao.md) —
+  constrói o instrumento (fixtures gerados por `ffmpeg`, injetor k6 em container, oráculo em
+  SQL + amostra pela API, overlay `docker-compose.carga.yml`) e julga a afirmação que o
+  enunciado cobra direto: *não perder uma requisição em pico*. Rajada com o fixture de controle
+  de 3 s, `docker kill` no `extracao` e no `videos` durante a corrida — este último é a primeira
+  vez que a varredura do ADR 0003 é exercitada. Critério fixado antes de rodar, e o item duro é
+  contar como perda toda resposta não-`202`
+- [026 — Linearidade horizontal do extracao](tickets/026-linearidade-horizontal.md) —
+  `bloqueado-por: 025`. Não constrói nada: reusa o harness e varre `N ∈ {1,2,4,6}` réplicas com
+  `cpus=2`, backlog fixo e fixture de ~2 min. O teto do laboratório (20 cores para toda a stack)
+  é declarado como achado, não escondido
+- [027 — Melhorias justificadas pela medição](tickets/027-melhorias-medidas.md) —
+  `bloqueado-por: 025, 026`. Nasce com o corpo vazio de propósito: nenhuma melhoria entra sem um
+  número que a condene. Fechar sem mudança de código é resultado aceitável
 
 ## Fora de escopo
 

@@ -3,7 +3,7 @@
 - id: 025
 - label: wayfinder:task
 - status: aberto
-- assignee:
+- assignee: vandrep
 - bloqueado-por:
 
 ## Question

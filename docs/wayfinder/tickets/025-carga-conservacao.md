@@ -120,12 +120,12 @@ isso de "reentrega fora de ordem, que é caminho esperado" — e é, para uma re
 `Iniciada` chega, o Vídeo vai a `PROCESSANDO` e fica lá para sempre. Nem a varredura do
 ADR 0003 o alcança: ela procura marcas de publicação nulas, não Vídeos parados.
 
-A prova não é o raciocínio, é o bucket: dos **45** Vídeos presos ao fim das rodadas, **45 têm
-o `.zip` gravado no MinIO**. Cem por cento. A Extração sempre terminou, o Pacote sempre
-existiu, e o usuário que faz polling nunca vai saber — para ele, `GET /videos/{id}` responde
-`PROCESSANDO` até o fim dos tempos e o Pacote expira em sete dias sem nunca ter sido oferecido.
-É exatamente a requisição perdida que o enunciado proíbe, com o agravante de o trabalho ter
-sido feito e jogado fora.
+A prova não é o raciocínio, é o bucket: os censos das três rodadas somam **46** Vídeos presos,
+e os **45** que a conferência contra o MinIO cobriu têm todos **o `.zip` gravado lá**. A
+Extração sempre terminou, o Pacote sempre existiu, e o usuário que faz polling nunca vai
+saber — para ele, `GET /videos/{id}` responde `PROCESSANDO` até o fim dos tempos e o Pacote
+expira em sete dias sem nunca ter sido oferecido. É exatamente a requisição perdida que o
+enunciado proíbe, com o agravante de o trabalho ter sido feito e jogado fora.
 
 **O segundo achado é que a marca do ADR 0003 mente.** Três Vídeos ficaram em `RECEBIDO` com
 `comando_publicado_em` **preenchido** — publicado 200 ms depois do `INSERT`, e o comando nunca
@@ -161,9 +161,25 @@ harness, e vale mais para o 026 do que para este.
 **Números.** Rodada limpa (2×): 400 aceitos, 400 terminais em **98 s** com 4 réplicas, latência
 do `202` med 3,3 s / p95 5,5 s / max 6,6 s sob 400 conexões simultâneas — a fila absorve, a
 borda enfileira e ninguém cai. `mata-extracao` (2×): 399/400 e 389/400. `mata-videos`: dos 39
-aceitos antes da queda, **2** chegaram a terminal em 450 s. O limite de drenagem foi apertado
-de 3 s para **1 s por Vídeo por réplica** depois da calibração, porque um limite folgado
-transforma o critério 2 em "eventualmente termina", que nada reprova.
+aceitos antes da queda, **2** chegaram a terminal em 450 s — e os outros 361 envios da rajada
+nem chegaram a ser aceitos (239 timeouts de conexão, 53 EOF, 46 resets, 22 recusas), com o
+critério 1 dispensado ali de propósito e o número registrado assim mesmo. O limite de
+drenagem foi apertado de 3 s para **1 s por Vídeo por réplica** depois da calibração, porque
+um limite folgado transforma o critério 2 em "eventualmente termina", que nada reprova.
+
+**O que este ticket não entregou.** A terceira injeção — restart do RabbitMQ com fila cheia —
+estava marcada como *"só se sobrar tempo"* e **não rodou**; `conservacao.sh` não tem esse modo.
+A durabilidade de fila quorum segue sendo garantia do broker, afirmada e não exercitada aqui.
+Mais sério: a rodada `mata-videos` existia para **provar que a varredura de reconciliação
+republica**, e não provou — o que ela mostrou foi o defeito 2, e nenhum artefato da rodada
+registra uma única republicação. Enquanto os defeitos 1 e 2 existirem, o cenário que a
+exercitaria está envenenado por eles; a demonstração cai do outro lado da correção, e o
+[027](027-melhorias-medidas.md) a cobra como condição de aceite. E a latência do `202` foi
+medida sem orçamento declarado em lugar nenhum: a segunda rodada `mata-extracao`, mesma
+configuração da primeira, deu med **9,8 s** / p95 12,4 s / max 14,8 s contra med 3,3 s da
+limpa. A degradação não foi explicada, e a suspeita é o estado acumulado — nenhuma rodada zera
+o banco antes de começar, decisão de método que o [026](026-linearidade-horizontal.md) precisa
+tomar antes de comparar vazão entre contagens de réplica.
 
 **Nada foi corrigido aqui, por desenho.** Os três defeitos vão para o
 [027](027-melhorias-medidas.md) com o número ao lado. O que este ticket entrega é o instrumento,

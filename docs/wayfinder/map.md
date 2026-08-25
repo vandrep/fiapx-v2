@@ -330,28 +330,43 @@ verificadas por teste, não são sugestão). Projeto original em
   de módulos filma `git ls-files` porque o `init-project.sh` deixou `com/example/` vazios que o
   git não rastreia mas um `tree` local mostraria
 
+- [Harness de carga e prova de conservação sob pico](tickets/025-carga-conservacao.md) —
+  harness em `scripts/carga/` (fixtures por `ffmpeg`, injetor k6 em container, oráculo em SQL +
+  amostra pela API) e overlay `docker-compose.carga.yml`. O veredito é o que o ticket existia
+  para arriscar: **a afirmação não se sustenta**. A borda conserva — 400 envios simultâneos de
+  1 MB deram 400 `202`, zero recusas, em toda rodada com a borda viva —, mas o **evento terminal
+  é descartado em silêncio quando chega fora de ordem**: `Iniciada` e `Concluida` vêm em filas
+  independentes, e a `Concluida` que chega primeiro não casa o predecessor, altera zero linhas e
+  recebe ack. Vídeo preso em `PROCESSANDO` para sempre — e a prova não é raciocínio, é o bucket:
+  **45 de 45 presos têm o `.zip` gravado**. 11/400 sob pico com réplica reiniciada, 34/39 depois
+  de o `videos` cair. Mais dois achados: a marca do ADR 0003 **mente** (`publish-confirms` é
+  `false` por default, então "publiquei" completa antes do broker confirmar — 3 Vídeos em
+  `RECEBIDO` com marca preenchida e comando nenhum na fila, e a varredura filtra por marca nula,
+  logo nunca os reconsidera); e a varredura de órfãos no boot do `extracao` **apaga o scratch das
+  réplicas vivas**, porque o volume nomeado é compartilhado e o Javadoc assume exclusividade — um
+  h264 válido chegou ao usuário como `ARQUIVO_INVALIDO`. O critério 5 do harness ("zero FALHOU
+  com fixture válido") nasceu disso: os quatro originais deixavam passar terminal-porém-errado.
+  Nada corrigido aqui, por desenho — os três foram para o 027 com o número ao lado
+
 ## Ainda não especificado
 
-<!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue, e o que
-     restava era gravar o vídeo. A fronteira reabriu por escolha, não por pendência — o próprio
-     `docs/arquitetura.md` § Limitações conhecidas declara que "a escalabilidade é argumentada,
-     não medida", e sobra prazo para converter essa frase em número. Os três tickets abaixo
-     existem para isso, e só o 025 está na fronteira. -->
+<!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
+     fronteira reabriu por escolha — `docs/arquitetura.md` § Limitações conhecidas declarava
+     que "a escalabilidade é argumentada, não medida", e sobrava prazo para converter a frase
+     em número. O 025 converteu, e o número reprovou: hoje há três defeitos de correção
+     medidos, e o 027 deixou de ser hipotético. -->
 
-- [025 — Harness de carga e prova de conservação sob pico](tickets/025-carga-conservacao.md) —
-  constrói o instrumento (fixtures gerados por `ffmpeg`, injetor k6 em container, oráculo em
-  SQL + amostra pela API, overlay `docker-compose.carga.yml`) e julga a afirmação que o
-  enunciado cobra direto: *não perder uma requisição em pico*. Rajada com o fixture de controle
-  de 3 s, `docker kill` no `extracao` e no `videos` durante a corrida — este último é a primeira
-  vez que a varredura do ADR 0003 é exercitada. Critério fixado antes de rodar, e o item duro é
-  contar como perda toda resposta não-`202`
-- [026 — Linearidade horizontal do extracao](tickets/026-linearidade-horizontal.md) —
-  `bloqueado-por: 025`. Não constrói nada: reusa o harness e varre `N ∈ {1,2,4,6}` réplicas com
-  `cpus=2`, backlog fixo e fixture de ~2 min. O teto do laboratório (20 cores para toda a stack)
-  é declarado como achado, não escondido
+- [026 — Linearidade horizontal do extracao](tickets/026-linearidade-horizontal.md) — **na
+  fronteira** desde que o 025 fechou. Não constrói nada: reusa o harness e varre
+  `N ∈ {1,2,4,6}` réplicas com `cpus=2`, backlog fixo e fixture de ~2 min. O teto do
+  laboratório (20 cores para toda a stack) é declarado como achado, não escondido. Nasce
+  sabendo que o defeito 3 do 025 (scratch compartilhado entre réplicas) vai aparecer ali —
+  o critério 5 do harness existe para que ele apareça nomeado
 - [027 — Melhorias justificadas pela medição](tickets/027-melhorias-medidas.md) —
-  `bloqueado-por: 025, 026`. Nasce com o corpo vazio de propósito: nenhuma melhoria entra sem um
-  número que a condene. Fechar sem mudança de código é resultado aceitável
+  `bloqueado-por: 026`. Nasceu com o corpo vazio de propósito e o 025 o preencheu com três
+  condenados, todos de **correção**, nenhum de vazão: evento terminal perdido fora de ordem,
+  marca de publicação que mente, varredura de boot que sabota as réplicas vivas. Os dois
+  primeiros são candidatos a ADR
 
 ## Fora de escopo
 

@@ -1,0 +1,22 @@
+# Overlay de experimento (ticket 025). Nao substitui o `docker-compose.yml` — soma-se a ele:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.carga.yml up -d
+#
+# O `docker-compose.yml` principal **e a demo da banca**, e por isso nao recebe `replicas:`
+# nem limite de CPU: sao parametros que existem so para o experimento, e deixa-los la faria a
+# demo carregar o instrumento para sempre. Overlay e a construcao que o proprio Compose
+# oferece para esta separacao.
+#
+# As duas variaveis abaixo sao o parametro que o ticket 026 varre. O 025 fixa
+# FIAPX_EXTRACAO_REPLICAS=4 para a drenagem da rajada nao levar meia hora; o 026 percorre
+# N em {1,2,4,6} com o mesmo teto de CPU por replica.
+services:
+  extracao:
+    deploy:
+      replicas: ${FIAPX_EXTRACAO_REPLICAS:-4}
+      resources:
+        limits:
+          # Teto por replica, e nao por servico: sem ele, "dobrar replicas" num host de 20
+          # cores nao dobra nada — mede-se o host, nao o desenho. `cpus` como string porque
+          # o Compose exige (aceita fracionario).
+          cpus: "${FIAPX_EXTRACAO_CPUS:-2}"

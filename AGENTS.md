@@ -127,6 +127,13 @@ mensageria, config de Compose ou imagem: é a única coisa no repo que reprova u
 passa nos próprios testes e mesmo assim não fala com o vizinho. `verify` em vez de `test`
 porque o CI precisa do `package` para construir as imagens no mesmo runner.
 
+`scripts/carga/conservacao.sh` é o outro degrau: rajada de centenas de envios contra o Compose
+com falha injetada (`docker kill` no `extracao` ou no `videos`), julgada por critérios fixados
+antes de rodar. Rode-o quando mexer em máquina de estados, consumo de evento ou reconciliação —
+ele reprova onde o `smoke.sh` passa, porque o `smoke.sh` manda um vídeo de cada vez. Hoje ele
+**reprova de propósito**: três defeitos medidos e ainda abertos, em
+[`docs/wayfinder/tickets/027-melhorias-medidas.md`](docs/wayfinder/tickets/027-melhorias-medidas.md).
+
 ## Commits
 
 Conventional Commits em português, sem acentos na linha de assunto:

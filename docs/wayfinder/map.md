@@ -44,6 +44,7 @@ test-first por construção); `writing-for-agents` ao editar `AGENTS.md`.
 | Notificação | SMTP com MailHog no Compose |
 | Health checks | Sim (`quarkus-smallrye-health`), para `depends_on: service_healthy` |
 | CI/CD | GitHub Actions: `verify` + build das imagens + push para o GHCR, tag do commit **e `latest`**, `amd64`+`arm64` (ticket 013). `main` protegida por ruleset: PR obrigatório, zero aprovações |
+| Escalabilidade | Medida ([026](tickets/026-linearidade-horizontal.md)): `extracao` linear até **6 réplicas** nesta máquina (eficiência 0,88, critério 0,80), 15,6 Vídeo/min; `ffmpeg` é 98,2% do tempo de serviço. Borda ainda não medida com réplicas ([028](tickets/028-escala-da-borda.md)) |
 | Testes | Por serviço e isolado (unitário do `core`, Cucumber pela borda HTTP, `ArchitectureConstraintsTest`); fluxo ponta-a-ponta por script de smoke versionado, não automatizado no CI |
 
 **Base de código**: template em `/home/vandrep/projetos/oficina-soat/quarkus-clean-architecture-template`
@@ -348,40 +349,55 @@ verificadas por teste, não são sugestão). Projeto original em
   com fixture válido") nasceu disso: os quatro originais deixavam passar terminal-porém-errado.
   Nada corrigido aqui, por desenho — os três foram para o 027 com o número ao lado
 
+- [Linearidade horizontal do extracao](tickets/026-linearidade-horizontal.md) — **a afirmação se
+  sustenta**: eficiência de escala 0,99 / 0,90 / 0,88 em 2 / 4 / 6 réplicas, nunca abaixo do
+  critério de 0,80 fixado antes de rodar; de 2,96 para **15,62 Vídeo/min**. Mas o veredito é a
+  parte menor. O pré-registro pagou três vezes, e uma delas **mudou o resultado**: pelo cronômetro
+  de parede a eficiência seria 0,95 / 0,80 / **0,71** e a afirmação reprovaria em `N=6` — por
+  artefato do instrumento, porque a rampa de injeção entra no denominador penalizando quem drena
+  rápido. Descontar isso depois de ver o número seria indistinguível de fabricar o resultado. A
+  partição condenou a conta que a motivou: **`ffmpeg` é 98,2%** do tempo de serviço, e os ~3 s que
+  o 006 previa eram de máquina **sem teto de CPU** (3,04 s no host contra 20,84 s dentro de uma
+  cota de 2). E o controle sujo fechou uma das três coisas que o 025 não mostrou: a degradação
+  suspeita de ser estado acumulado **não existe** (0,0499 contra 0,0498, sobre três corridas de
+  lixo). O achado que mais custou: **duas das doze corridas foram corrompidas pelo host
+  suspendendo no meio**, modo de falha que não perde, não falha e não reinicia nada — só estica o
+  denominador —, e que passou nos cinco portões. `n1-r2` marcou metade da vazão e, tivesse entrado
+  na mediana, a curva inteira apareceria com eficiência **acima de 1,0**. Daí o sexto portão,
+  continuidade da série de telemetria. Dois erros meus de instrumento
+  (locale do `awk`, e `docker stats` com leituras inutilizáveis) empurraram a ocupação do host
+  para o `/proc/stat`: **77% dos 20 núcleos em `N=6`** — não saturou, mas a folga acabaria em
+  `N=8`. Números em
+  [`docs/pesquisa/carga-escalabilidade.md`](../pesquisa/carga-escalabilidade.md); o primeiro
+  candidato de **vazão** do 027 (`-threads 2` recupera 32%) saiu daqui
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
      fronteira reabriu por escolha — `docs/arquitetura.md` § Limitações conhecidas declarava
      que "a escalabilidade é argumentada, não medida", e sobrava prazo para converter a frase
-     em número. O 025 converteu, e o número reprovou: hoje há três defeitos de correção
-     medidos, e o 027 deixou de ser hipotético. -->
+     em número. O 025 converteu a metade da conservação, e o número reprovou; o 026 converteu a
+     metade da linearidade, e o número confirmou. Restam quatro defeitos medidos — três de
+     correção, um de vazão — e o 027, que deixou de ser hipotético e é agora a única coisa na
+     fronteira. -->
 
-- [026 — Linearidade horizontal do extracao](tickets/026-linearidade-horizontal.md) — **na
-  fronteira** desde que o 025 fechou, e agora com **método pré-registrado**: o enunciado foi
-  interrogado antes de rodar e a seção *Método, fixado antes de rodar* desvia dele em sete
-  pontos, cada um com o motivo. Os que mudam o resultado: a calibração mira em `N=6` (mirar em
-  `N=1` deixaria o ponto decisivo com ~40 s de regime); vazão é a série de `finalizado_em` na
-  janela pós-injeção, porque a rampa de 3,9 GB penaliza `N=6` e enviesa a curva contra a
-  linearidade julgada; `down -v` por ponto, decisão que o 025 delegou; dois controles finais em
-  `N=1`, um limpo e um **sujo**, e a diferença entre eles mede a degradação que o 025 suspeitou
-  e não explicou. A partição do tempo de serviço entrou porque a conta do 006 sugere **~3 s de
-  `ffmpeg` contra ~63 MB de I/O** por Vídeo — se o `ffmpeg` for minoria, a curva mede o MinIO
-  singleton, não *competing consumers*. O defeito 3 do 025 é contornado por protocolo (nada
-  boota com trabalho em voo, corrida aborta em restart), não corrigido. E o corte errou por uma
-  peça: entra um `escalabilidade.sh`, porque `conservacao.sh` não varre — `oraculo.sh`,
-  `injetor.js` e `gera-fixtures.sh` são reusados sem um toque
 - [028 — Escala da borda](tickets/028-escala-da-borda.md) — `bloqueado-por: 027`. Saiu do 026
   por corte: escalar o `videos` é outro objeto (HTTP, não fila) e outro critério (recusa e
   latência, não vazão). Julga o **"Nunca medido"** da célula do `videos` na tabela § *O que
   escala, e como*, contra os 361 recusados de 400 que o 025 mediu ao derrubar a réplica única.
   Nasce bloqueado porque o modo `mata-videos` hoje mede os defeitos 1 e 2 do 025, não a borda —
   a pergunta que importa (matar uma réplica de N deveria custar zero requisição) só é medível
-  depois da correção. Precisa de construção: proxy no overlay de carga
-- [027 — Melhorias justificadas pela medição](tickets/027-melhorias-medidas.md) —
-  `bloqueado-por: 026`. Nasceu com o corpo vazio de propósito e o 025 o preencheu com três
-  condenados, todos de **correção**, nenhum de vazão: evento terminal perdido fora de ordem,
-  marca de publicação que mente, varredura de boot que sabota as réplicas vivas. Os dois
-  primeiros são candidatos a ADR
+  depois da correção. Precisa de construção: proxy no overlay de carga. O 026 já lhe entrega um
+  número: a réplica única **não é barata sob rajada** — 16 uploads simultâneos de 41 MB levaram o
+  `videos` a ~12 núcleos de pico, o que a média de 91% durante a drenagem esconde inteiramente
+- [027 — Melhorias justificadas pela medição](tickets/027-melhorias-medidas.md) — **na fronteira**
+  desde que o 026 fechou, e é o único ticket takeable. Nasceu com o corpo vazio de propósito; o
+  025 o preencheu com três condenados de **correção** — evento terminal perdido fora de ordem,
+  marca de publicação que mente, varredura de boot que sabota as réplicas vivas — e o 026
+  acrescentou o primeiro de **vazão**: o `ffmpeg` dimensiona 20 threads por `nproc` em vez da cota
+  do cgroup, e `-threads 2` recupera 32%. Os dois primeiros são candidatos a ADR; o quarto
+  provavelmente não é, mas é decisão e não digitação — o número certo de threads depende da cota,
+  que é config de implantação e não de código
 
 ## Fora de escopo
 

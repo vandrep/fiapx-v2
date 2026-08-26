@@ -2,8 +2,8 @@
 
 - id: 026
 - label: wayfinder:task
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: vandrep (sessao de 2026-08-26)
 - bloqueado-por: 025
 
 ## Question
@@ -236,3 +236,92 @@ No `docs/arquitetura.md`: subseção sobre linearidade dentro de § *O que a med
 célula *"dobrar réplicas dobra a vazão"* da tabela § *O que escala, e como* reescrita com o
 intervalo medido, e a *Limitação conhecida* trocada de "continua argumentada, não medida" para
 "medida até N=X nesta máquina, e além disso não sei" — que é uma limitação melhor.
+
+
+---
+
+## Resolução
+
+**A afirmação se sustenta: eficiência de escala 0,99 / 0,90 / 0,88 em `N` = 2 / 4 / 6, nunca
+abaixo do critério de 0,80 fixado antes de rodar.** De 2,96 para **15,62 Vídeo/min**. Números,
+brutos e curva em [`docs/pesquisa/carga-escalabilidade.md`](../../pesquisa/carga-escalabilidade.md).
+
+Diferente do [025](025-carga-conservacao.md), este ticket **confirma** o que julgava. O que ele
+acrescenta não é o veredito — é o que o método pré-registrado impediu de dar errado, e três
+achados que a especificação não tinha como prever.
+
+### O pré-registro pagou três vezes, e uma delas mudou o veredito
+
+- **A janela pós-injeção (item 2) é a decisão de maior efeito no resultado.** Pelo cronômetro de
+  parede, a eficiência é 0,95 / 0,80 / **0,71** — a afirmação **reprovaria** em `N=6`, e
+  reprovaria por artefato do instrumento: em `N=6` a drenagem dura 145 s dos quais 21 s são
+  injeção. O item 2 previu e descontou esse viés antes de qualquer número existir. Sem o carimbo
+  anterior, descontá-lo depois seria indistinguível de fabricar o resultado desejado.
+- **A partição do tempo de serviço (item 3) era a pergunta certa, e a conta que a motivou estava
+  errada por 7×.** Media-se `ffmpeg` para saber se a curva mediria *competing consumers* ou um
+  MinIO singleton. Resultado: **`ffmpeg` é 98,2%** do tempo de serviço — download, `ffprobe`,
+  empacotamento e upload somam 1,8%. O gatilho do fixture longo não dispara. A conta do
+  [006](006-ffmpeg-extracao.md) que previa ~3 s não estava errada: ela era de máquina **sem teto
+  de CPU** (3,04 s medidos no host, contra 20,84 s dentro de uma cota de 2 CPUs).
+- **O controle sujo (item 6) respondeu "não" a uma pergunta que estava aberta desde o 025.** A
+  degradação suspeita de ser estado acumulado **não existe**: 0,0499 contra 0,0498 Vídeo/s, sobre
+  três corridas de lixo. Era o controle mais fácil de cortar do desenho e é o que fechou uma das
+  três coisas que o 025 não mostrou.
+
+### O sexto portão: os cinco não pegavam a máquina dormindo
+
+**Duas das doze corridas foram corrompidas pelo host suspender no meio** — 708 s numa, 2695 s
+noutra. O modo de falha é perverso porque não quebra nada: nenhum Vídeo se perde, nenhum falha,
+nenhum container reinicia. O relógio anda e o denominador estica. `n1-r2` marcou metade da vazão
+dos outros `N=1` e **passou nos cinco portões**; tivesse entrado na mediana, a base de `N=1` cairia
+e a curva inteira apareceria com eficiência **acima de 1,0** — o gráfico mais bonito e mais falso
+possível.
+
+A prova de que foi o host: 20,7 s por Vídeo antes do buraco e 21,5 s depois, sem degradação; e o
+buraco aparece igual na amostragem de `docker stats` (que roda fora dos containers) e no
+`journalctl`, que não registra nada por 45 min e volta com erros de rede. Daí o portão novo —
+**continuidade da série de telemetria**, qualquer intervalo acima de 30 s entre amostras de 5 s é
+ausência do host — que separa exatamente as duas: as outras dez corridas têm intervalo máximo de
+8 s, uniformemente. Ambas descartadas e recorridas uma vez, como o protocolo manda, e publicadas
+marcadas como inválidas.
+
+Isto também é a explicação candidata para a variância de 3× que o 025 viu e atribuiu a estado
+acumulado: o 025 não tinha telemetria de host, então não podia distinguir *"o sistema ficou lento"*
+de *"a máquina não estava lá"*.
+
+### Achado de vazão para o 027, o primeiro que não é de correção
+
+`nproc` dentro do container devolve **20**, então o `ffmpeg` default abre 20 threads que a cota de
+2 CPUs estrangula em bloco. `-threads 2` recupera **32%** (20,84 s → 14,14 s) e bate quase exato
+com 2 núcleos dedicados via `taskset` (14,02 s) — a perda inteira era sobre-assinatura contra a
+cota. É também a hipótese mais provável para os 12% de perda em `N=6`, onde há ~120 threads de
+`ffmpeg` disputando 20 núcleos sob seis cotas independentes. O 025 só produziu condenados de
+correção; este é o primeiro de vazão.
+
+### Dois erros meus, ambos de instrumento e ambos pegos por conferência
+
+- **Locale.** O `awk` sob `pt_BR` lê `1787774374.011` cortando no ponto decimal. Toda subtração de
+  instante virava segundo inteiro, e a primeira partição saiu com granularidade de 1 s — download,
+  empacotamento e upload apareciam como `0,00s`, indistinguíveis de zero. `export LC_ALL=C`.
+- **`docker stats` não é confiável do jeito que eu usei.** A **primeira** amostra de cada container
+  reporta o acumulado desde o boot (1547% para o Keycloak), o que numa corrida curta domina a
+  média. E a leitura do container do **RabbitMQ** oscila entre 0,3% e 894% em amostras de 2 s sem
+  correlação com trabalho — não é publicável. Por isso a ocupação do host passou a vir do
+  `/proc/stat`, que não depende de container nenhum: **77% dos 20 núcleos em `N=6`**, medido numa
+  corrida suplementar. É o que permite dizer que o host não saturou — e que a folga acabaria em
+  `N=8`, que não foi medido.
+
+### O corte 025/026 errou por uma peça, como o enunciado previa
+
+Entrou `scripts/carga/escalabilidade.sh` (calibração, varredura, portões, telemetria, resumo);
+`oraculo.sh`, `injetor.js`, `gera-fixtures.sh` e `docker-compose.carga.yml` foram reusados **sem
+um toque**, exatamente como o corte prometia. *"Não constrói nada"* era otimismo: um experimento
+com critério e denominador próprios pede orquestrador próprio.
+
+### O que fica em aberto
+
+O joelho está entre `N=2` e `N=4` e não há ponto `N=3` para localizá-lo — o gatilho condicional
+não disparou porque a eficiência não quebrou 0,80, e acrescentar o ponto depois de ver o número
+seria exatamente o que o pré-registro existe para impedir. `N=8` não foi medido. A hipótese das
+threads não foi testada na varredura, só isoladamente. Lista completa na § *O que a medição não
+mostrou* do documento de pesquisa.

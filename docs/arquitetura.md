@@ -246,8 +246,8 @@ Os dois requisitos que não aparecem numa demonstração. Ambos têm mecanismo, 
 
 | Serviço | Escala | Por quê |
 |---|---|---|
-| `extracao` | réplicas, linearmente | sem estado, `max-outstanding-messages=1` — cada réplica pega **uma** extração por vez e só volta à fila quando termina. *Competing consumers* puro: dobrar réplicas dobra a vazão |
-| `videos` | réplicas | o estado está no Postgres, não em memória; a transição é `UPDATE` condicional, então duas réplicas processando a mesma mensagem chegam ao mesmo resultado. **Nunca medido**: o Compose sobe uma réplica só, e derrubá-la custou 361 envios recusados de 400 ([§ O que a medição mostrou](#o-que-a-medição-mostrou)) |
+| `extracao` | réplicas, **linear até 6 réplicas nesta máquina** | sem estado, `max-outstanding-messages=1` — cada réplica pega **uma** extração por vez e só volta à fila quando termina. *Competing consumers* puro. **Medido** ([ticket 026](wayfinder/tickets/026-linearidade-horizontal.md)): eficiência de escala 0,99 / 0,90 / 0,88 em 2 / 4 / 6 réplicas, de 2,96 para 15,6 Vídeo/min. Acima disso é desconhecido — os 20 núcleos do host já estavam a 77% |
+| `videos` | réplicas | o estado está no Postgres, não em memória; a transição é `UPDATE` condicional, então duas réplicas processando a mesma mensagem chegam ao mesmo resultado. **Nunca medido com réplicas**: o Compose sobe uma réplica só, e derrubá-la custou 361 envios recusados de 400 ([§ O que a medição mostrou](#o-que-a-medição-mostrou)). O que se sabe da réplica única é que ela **não é barata sob rajada**: 16 uploads simultâneos de 41 MB a levaram a ~12 núcleos de pico ([ticket 026](wayfinder/tickets/026-linearidade-horizontal.md)) |
 | `notificacao` | réplicas | idempotente por construção — a unicidade mora na transição de estado do `videos`, não aqui |
 
 O `prefetch=1` do `extracao` é a escolha central: extração de vídeo é limitada por CPU e
@@ -326,6 +326,35 @@ Três coisas a medição **não** mostrou, e que valem tanto quanto o que ela mo
   deu med 9,8 s / p95 12,4 s / max 14,8 s. A degradação entre rodadas não foi explicada, e é
   suspeita de ser efeito do estado acumulado: nenhuma rodada zera o banco antes de começar.
 
+### E o que a segunda medição mostrou: a linearidade se sustenta
+
+Uma segunda medição ([ticket 026](wayfinder/tickets/026-linearidade-horizontal.md), números em
+[`docs/pesquisa/carga-escalabilidade.md`](pesquisa/carga-escalabilidade.md)) varreu réplicas do
+`extracao` — `N` em 1, 2, 4 e 6, com teto de 2 CPUs cada, duas repetições por ponto, `down -v`
+entre pontos e ordem randomizada. Diferente do 025, esta **confirma** a afirmação da tabela:
+
+| Réplicas | Vazão | Eficiência de escala |
+|---:|---:|---:|
+| 1 | 2,96 Vídeo/min | 1,00 |
+| 2 | 5,87 Vídeo/min | 0,99 |
+| 4 | 10,67 Vídeo/min | 0,90 |
+| 6 | **15,62 Vídeo/min** | 0,88 |
+
+O critério — eficiência ≥ 0,80 — foi fixado antes de rodar e não é quebrado em nenhum ponto. A
+curva entorta entre 2 e 4 réplicas e depois quase para de piorar. O teto **não** é o desenho:
+cada réplica passa a não conseguir gastar a própria cota de CPU (de ~196% para ~170%) porque
+cada `ffmpeg` abre 20 threads contra uma cota de 2 — em 6 réplicas são ~120 threads disputando
+20 núcleos. Isoladamente, fixar `-threads 2` recupera **32%** do tempo de extração, e é
+candidato de vazão no [ticket 027](wayfinder/tickets/027-melhorias-medidas.md).
+
+A mesma medição fechou uma das três coisas que o 025 não mostrou: **a degradação suspeita de ser
+estado acumulado não existe.** Uma corrida sobre três corridas de lixo (96 Vídeos e 96 Pacotes no
+MinIO, 96 linhas na tabela) deu 0,0499 Vídeo/s contra 0,0498 da corrida limpa. A explicação mais
+provável para a variância de 3× que o 025 viu é outra, e o 026 a encontrou na própria pele: duas
+das doze corridas foram corrompidas pelo **host suspendendo** no meio da medição, o que estica o
+denominador sem perder, falhar ou reiniciar nada — nenhum dos cinco critérios de validade pegava
+isso, e o harness ganhou um sexto.
+
 Tudo isto está aqui, e não escondido, porque um documento de arquitetura que descreve o
 mecanismo e omite a medição que o reprovou é pior que um que não mede.
 
@@ -381,12 +410,18 @@ O que eu não defendo — apenas aceitei.
   não registrou uma única republicação. Escalar a borda por réplicas é afirmação de desenho,
   não medição.
 - **A latência do `202` não tem orçamento declarado.** Ela foi medida (med 3,3 s sob 400
-  conexões simultâneas de 1 MB) e variou até 9,8 s entre rodadas de mesma configuração, sem
-  explicação. Não há limiar contra o qual julgá-la.
-- **A linearidade horizontal continua argumentada, não medida.** O harness de carga existe
-  (`scripts/carga/`), mas a varredura de réplicas do `extracao` ainda não rodou
-  ([ticket 026](wayfinder/tickets/026-linearidade-horizontal.md)). E `--scale extracao=N` hoje
-  tem um defeito conhecido: as réplicas compartilham o volume de scratch.
+  conexões simultâneas de 1 MB) e variou até 9,8 s entre rodadas de mesma configuração. O
+  [ticket 026](wayfinder/tickets/026-linearidade-horizontal.md) descartou a hipótese de estado
+  acumulado, mas continua não havendo limiar contra o qual julgá-la.
+- **A linearidade horizontal foi medida até 6 réplicas, e além disso eu não sei.** Ela se
+  sustenta (eficiência 0,88 em 6 réplicas, acima do critério de 0,80 fixado antes de rodar), mas
+  em 6 réplicas o host já estava a 77% dos 20 núcleos: `N=8` é onde a folga acabaria, e não foi
+  medido. Nada aqui diz o que acontece em máquina de outro porte, com MinIO remoto, ou com
+  Vídeos de durações misturadas — todos os Vídeos de uma corrida eram o mesmo arquivo. Números em
+  [`docs/pesquisa/carga-escalabilidade.md`](pesquisa/carga-escalabilidade.md). E `--scale
+  extracao=N` continua com o defeito conhecido de as réplicas compartilharem o volume de scratch
+  ([ticket 027](wayfinder/tickets/027-melhorias-medidas.md)); a varredura o contornou por
+  protocolo, não o corrigiu.
 - **Não há observabilidade além de health check.** Sem métrica, sem tracing distribuído. Num
   sistema assíncrono com DLQ, a primeira coisa que eu acrescentaria com mais tempo seria
   visibilidade sobre profundidade de fila e taxa de dead-letter.

@@ -4,7 +4,7 @@
 - label: wayfinder:task
 - status: aberto
 - assignee:
-- bloqueado-por: 025, 026
+- bloqueado-por:
 
 ## Question
 
@@ -66,3 +66,40 @@ varredura republicando de fato; sem ela, o `docs/arquitetura.md` continua com a 
 O 1 e o 2 são candidatos a **ADR**: mexem em garantia declarada e as alternativas são reais
 (reordenar no consumidor, tolerar a chegada fora de ordem no `UPDATE`, ligar `publish-confirms`,
 ou estender a varredura para Vídeos parados). O 3 é local e provavelmente não paga ADR.
+
+
+## Condenados pelo 026
+
+O 026 **confirmou** a linearidade (eficiência 0,88 em 6 réplicas contra critério de 0,80), então
+não condenou o desenho. Condenou **um** ponto, e é o primeiro candidato de vazão deste ticket —
+todos os do 025 são de correção.
+
+4. **O `ffmpeg` abre 20 threads contra uma cota de 2 CPUs.** `nproc` dentro do container devolve
+   os 20 núcleos do host, não a cota do cgroup, então o `ffmpeg` default dimensiona o pool pelo
+   número errado e as 20 threads são estranguladas em bloco pelo CFS. Medido no mesmo fixture de
+   2 min: **20,84 s com o default, 14,14 s com `-threads 2` — 32%**, e o valor com `-threads 2`
+   bate quase exato com 2 núcleos dedicados via `taskset` (14,02 s), o que fecha o diagnóstico: a
+   perda inteira era sobre-assinatura contra a cota.
+
+   É também a hipótese mais provável para os 12% de perda de eficiência em `N=6`, onde há ~120
+   threads de `ffmpeg` disputando 20 núcleos sob seis cotas independentes — a CPU por réplica cai
+   de ~196% para ~170% conforme `N` cresce, isto é, cada réplica deixa de conseguir gastar a
+   própria cota. Essa parte **não foi testada na varredura**, só isoladamente.
+
+   O que torna isto não-trivial e provavelmente merecedor de discussão: o número de threads certo
+   **depende da cota**, que é config de implantação, não de código. Fixar `-threads 2` no adapter
+   acopla o serviço a um `cpus=2` que só existe no overlay de carga; o `docker-compose.yml` da
+   demo não põe teto nenhum, e ali o default de 20 threads é o **certo** (3,04 s medidos sem
+   teto). As alternativas reais são ler a cota do cgroup em runtime, expor um
+   `fiapx.extracao.threads` configurável, ou não mexer e documentar. Provavelmente **não** é ADR
+   — é reversível —, mas é decisão, não digitação.
+
+**Nota de método herdada do 026, que vale para as medições de "depois" deste ticket.** O harness
+ganhou um sexto portão de validade — continuidade da série de telemetria — porque duas das doze
+corridas do 026 foram corrompidas pelo *host suspendendo* no meio, o que estica o denominador sem
+falhar nenhum dos outros cinco critérios. Toda medição de antes/depois aqui roda sob
+`systemd-inhibit --what=sleep:idle`, ou repete o mesmo erro.
+
+O 3 ganha contexto novo: o 026 o **contornou por protocolo** (nada boota com trabalho em voo) e
+percorreu 12 corridas com até 6 réplicas sem incidência — o que confirma que é defeito de boot, e
+não de regime, mas não o corrige.

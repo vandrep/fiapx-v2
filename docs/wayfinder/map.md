@@ -330,11 +330,58 @@ verificadas por teste, não são sugestão). Projeto original em
   de módulos filma `git ls-files` porque o `init-project.sh` deixou `com/example/` vazios que o
   git não rastreia mas um `tree` local mostraria
 
+- [Harness de carga e prova de conservação sob pico](tickets/025-carga-conservacao.md) —
+  harness em `scripts/carga/` (fixtures por `ffmpeg`, injetor k6 em container, oráculo em SQL +
+  amostra pela API) e overlay `docker-compose.carga.yml`. O veredito é o que o ticket existia
+  para arriscar: **a afirmação não se sustenta**. A borda conserva — 400 envios simultâneos de
+  1 MB deram 400 `202`, zero recusas, em toda rodada com a borda viva —, mas o **evento terminal
+  é descartado em silêncio quando chega fora de ordem**: `Iniciada` e `Concluida` vêm em filas
+  independentes, e a `Concluida` que chega primeiro não casa o predecessor, altera zero linhas e
+  recebe ack. Vídeo preso em `PROCESSANDO` para sempre — e a prova não é raciocínio, é o bucket:
+  **45 de 45 presos têm o `.zip` gravado**. 11/400 sob pico com réplica reiniciada, 34/39 depois
+  de o `videos` cair. Mais dois achados: a marca do ADR 0003 **mente** (`publish-confirms` é
+  `false` por default, então "publiquei" completa antes do broker confirmar — 3 Vídeos em
+  `RECEBIDO` com marca preenchida e comando nenhum na fila, e a varredura filtra por marca nula,
+  logo nunca os reconsidera); e a varredura de órfãos no boot do `extracao` **apaga o scratch das
+  réplicas vivas**, porque o volume nomeado é compartilhado e o Javadoc assume exclusividade — um
+  h264 válido chegou ao usuário como `ARQUIVO_INVALIDO`. O critério 5 do harness ("zero FALHOU
+  com fixture válido") nasceu disso: os quatro originais deixavam passar terminal-porém-errado.
+  Nada corrigido aqui, por desenho — os três foram para o 027 com o número ao lado
+
 ## Ainda não especificado
 
-<!-- vazia, e agora definitivamente: o 024 era o último ticket aberto do mapa. Não há névoa
-     em escopo, não há ticket aberto, e o caminho até o destino está percorrido — o que resta
-     é gravar o vídeo, que é execução do roteiro, não decisão. -->
+<!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
+     fronteira reabriu por escolha — `docs/arquitetura.md` § Limitações conhecidas declarava
+     que "a escalabilidade é argumentada, não medida", e sobrava prazo para converter a frase
+     em número. O 025 converteu, e o número reprovou: hoje há três defeitos de correção
+     medidos, e o 027 deixou de ser hipotético. -->
+
+- [026 — Linearidade horizontal do extracao](tickets/026-linearidade-horizontal.md) — **na
+  fronteira** desde que o 025 fechou, e agora com **método pré-registrado**: o enunciado foi
+  interrogado antes de rodar e a seção *Método, fixado antes de rodar* desvia dele em sete
+  pontos, cada um com o motivo. Os que mudam o resultado: a calibração mira em `N=6` (mirar em
+  `N=1` deixaria o ponto decisivo com ~40 s de regime); vazão é a série de `finalizado_em` na
+  janela pós-injeção, porque a rampa de 3,9 GB penaliza `N=6` e enviesa a curva contra a
+  linearidade julgada; `down -v` por ponto, decisão que o 025 delegou; dois controles finais em
+  `N=1`, um limpo e um **sujo**, e a diferença entre eles mede a degradação que o 025 suspeitou
+  e não explicou. A partição do tempo de serviço entrou porque a conta do 006 sugere **~3 s de
+  `ffmpeg` contra ~63 MB de I/O** por Vídeo — se o `ffmpeg` for minoria, a curva mede o MinIO
+  singleton, não *competing consumers*. O defeito 3 do 025 é contornado por protocolo (nada
+  boota com trabalho em voo, corrida aborta em restart), não corrigido. E o corte errou por uma
+  peça: entra um `escalabilidade.sh`, porque `conservacao.sh` não varre — `oraculo.sh`,
+  `injetor.js` e `gera-fixtures.sh` são reusados sem um toque
+- [028 — Escala da borda](tickets/028-escala-da-borda.md) — `bloqueado-por: 027`. Saiu do 026
+  por corte: escalar o `videos` é outro objeto (HTTP, não fila) e outro critério (recusa e
+  latência, não vazão). Julga o **"Nunca medido"** da célula do `videos` na tabela § *O que
+  escala, e como*, contra os 361 recusados de 400 que o 025 mediu ao derrubar a réplica única.
+  Nasce bloqueado porque o modo `mata-videos` hoje mede os defeitos 1 e 2 do 025, não a borda —
+  a pergunta que importa (matar uma réplica de N deveria custar zero requisição) só é medível
+  depois da correção. Precisa de construção: proxy no overlay de carga
+- [027 — Melhorias justificadas pela medição](tickets/027-melhorias-medidas.md) —
+  `bloqueado-por: 026`. Nasceu com o corpo vazio de propósito e o 025 o preencheu com três
+  condenados, todos de **correção**, nenhum de vazão: evento terminal perdido fora de ordem,
+  marca de publicação que mente, varredura de boot que sabota as réplicas vivas. Os dois
+  primeiros são candidatos a ADR
 
 ## Fora de escopo
 

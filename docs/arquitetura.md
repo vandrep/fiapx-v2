@@ -247,7 +247,7 @@ Os dois requisitos que não aparecem numa demonstração. Ambos têm mecanismo, 
 | Serviço | Escala | Por quê |
 |---|---|---|
 | `extracao` | réplicas, linearmente | sem estado, `max-outstanding-messages=1` — cada réplica pega **uma** extração por vez e só volta à fila quando termina. *Competing consumers* puro: dobrar réplicas dobra a vazão |
-| `videos` | réplicas | o estado está no Postgres, não em memória; a transição é `UPDATE` condicional, então duas réplicas processando a mesma mensagem chegam ao mesmo resultado |
+| `videos` | réplicas | o estado está no Postgres, não em memória; a transição é `UPDATE` condicional, então duas réplicas processando a mesma mensagem chegam ao mesmo resultado. **Nunca medido**: o Compose sobe uma réplica só, e derrubá-la custou 361 envios recusados de 400 ([§ O que a medição mostrou](#o-que-a-medição-mostrou)) |
 | `notificacao` | réplicas | idempotente por construção — a unicidade mora na transição de estado do `videos`, não aqui |
 
 O `prefetch=1` do `extracao` é a escolha central: extração de vídeo é limitada por CPU e
@@ -267,7 +267,7 @@ inviabilizaria o serviço na máquina de quem avalia.
 | Broker reinicia | filas **quorum**, replicadas e duráveis — mensagem confirmada sobrevive |
 | Worker morre no meio | ack **manual**, depois do trabalho; a mensagem volta para a fila |
 | Mensagem envenenada | `x-delivery-limit=3` e DLQ — a mensagem sai do caminho, mas não some: o `extracao` consome a própria DLQ e transforma o esgotamento em `ExtracaoFalhou`, que vira e-mail |
-| Falha entre gravar no banco e publicar na fila | duas colunas marcadoras (`comando_publicado_em`, `falha_publicada_em`) e uma varredura a cada 30s republicam o que ficou para trás ([ADR 0003](adr/0003-reconciliacao-por-varredura.md)) |
+| Falha entre gravar no banco e publicar na fila | duas colunas marcadoras (`comando_publicado_em`, `falha_publicada_em`) e uma varredura a cada 30s republicam o que ficou para trás ([ADR 0003](adr/0003-reconciliacao-por-varredura.md)). **A republicação nunca foi observada acontecendo**: a rodada que existia para exercitá-la não produziu evidência de uma única republicação ([§ O que a medição mostrou](#o-que-a-medição-mostrou)) |
 
 Essa última linha é a menos óbvia e a que mais importa. Gravar no Postgres e publicar no
 RabbitMQ não é uma operação atômica: um crash entre as duas deixaria um Vídeo eternamente em
@@ -280,12 +280,61 @@ O regime resultante é **pelo menos uma vez**, assumido e não escondido. *Exata
 foi recusado explicitamente: custaria um outbox canônico com tabela e payload serializado, e
 o preço de duplicar um e-mail é menor que o de perder uma falha.
 
+### O que a medição mostrou
+
+A tabela acima descreve mecanismos que existem no código. Um teste de carga
+([ticket 025](wayfinder/tickets/025-carga-conservacao.md)) mediu se eles bastam, e a resposta
+é **não**.
+
+O que passou: sob rajada de 400 envios simultâneos de 1 MB, a borda devolveu **400 `202`, zero
+recusas** — sem `5xx`, sem conexão recusada, sem timeout —, e a fila drenou tudo em 98 s com
+quatro réplicas. A primeira linha da tabela se sustenta: o pico vira backlog, não erro.
+
+O que reprovou: `ExtracaoIniciada` e `ExtracaoConcluida` viajam em **filas independentes, sem
+ordem entre si**. Quando a conclusão chega primeiro, o `UPDATE` condicional não encontra o
+predecessor `PROCESSANDO`, altera zero linhas e a mensagem recebe ack — o desfecho some. O
+Vídeo fica em `PROCESSANDO` para sempre **com o Pacote já gravado no bucket** — os censos das
+três rodadas somam 46 presos, e a conferência contra o MinIO cobriu 45 deles, todos com o
+`.zip` lá. Incidência medida: 11 em 400 sob pico com uma réplica reiniciada, e 34 em
+39 depois de o `videos` cair e voltar. Nenhuma varredura existente alcança esse estado: a do
+ADR 0003 procura marcas de publicação nulas, não Vídeos parados.
+
+Dois defeitos menores saíram da mesma medição. A marca do ADR 0003 pode **mentir**:
+`publish-confirms` é `false` por default no conector RabbitMQ, então o envio completa antes de
+o broker confirmar, e três Vídeos ficaram em `RECEBIDO` com `comando_publicado_em` preenchido e
+comando nenhum na fila. E a varredura de órfãos no boot do `extracao` apaga o scratch das
+réplicas **vivas**, porque o volume nomeado é compartilhado entre elas — um h264 válido chegou
+ao usuário como `ARQUIVO_INVALIDO`.
+
+Os três estão em aberto no [ticket 027](wayfinder/tickets/027-melhorias-medidas.md).
+
+Três coisas a medição **não** mostrou, e que valem tanto quanto o que ela mostrou:
+
+- **A varredura de reconciliação nunca foi vista republicando.** Derrubar o `videos` no meio da
+  rajada existia para exercitá-la, e o que se observou foi só o defeito da marca falsa: dos 39
+  aceitos antes da queda, 2 chegaram a terminal em 450 s, e nenhum artefato da rodada registra
+  uma republicação. A linha da tabela acima ficou, portanto, **afirmada e não verificada** — a
+  demonstração só é possível depois de corrigidos os dois primeiros defeitos, que envenenam
+  justamente o cenário que a exercitaria.
+- **A borda é réplica única, e derrubá-la perde envio.** Nessa mesma rodada, 361 dos 400 envios
+  não chegaram a ser aceitos — 239 timeouts de conexão, 53 EOF, 46 conexões resetadas, 22
+  recusadas. O critério de "zero não-`202`" foi dispensado ali de propósito, porque a queda era
+  provocada; o número fica registrado assim mesmo, porque a garantia do enunciado não distingue
+  motivos.
+- **A latência do `202` não tem orçamento declarado.** Sob 400 conexões simultâneas de 1 MB, a
+  rodada limpa deu med 3,3 s / p95 5,5 s / max 6,6 s, e uma segunda rodada da mesma configuração
+  deu med 9,8 s / p95 12,4 s / max 14,8 s. A degradação entre rodadas não foi explicada, e é
+  suspeita de ser efeito do estado acumulado: nenhuma rodada zera o banco antes de começar.
+
+Tudo isto está aqui, e não escondido, porque um documento de arquitetura que descreve o
+mecanismo e omite a medição que o reprovou é pior que um que não mede.
+
 ## Requisitos do enunciado
 
 | Requisito | Como é atendido | Onde |
 |---|---|---|
 | Processar mais de um vídeo ao mesmo tempo | *competing consumers* no `extracao`, `prefetch=1`, réplicas independentes | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
-| Não perder requisição em pico | `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit`, reconciliação por varredura | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
+| Não perder requisição em pico | `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit`, reconciliação por varredura — **parcialmente atendido**, ver [§ O que a medição mostrou](#o-que-a-medição-mostrou) | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
 | Protegido por usuário e senha | Keycloak, OIDC *bearer-only*; o dono vem do `sub` do token | [pesquisa](pesquisa/oidc-keycloak.md) |
 | Listagem de status dos vídeos do usuário | `GET /videos` paginado, escopado pelo dono; não existe consulta sem dono na interface do gateway | [contrato HTTP](contratos/http-videos.md) |
 | Notificar o usuário em caso de erro | `VideoFalhou` → `notificacao` → SMTP; unicidade garantida pela transição de estado | [ADR 0001](adr/0001-politica-de-falhas.md) |
@@ -321,8 +370,23 @@ O que eu não defendo — apenas aceitei.
   não uma falha entre publicar `VideoFalhou` e o SMTP aceitar. Numa janela estreita, o
   usuário pode receber o aviso duas vezes. Foi escolha consciente: duplicar um aviso é melhor
   que engolir uma falha.
-- **A escalabilidade é argumentada, não medida.** O Compose sobe uma réplica de cada serviço.
-  O desenho suporta `--scale extracao=N`, mas não há teste de carga que prove a linearidade.
+- **A conservação sob pico foi medida e reprovou.** O sistema perde requisição quando o evento
+  de conclusão chega fora de ordem — 11 em 400 sob pico com falha injetada. Diagnóstico e
+  números na seção [§ O que a medição mostrou](#o-que-a-medição-mostrou); correção em aberto no
+  [ticket 027](wayfinder/tickets/027-melhorias-medidas.md). É a limitação mais séria desta
+  lista, e a única que contraria um requisito explícito do enunciado.
+- **A borda é réplica única, e a varredura de reconciliação nunca foi vista funcionando.** O
+  Compose sobe um `videos`; derrubá-lo durante uma rajada custou 361 envios recusados de 400,
+  e a rodada que existia para exercitar a varredura do [ADR 0003](adr/0003-reconciliacao-por-varredura.md)
+  não registrou uma única republicação. Escalar a borda por réplicas é afirmação de desenho,
+  não medição.
+- **A latência do `202` não tem orçamento declarado.** Ela foi medida (med 3,3 s sob 400
+  conexões simultâneas de 1 MB) e variou até 9,8 s entre rodadas de mesma configuração, sem
+  explicação. Não há limiar contra o qual julgá-la.
+- **A linearidade horizontal continua argumentada, não medida.** O harness de carga existe
+  (`scripts/carga/`), mas a varredura de réplicas do `extracao` ainda não rodou
+  ([ticket 026](wayfinder/tickets/026-linearidade-horizontal.md)). E `--scale extracao=N` hoje
+  tem um defeito conhecido: as réplicas compartilham o volume de scratch.
 - **Não há observabilidade além de health check.** Sem métrica, sem tracing distribuído. Num
   sistema assíncrono com DLQ, a primeira coisa que eu acrescentaria com mais tempo seria
   visibilidade sobre profundidade de fila e taxa de dead-letter.

@@ -357,11 +357,26 @@ verificadas por teste, não são sugestão). Projeto original em
      medidos, e o 027 deixou de ser hipotético. -->
 
 - [026 — Linearidade horizontal do extracao](tickets/026-linearidade-horizontal.md) — **na
-  fronteira** desde que o 025 fechou. Não constrói nada: reusa o harness e varre
-  `N ∈ {1,2,4,6}` réplicas com `cpus=2`, backlog fixo e fixture de ~2 min. O teto do
-  laboratório (20 cores para toda a stack) é declarado como achado, não escondido. Nasce
-  sabendo que o defeito 3 do 025 (scratch compartilhado entre réplicas) vai aparecer ali —
-  o critério 5 do harness existe para que ele apareça nomeado
+  fronteira** desde que o 025 fechou, e agora com **método pré-registrado**: o enunciado foi
+  interrogado antes de rodar e a seção *Método, fixado antes de rodar* desvia dele em sete
+  pontos, cada um com o motivo. Os que mudam o resultado: a calibração mira em `N=6` (mirar em
+  `N=1` deixaria o ponto decisivo com ~40 s de regime); vazão é a série de `finalizado_em` na
+  janela pós-injeção, porque a rampa de 3,9 GB penaliza `N=6` e enviesa a curva contra a
+  linearidade julgada; `down -v` por ponto, decisão que o 025 delegou; dois controles finais em
+  `N=1`, um limpo e um **sujo**, e a diferença entre eles mede a degradação que o 025 suspeitou
+  e não explicou. A partição do tempo de serviço entrou porque a conta do 006 sugere **~3 s de
+  `ffmpeg` contra ~63 MB de I/O** por Vídeo — se o `ffmpeg` for minoria, a curva mede o MinIO
+  singleton, não *competing consumers*. O defeito 3 do 025 é contornado por protocolo (nada
+  boota com trabalho em voo, corrida aborta em restart), não corrigido. E o corte errou por uma
+  peça: entra um `escalabilidade.sh`, porque `conservacao.sh` não varre — `oraculo.sh`,
+  `injetor.js` e `gera-fixtures.sh` são reusados sem um toque
+- [028 — Escala da borda](tickets/028-escala-da-borda.md) — `bloqueado-por: 027`. Saiu do 026
+  por corte: escalar o `videos` é outro objeto (HTTP, não fila) e outro critério (recusa e
+  latência, não vazão). Julga o **"Nunca medido"** da célula do `videos` na tabela § *O que
+  escala, e como*, contra os 361 recusados de 400 que o 025 mediu ao derrubar a réplica única.
+  Nasce bloqueado porque o modo `mata-videos` hoje mede os defeitos 1 e 2 do 025, não a borda —
+  a pergunta que importa (matar uma réplica de N deveria custar zero requisição) só é medível
+  depois da correção. Precisa de construção: proxy no overlay de carga
 - [027 — Melhorias justificadas pela medição](tickets/027-melhorias-medidas.md) —
   `bloqueado-por: 026`. Nasceu com o corpo vazio de propósito e o 025 o preencheu com três
   condenados, todos de **correção**, nenhum de vazão: evento terminal perdido fora de ordem,

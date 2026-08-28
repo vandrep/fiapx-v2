@@ -72,6 +72,15 @@
             <artifactId>quarkus-test-keycloak-server</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- @RunOnVertxContext: o UPDATE condicional do ADR 0002 passa por
+             Panache.withTransaction, que exige um contexto Vert.x — chamado do thread do
+             JUnit ele morre com "No current Vertx context found" (ticket 027). -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-vertx</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

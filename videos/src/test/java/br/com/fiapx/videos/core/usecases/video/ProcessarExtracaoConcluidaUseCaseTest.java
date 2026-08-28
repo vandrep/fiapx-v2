@@ -40,6 +40,34 @@ class ProcessarExtracaoConcluidaUseCaseTest {
     }
 
     @Test
+    void aConcluidaQueChegaAntesDaIniciadaAindaConclui() {
+        // Defeito 1 do ticket 027: as duas mensagens vem em filas independentes. Antes desta
+        // correcao o UPDATE exigia PROCESSANDO, alterava zero linhas e dava ack — o Video
+        // ficava preso em PROCESSANDO para sempre, com o .zip ja gravado no bucket.
+        var recemRecebido = Video.novo("chegou-fora-de-ordem.mp4", 2_048L, DONO)
+                .armazenadoEm("id/original.mp4");
+        videos.armazenados.put(recemRecebido.id(), recemRecebido);
+        assertEquals(EstadoVideo.RECEBIDO, recemRecebido.estado());
+
+        useCase.executar(new ProcessarExtracaoConcluidaUseCase.Command(
+                recemRecebido.id(), Instant.now(), recemRecebido.id() + ".zip", 900, 2_048L)).join();
+
+        assertEquals(EstadoVideo.CONCLUIDO, recemRecebido.estado());
+        assertEquals(recemRecebido.id() + ".zip", recemRecebido.chavePacote());
+    }
+
+    @Test
+    void aIniciadaAtrasadaNaoDesfazOConcluido() {
+        var iniciada = new ProcessarExtracaoIniciadaUseCase(videos);
+        useCase.executar(new ProcessarExtracaoConcluidaUseCase.Command(
+                video.id(), Instant.now(), video.id() + ".zip", 1_200, 4_096L)).join();
+
+        iniciada.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id(), Instant.now())).join();
+
+        assertEquals(EstadoVideo.CONCLUIDO, video.estado());
+    }
+
+    @Test
     void reentregaAposConcluidoNaoFalha() {
         var comando = new ProcessarExtracaoConcluidaUseCase.Command(
                 video.id(), Instant.now(), video.id() + ".zip", 1_200, 4_096L);

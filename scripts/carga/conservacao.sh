@@ -35,6 +35,11 @@ vus="${FIAPX_VUS:-$envios}"
 replicas="${FIAPX_EXTRACAO_REPLICAS:-4}"
 fixture="${FIAPX_FIXTURE:-controle-3s.mp4}"
 amostra="${FIAPX_AMOSTRA:-10}"
+# Quando derrubar o `videos`, contado do inicio da rajada. Precisa cair DEPOIS de o primeiro
+# 202 ter sido gravado e ANTES de a rajada acabar — cedo demais e a borda morre antes de
+# aceitar qualquer coisa, e a rodada nao exercita janela nenhuma (criterio 0). Era 3s fixo
+# ate o ticket 027, quando duas rodadas seguidas aceitaram zero.
+atraso_kill="${FIAPX_ATRASO_KILL:-3}"
 usuario="${FIAPX_USUARIO:-demo}"
 senha="${FIAPX_SENHA:-demo}"
 
@@ -124,6 +129,11 @@ if [[ "$modo" == mata-videos ]]; then
 else
     echo "       Qualquer 5xx, recusa de conexao ou timeout conta como perda."
 fi
+if [[ "$modo" == mata-videos ]]; then
+    echo "    0. Ao menos um 202 ANTES da queda — sem isso nao ha janela aberta para o ADR 0003"
+    echo "       fechar, e os criterios 2 a 5 passam com 0/0 sem julgar coisa nenhuma. Portao"
+    echo "       de validade da rodada, nao do sistema (ticket 027)."
+fi
 echo "    2. 100% dos ids aceitos em estado terminal (CONCLUIDO ou FALHOU) em ${limite_drenagem}s."
 echo "    3. Zero presos em RECEBIDO ou PROCESSANDO ao fim."
 echo "    4. Amostra de $amostra ids conferida pela API, como dono: 200 e estado terminal."
@@ -155,10 +165,10 @@ k6_pid=$!
 if [[ "$modo" == mata-videos ]]; then
     # Durante a rajada, e nao depois: a janela que o ADR 0003 fecha e a que existe entre
     # gravar a linha e publicar o comando, e ela so esta aberta enquanto ha envio em voo.
-    sleep 3
+    sleep "$atraso_kill"
     alvo="$("${compose[@]}" ps -q videos | head -1)"
     docker kill "$alvo" >/dev/null
-    aviso "videos morto a 3s do inicio da rajada (container ${alvo:0:12})"
+    aviso "videos morto a ${atraso_kill}s do inicio da rajada (container ${alvo:0:12})"
 fi
 
 wait "$k6_pid" && k6_codigo=0 || k6_codigo=$?
@@ -236,6 +246,17 @@ julga() {
 }
 
 if [[ "$modo" == mata-videos ]]; then
+    # Portao de validade da RODADA, e nao criterio sobre o sistema: com zero aceitos os
+    # criterios 2 a 5 passam todos com 0/0 e a rodada nao julgou nada. Aconteceu duas vezes
+    # seguidas no ticket 027 — a borda caiu antes do primeiro 202 — e passou verde.
+    if (( aceitos == 0 )); then
+        echo "    ${vermelho}INVALIDA${normal}  0. Nenhum 202 antes da queda: nenhuma janela foi aberta."
+        echo
+        echo "${negrito}${vermelho}Rodada invalida${normal}: aumente FIAPX_ATRASO_KILL (atual ${atraso_kill}s) e repita."
+        echo "    Saida completa: scripts/carga/saida/$rotulo/"
+        exit 2
+    fi
+    ok "0. Rodada valida — $aceitos aceito(s) antes da queda"
     aviso "1. Zero nao-202 — dispensado neste modo ($recusados recusas, a borda foi derrubada)"
 else
     julga "1. Zero nao-202" "$([[ $recusados == 0 ]] && echo true || echo false)" \

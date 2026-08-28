@@ -14,6 +14,8 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * A tabela {@code video} e o outbox (ADR 0003): sem broker, prova que a varredura republica
@@ -48,6 +50,26 @@ class ReconciliarPublicacoesPendentesUseCaseTest {
         assertEquals(1, extracao.idsEnviados.size());
         assertEquals(video.id(), extracao.idsEnviados.get(0));
         assertNotNull(videos.comandoPublicadoEm.get(video.id()));
+    }
+
+    /**
+     * A contagem devolvida e o que torna a garantia do ADR 0003 <b>observavel</b>: ate o
+     * ticket 027 a varredura era muda, e por isso nenhuma medicao (nem a do 025) tinha
+     * conseguido flagra-la republicando.
+     */
+    @Test
+    void aVarreduraDizQuantoRepublicou() {
+        var video = recebidoHa(2, ChronoUnit.MINUTES);
+        videos.armazenados.put(video.id(), video);
+
+        var primeira = useCase.executar().join();
+        var segunda = useCase.executar().join();
+
+        assertEquals(1, primeira.comandos());
+        assertEquals(0, primeira.falhas());
+        assertTrue(primeira.houveAlgo());
+        assertEquals(0, segunda.comandos());
+        assertFalse(segunda.houveAlgo(), "passada sem pendencia nao pode aparecer no log");
     }
 
     @Test

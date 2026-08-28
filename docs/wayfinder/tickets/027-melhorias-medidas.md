@@ -2,8 +2,8 @@
 
 - id: 027
 - label: wayfinder:task
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: vandrep
 - bloqueado-por:
 
 ## Question
@@ -103,3 +103,114 @@ falhar nenhum dos outros cinco critérios. Toda medição de antes/depois aqui r
 O 3 ganha contexto novo: o 026 o **contornou por protocolo** (nada boota com trabalho em voo) e
 percorreu 12 corridas com até 6 réplicas sem incidência — o que confirma que é defeito de boot, e
 não de regime, mas não o corrige.
+
+
+## Resolução
+
+**Quatro aceitas, todas com o número de antes e o de depois. Nenhuma recusada por preço — o que
+a medição condenou, a medição também mediu de volta.** Todas as corridas sob
+`systemd-inhibit --what=sleep:idle`, pelo sexto portão do 026.
+
+| Defeito | Antes | Depois |
+|---|---|---|
+| 1. Terminal fora de ordem descartada (pico, réplica reiniciada) | 11/400 presos em `PROCESSANDO` | **0/400**, 400 concluídos em 93 s |
+| 1. Idem, com o `videos` derrubado | 34/39 presos | **0/133** terminais em 39 s |
+| 2. Varredura nunca observada republicando | nenhum registro, em rodada nenhuma | `reconciliacao republicou 1 comando(s) e 0 falha(s)`, órfão a `CONCLUIDO` |
+| 4. `ffmpeg` sobre-assinando a cota | 18,54 s (mediana de 3) no fixture de 2 min sob `cpus=2` | **12,68 s**, −31,6% |
+
+### 1. O predecessor virou conjunto (ADR 0002 emendado)
+
+`CONCLUIDO` e `FALHOU` passam a aceitar `RECEBIDO` **ou** `PROCESSANDO`; `EstadoVideo.predecessores()`
+devolve `Set` e o `WHERE` virou `estado in ?`. Foi a alternativa "tolerar a chegada fora de ordem
+no `UPDATE`", contra reordenar no consumidor (exige estado e timeout) e fila única (quebra o
+contrato do 007). O argumento que decide: **`PROCESSANDO` é informação de acompanhamento, não
+portão** — pular o aviso de "alguém pegou" não invalida o desfecho, e o desfecho estava no bucket.
+
+A guarda de unicidade do e-mail não afrouxou, e isso não é asserção: o `UPDATE` continua mudando
+a linha exatamente uma vez, e há teste saindo de `RECEBIDO` que exige um `VideoFalhou` só.
+
+**Um teste do repositório afirmava o defeito.** `VideoTest.concluirSemPassarPorProcessandoNaoMudaNada`
+exigia que concluir a partir de `RECEBIDO` não mudasse nada — era a regra errada, escrita com
+confiança. Foi invertido, com o comentário dizendo que já afirmou o contrário.
+
+### 2. `publish-confirms=true`, e a varredura deixou de ser muda
+
+A marca mentia porque o default do conector é `false`. Ligado nos dois canais de saída do `videos`.
+
+Mas a condição de aceite do ticket não era essa — era **ver a varredura republicando**, o que
+nunca acontecera. Descoberto o porquê: `ReconciliarPublicacoesPendentesUseCase` era **silenciosa**,
+então nem a rodada do 025 nem duas rodadas `mata-videos` daqui poderiam tê-la flagrado, mesmo que
+ela tivesse agido. O use case passou a devolver quanto republicou e o `@Scheduled` registra só as
+passadas não vazias — a passada vazia é o caso normal a cada 30 s e afogaria o log.
+
+Com isso a observação saiu, e é honesto dizer **como**: nas rodadas `mata-videos` a queda **não
+produziu órfão nenhum** (134 linhas, 134 com marca — a janela é estreita demais para o
+`docker kill` acertar de propósito). A demonstração foi feita contra um órfão **semeado** — linha
+em `RECEBIDO`, marca nula, `recebido_em` 5 min atrás —, que a varredura republicou e levou a
+`CONCLUIDO`. Isso exercita o mecanismo do ADR 0003 de ponta a ponta; não exercita a corrida que o
+cria. A distinção está registrada no ADR.
+
+**O custo que eu previ não existe.** Argumentei que confirms custaria um round-trip por
+publicação. Medido com as duas imagens sob a mesma rajada de 400: mediana do `202` em 11233 ms
+com confirms contra 11504 ms sem, p95 14864 contra 15647, drenagem 105 s nos dois. A diferença
+está no ruído, e o sinal de que ela estaria: a latência do `202` ali é fila na borda, não broker.
+
+### 3. Gate por idade na varredura de órfãos
+
+`limparOrfaosNoBoot` só apaga diretório ocioso há mais de uma hora (folga larga sobre o teto de
+20 min do 011 e o timeout de 300 s), e a idade vem do arquivo mais recente **em qualquer
+profundidade** — o `ffmpeg` grava os frames dentro do diretório e nem todo sistema de arquivos
+toca o mtime do pai. Não conseguir datar conta como "em uso", conservador.
+
+Recusadas com o motivo ao lado, porque trocavam um defeito por outro: **subdiretório por réplica**
+(container reiniciado nasce com hostname novo, o subtree antigo nunca mais é varrido — troca
+sabotagem por vazamento) e **volume anônimo por réplica** (vaza volume a cada recriação e some o
+teto de 4 GB do 011).
+
+### 4. `-threads` derivado da cota, e não configurável
+
+O dilema que o ticket registrava — "o número certo depende da cota, que é config de implantação"
+— **se dissolveu num fato**: a JVM já lê a cota. `-XshowSettings:system` sob `cpus=2` num host de
+20 núcleos imprime `Effective CPU Count: 2` enquanto `nproc` responde 20, e é esse número que
+`availableProcessors()` devolve. Então `-threads availableProcessors()` é certo nos dois mundos,
+e sem teto reproduz o default de sempre.
+
+Verificado **no processo vivo**, não só no raciocínio: durante a rodada de carga, a linha de
+comando do `ffmpeg` dentro do container era `... -loglevel level+repeat+error -threads 2 -xerror ...`.
+
+**Recusada** a propriedade `fiapx.extracao.threads`, e o motivo vale a linha: um número que a JVM
+já sabe ler viraria conhecimento tribal num `.env`, com a falha silenciosa de ficar
+desatualizado quando a cota mudasse. Sem ADR — é reversível e o valor não é escolha, é leitura do
+ambiente.
+
+## O que apareceu por medir, e não estava no ticket
+
+- **O harness dava falso verde.** O modo `mata-videos` passou **duas vezes com 0 aceitos**: a
+  borda caía antes do primeiro `202` e os critérios 2 a 5 se satisfaziam com 0/0. Ganhou um
+  **portão de validade de rodada** (critério 0: ao menos um `202` antes da queda, senão a rodada
+  é inválida e sai com código 2) e `FIAPX_ATRASO_KILL`, porque os 3 s fixos não alcançavam a
+  janela. Mesma família do sexto portão do 026: o instrumento reprovando a si mesmo.
+- **O harness mede a imagem que estiver por perto.** `docker-compose.yml` referencia
+  `ghcr.io/vandrep/fiapx-*:latest` e nenhum script constrói — rodar o harness depois de mexer no
+  código mede o binário de três dias atrás, em silêncio. As imagens foram construídas à mão aqui,
+  com o estado anterior guardado em `:pre-027`, que é o que tornou possível a comparação de custo
+  do confirms.
+- **O `IN` não tinha teste.** `estado in ?` com `Set` de enum é HQL que nenhum teste do `core`
+  alcança e que o BDD também não — ele monta `CONCLUIDO` atribuindo a entidade direto. Sem
+  cobertura, a correção do defeito 1 só seria exercitada em produção.
+  `VideoDataSourceAdapterTest` fechou isso (5 testes contra Postgres de verdade) e exigiu
+  `quarkus-test-vertx`: `Panache.withTransaction` do thread do JUnit morre com
+  "No current Vertx context found".
+- **"Could not load class" no `videos` é o Keycloak, não o teste.** Quando o Dev Services for
+  Keycloak estoura o timeout do Testcontainers, a augmentação do Quarkus falha e o JUnit reporta
+  `ClassSelector ... resolution failed` / "Could not load class with name: ...", que parece erro
+  de compilação e manda procurar no lugar errado — a causa está dezenas de linhas acima, num
+  `Timed out waiting for log output matching '.*Keycloak.*started.*'`. Nesta máquina isso é
+  intermitente e depende de carga: o Keycloak reconstrói a própria imagem no boot (25,7 s só de
+  augmentação) e passa raspando no limite. Rodadas do `verify` alternaram entre verde e essa
+  falha sem nenhuma mudança de código; a contagem de 144 saiu de duas rodadas verdes.
+
+**144 testes verdes (103 sem Docker)**, contra 130 (96) antes — medido, não somado: 95 no
+`videos`, 27 no `extracao`, 22 no `notificacao`, com 41 dependentes de Docker (33 de Cucumber,
+5 do adapter novo, 2 do scratch, 1 do retry). A soma das linhas por ticket continua devendo
+duas unidades ao total real, exatamente a divergência que o ticket 023 já registrara.

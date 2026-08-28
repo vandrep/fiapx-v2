@@ -16,7 +16,7 @@ public class ReconciliacaoController {
         this.reconciliarPublicacoesPendentesUseCase = reconciliarPublicacoesPendentesUseCase;
     }
 
-    public CompletableFuture<Void> reconciliar() {
+    public CompletableFuture<ReconciliarPublicacoesPendentesUseCase.Republicacoes> reconciliar() {
         return reconciliarPublicacoesPendentesUseCase.executar();
     }
 }

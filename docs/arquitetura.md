@@ -306,7 +306,8 @@ comando nenhum na fila. E a varredura de órfãos no boot do `extracao` apaga o 
 réplicas **vivas**, porque o volume nomeado é compartilhado entre elas — um h264 válido chegou
 ao usuário como `ARQUIVO_INVALIDO`.
 
-Os três estão em aberto no [ticket 027](wayfinder/tickets/027-melhorias-medidas.md).
+Os três foram corrigidos no [ticket 027](wayfinder/tickets/027-melhorias-medidas.md) — ver
+[§ E o que a terceira medição mostrou](#e-o-que-a-terceira-medição-mostrou-os-três-defeitos-fechados).
 
 Três coisas a medição **não** mostrou, e que valem tanto quanto o que ela mostrou:
 
@@ -315,7 +316,8 @@ Três coisas a medição **não** mostrou, e que valem tanto quanto o que ela mo
   aceitos antes da queda, 2 chegaram a terminal em 450 s, e nenhum artefato da rodada registra
   uma republicação. A linha da tabela acima ficou, portanto, **afirmada e não verificada** — a
   demonstração só é possível depois de corrigidos os dois primeiros defeitos, que envenenam
-  justamente o cenário que a exercitaria.
+  justamente o cenário que a exercitaria. *Resolvido no ticket 027: a varredura passou a
+  registrar o que republica, e foi observada fazendo-o.*
 - **A borda é réplica única, e derrubá-la perde envio.** Nessa mesma rodada, 361 dos 400 envios
   não chegaram a ser aceitos — 239 timeouts de conexão, 53 EOF, 46 conexões resetadas, 22
   recusadas. O critério de "zero não-`202`" foi dispensado ali de propósito, porque a queda era
@@ -355,6 +357,37 @@ das doze corridas foram corrompidas pelo **host suspendendo** no meio da mediç�
 denominador sem perder, falhar ou reiniciar nada — nenhum dos cinco critérios de validade pegava
 isso, e o harness ganhou um sexto.
 
+### E o que a terceira medição mostrou: os três defeitos fechados
+
+O [ticket 027](wayfinder/tickets/027-melhorias-medidas.md) corrigiu os três defeitos do 025 e o
+ponto de vazão do 026, e mediu **depois** de cada um — sob `systemd-inhibit --what=sleep:idle`,
+pelo sexto portão que o 026 acrescentou.
+
+| Defeito | Antes | Depois |
+|---|---|---|
+| Terminal fora de ordem descartada | 11/400 presos em `PROCESSANDO` sob pico com réplica reiniciada | **0/400**, 400 concluídos em 93 s |
+| Terminal fora de ordem, `videos` derrubado | 34/39 presos | **0/133**, todos terminais em 39 s |
+| Varredura nunca observada republicando | nenhum registro em rodada nenhuma | `reconciliacao republicou 1 comando(s) e 0 falha(s)`, órfão a `CONCLUIDO` |
+| `ffmpeg` sobre-assinando a cota | 18,54 s (mediana de 3) num fixture de 2 min sob `cpus=2` | **12,68 s** com `-threads` derivado da cota, −32% |
+
+A correção do primeiro é a que mexe em garantia declarada: os estados terminais passaram a
+aceitar `RECEBIDO` **ou** `PROCESSANDO` como predecessor, porque `PROCESSANDO` é informação de
+acompanhamento e não portão ([ADR 0002](adr/0002-maquina-de-estados-em-duas-camadas.md)). A
+unicidade do e-mail não afrouxa: o `UPDATE` continua mudando a linha uma vez só.
+
+O número de threads do `ffmpeg` **não virou configuração**: `availableProcessors()` da JVM já lê
+a cota do cgroup — `Effective CPU Count: 2` sob `cpus=2` enquanto `nproc` responde 20 —, então o
+valor certo é derivado em runtime e reproduz o default de sempre onde não há teto. Verificado no
+container em produção, não só no papel: `ffmpeg ... -threads 2 ...` na linha de comando do
+processo vivo.
+
+Duas coisas que a medição contrariou, e que valem registro por isso. Ligar `publish-confirms`
+deveria custar um round-trip por publicação: sob rajada de 400, **não custa nada mensurável** —
+mediana de `202` em 11233 ms com confirms contra 11504 ms sem, drenagem de 105 s nos dois; a
+latência ali é fila na borda. E o modo `mata-videos` do harness passava **verde com 0 aceitos**,
+porque a borda caía antes do primeiro `202` e os critérios 2 a 5 se satisfaziam com 0/0 — ganhou
+um portão de validade de rodada, na mesma linha do sexto portão do 026.
+
 Tudo isto está aqui, e não escondido, porque um documento de arquitetura que descreve o
 mecanismo e omite a medição que o reprovou é pior que um que não mede.
 
@@ -363,14 +396,14 @@ mecanismo e omite a medição que o reprovou é pior que um que não mede.
 | Requisito | Como é atendido | Onde |
 |---|---|---|
 | Processar mais de um vídeo ao mesmo tempo | *competing consumers* no `extracao`, `prefetch=1`, réplicas independentes | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
-| Não perder requisição em pico | `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit`, reconciliação por varredura — **parcialmente atendido**, ver [§ O que a medição mostrou](#o-que-a-medição-mostrou) | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
+| Não perder requisição em pico | `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit`, reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada; a ressalva que resta é a réplica única da borda | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
 | Protegido por usuário e senha | Keycloak, OIDC *bearer-only*; o dono vem do `sub` do token | [pesquisa](pesquisa/oidc-keycloak.md) |
 | Listagem de status dos vídeos do usuário | `GET /videos` paginado, escopado pelo dono; não existe consulta sem dono na interface do gateway | [contrato HTTP](contratos/http-videos.md) |
 | Notificar o usuário em caso de erro | `VideoFalhou` → `notificacao` → SMTP; unicidade garantida pela transição de estado | [ADR 0001](adr/0001-politica-de-falhas.md) |
 | Persistir os dados | Postgres para o estado, MinIO para os arquivos | [`docker/postgres/init.sql`](../docker/postgres/init.sql) |
 | Arquitetura que permita escalar | serviços sem estado atrás de fila; o único com estado delega ao Postgres | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
 | Versionado no GitHub | `vandrep/fiapx-v2`, `main` protegida por ruleset, PR obrigatório | [`AGENTS.md`](../AGENTS.md) |
-| Testes que garantam a qualidade | 130 testes (96 sem Docker): unitários do `core` com dublês, Cucumber pela borda, teste arquitetural, `ffmpeg` real no `extracao`, e o smoke ponta-a-ponta | [`scripts/smoke.sh`](../scripts/smoke.sh) |
+| Testes que garantam a qualidade | 144 testes (103 sem Docker): unitários do `core` com dublês, Cucumber pela borda, teste arquitetural, `ffmpeg` real no `extracao`, e o smoke ponta-a-ponta | [`scripts/smoke.sh`](../scripts/smoke.sh) |
 | CI/CD | GitHub Actions: `verify` e publicação das três imagens multi-arquitetura no GHCR | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) |
 
 Da stack *recomendada*, monitoramento (Prometheus/Grafana) ficou de fora conscientemente —
@@ -399,16 +432,19 @@ O que eu não defendo — apenas aceitei.
   não uma falha entre publicar `VideoFalhou` e o SMTP aceitar. Numa janela estreita, o
   usuário pode receber o aviso duas vezes. Foi escolha consciente: duplicar um aviso é melhor
   que engolir uma falha.
-- **A conservação sob pico foi medida e reprovou.** O sistema perde requisição quando o evento
-  de conclusão chega fora de ordem — 11 em 400 sob pico com falha injetada. Diagnóstico e
-  números na seção [§ O que a medição mostrou](#o-que-a-medição-mostrou); correção em aberto no
-  [ticket 027](wayfinder/tickets/027-melhorias-medidas.md). É a limitação mais séria desta
-  lista, e a única que contraria um requisito explícito do enunciado.
-- **A borda é réplica única, e a varredura de reconciliação nunca foi vista funcionando.** O
-  Compose sobe um `videos`; derrubá-lo durante uma rajada custou 361 envios recusados de 400,
-  e a rodada que existia para exercitar a varredura do [ADR 0003](adr/0003-reconciliacao-por-varredura.md)
-  não registrou uma única republicação. Escalar a borda por réplicas é afirmação de desenho,
-  não medição.
+- **A conservação sob pico foi medida, reprovou, e foi corrigida.** O sistema perdia requisição
+  quando o evento de conclusão chegava fora de ordem — 11 em 400 sob pico com falha injetada.
+  Depois da correção do [ticket 027](wayfinder/tickets/027-melhorias-medidas.md), 0 em 400 no
+  mesmo cenário e 0 em 133 com a borda derrubada. Deixa de ser limitação; fica aqui como
+  histórico porque foi a única a contrariar um requisito explícito do enunciado, e porque
+  ninguém a teria encontrado sem medir.
+- **A borda é réplica única, e derrubá-la perde envio.** O Compose sobe um `videos`, e
+  derrubá-lo durante uma rajada custou 361 envios recusados de 400. Escalar a borda por
+  réplicas continua sendo afirmação de desenho, não medição — é o que o
+  [ticket 028](wayfinder/tickets/028-escala-da-borda.md) existe para julgar. A varredura do
+  [ADR 0003](adr/0003-reconciliacao-por-varredura.md), essa **já foi vista funcionando**: ela
+  passou a registrar o que republica, e um Vídeo órfão em `RECEBIDO` foi observado sendo
+  republicado e chegando a `CONCLUIDO` (ticket 027).
 - **A latência do `202` não tem orçamento declarado.** Ela foi medida (med 3,3 s sob 400
   conexões simultâneas de 1 MB) e variou até 9,8 s entre rodadas de mesma configuração. O
   [ticket 026](wayfinder/tickets/026-linearidade-horizontal.md) descartou a hipótese de estado
@@ -418,10 +454,10 @@ O que eu não defendo — apenas aceitei.
   em 6 réplicas o host já estava a 77% dos 20 núcleos: `N=8` é onde a folga acabaria, e não foi
   medido. Nada aqui diz o que acontece em máquina de outro porte, com MinIO remoto, ou com
   Vídeos de durações misturadas — todos os Vídeos de uma corrida eram o mesmo arquivo. Números em
-  [`docs/pesquisa/carga-escalabilidade.md`](pesquisa/carga-escalabilidade.md). E `--scale
-  extracao=N` continua com o defeito conhecido de as réplicas compartilharem o volume de scratch
-  ([ticket 027](wayfinder/tickets/027-melhorias-medidas.md)); a varredura o contornou por
-  protocolo, não o corrigiu.
+  [`docs/pesquisa/carga-escalabilidade.md`](pesquisa/carga-escalabilidade.md). O defeito de as
+  réplicas compartilharem o volume de scratch foi corrigido no
+  [ticket 027](wayfinder/tickets/027-melhorias-medidas.md) — a varredura de boot passou a só
+  apagar o que está ocioso há mais de uma hora, em vez de tudo.
 - **Não há observabilidade além de health check.** Sem métrica, sem tracing distribuído. Num
   sistema assíncrono com DLQ, a primeira coisa que eu acrescentaria com mais tempo seria
   visibilidade sobre profundidade de fila e taxa de dead-letter.

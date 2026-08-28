@@ -10,7 +10,9 @@ mesmo buraco existe do outro lado, entre gravar a transição para `FALHOU` e pu
 `falha_publicada_em` — e um `@Scheduled` republica o que está pendente. Fecha as duas
 janelas sem tabela nova, sem payload serializado e sem reescrever o dispatcher.
 
-Decidido no [ticket 018](../wayfinder/tickets/018-outbox-transacional.md).
+Decidido no [ticket 018](../wayfinder/tickets/018-outbox-transacional.md) e corrigido no
+[ticket 027](../wayfinder/tickets/027-melhorias-medidas.md), que descobriu que a marca podia
+mentir — ver a primeira consequência abaixo.
 
 ## Considered Options
 
@@ -39,6 +41,25 @@ dizer se o evento saiu.
 
 ## Consequences
 
+- **`publish-confirms=true` é o que faz a marca significar o que diz.** O default do conector
+  RabbitMQ do SmallRye é `false` (verificado no `@ConnectorAttribute` do
+  smallrye-reactive-messaging-rabbitmq 4.32.1), e com ele o envio completa **antes** de o
+  broker confirmar: `marcarComandoPublicado` gravava marca para mensagem que podia nunca ter
+  chegado. O [ticket 025](../wayfinder/tickets/025-carga-conservacao.md) mediu 3 Vídeos em
+  `RECEBIDO` com `comando_publicado_em` preenchido e comando nenhum na fila — e como a
+  varredura filtra por marca **nula**, ela nunca os reconsiderava: o mecanismo desenhado para
+  não perder requisição tinha um buraco exatamente onde alegava não ter. Ligado nos dois canais
+  de saída do `videos`. O custo esperado era um round-trip por publicação; medido sob rajada de
+  400, ele **não aparece** — 202 com mediana de 11233 ms contra 11504 ms sem confirms, e
+  drenagem de 105 s nos dois. A latência ali é fila na borda, não broker.
+- **A varredura registra o que republicou, e é assim que a garantia deixou de ser só afirmada.**
+  Até o ticket 027 ela era muda, e por isso nenhuma medição jamais a observara agir — o modo
+  `mata-videos` do 025 existia para isso e o que produziu foram os defeitos acima.
+  `ReconciliarPublicacoesPendentesUseCase` devolve quantos comandos e quantas falhas
+  republicou, e o `@Scheduled` em `framework` registra **só** as passadas não vazias (a vazia é
+  o caso normal a cada 30 s). Com isso a republicação foi vista de ponta a ponta: um Vídeo em
+  `RECEBIDO` sem marca virou `reconciliacao republicou 1 comando(s) e 0 falha(s)` no log e
+  chegou a `CONCLUIDO` com a marca gravada.
 - **A marca é gravada *depois* do publish, e isso é deliberado.** `INSERT` com marca nula →
   publica → `UPDATE` da marca. Um crash entre o publish e a marca republica o comando: a
   Extração roda duas vezes, o mesmo objeto de Pacote é sobrescrito e o segundo

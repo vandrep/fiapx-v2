@@ -77,15 +77,16 @@ public class VideoDataSourceAdapter implements VideoGateway {
     }
 
     /**
-     * O predecessor exigido no {@code WHERE} vem de {@link EstadoVideo#predecessor()}, nao de
-     * um literal aqui: o grafo de transicoes continua declarado uma vez so, no {@code core}
-     * (ADR 0002).
+     * Os predecessores aceitos no {@code WHERE} vem de {@link EstadoVideo#predecessores()},
+     * nao de literais aqui: o grafo de transicoes continua declarado uma vez so, no
+     * {@code core} (ADR 0002). {@code IN} e nao {@code =} porque os terminais aceitam dois
+     * predecessores desde o ticket 027.
      */
     @Override
     public CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm) {
         return Panache.withTransaction(() -> VideoEntity.update(
-                        "estado = ?1 where id = ?2 and estado = ?3",
-                        EstadoVideo.PROCESSANDO, id, EstadoVideo.PROCESSANDO.predecessor())
+                        "estado = ?1 where id = ?2 and estado in ?3",
+                        EstadoVideo.PROCESSANDO, id, EstadoVideo.PROCESSANDO.predecessores())
                         .map(linhasAlteradas -> linhasAlteradas > 0))
                 .subscribeAsCompletionStage();
     }
@@ -98,9 +99,9 @@ public class VideoDataSourceAdapter implements VideoGateway {
                                                        long tamanhoPacoteBytes) {
         return Panache.withTransaction(() -> VideoEntity.update(
                         "estado = ?1, finalizadoEm = ?2, chavePacote = ?3, quantidadeFrames = ?4,"
-                                + " tamanhoPacoteBytes = ?5 where id = ?6 and estado = ?7",
+                                + " tamanhoPacoteBytes = ?5 where id = ?6 and estado in ?7",
                         EstadoVideo.CONCLUIDO, concluidaEm, chavePacote, quantidadeFrames, tamanhoPacoteBytes,
-                        id, EstadoVideo.CONCLUIDO.predecessor())
+                        id, EstadoVideo.CONCLUIDO.predecessores())
                         .map(linhasAlteradas -> linhasAlteradas > 0))
                 .subscribeAsCompletionStage();
     }
@@ -113,8 +114,8 @@ public class VideoDataSourceAdapter implements VideoGateway {
     @Override
     public CompletableFuture<Optional<Video>> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
         return Panache.withTransaction(() -> VideoEntity.update(
-                        "estado = ?1, finalizadoEm = ?2, motivo = ?3 where id = ?4 and estado = ?5",
-                        EstadoVideo.FALHOU, falhouEm, motivo, id, EstadoVideo.FALHOU.predecessor())
+                        "estado = ?1, finalizadoEm = ?2, motivo = ?3 where id = ?4 and estado in ?5",
+                        EstadoVideo.FALHOU, falhouEm, motivo, id, EstadoVideo.FALHOU.predecessores())
                         .chain(linhasAlteradas -> linhasAlteradas > 0
                                 ? VideoEntity.<VideoEntity>findById(id)
                                         .map(entity -> Optional.of(paraDominio(entity)))

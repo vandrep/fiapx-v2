@@ -4,7 +4,7 @@
 - label: wayfinder:task
 - status: aberto
 - assignee:
-- bloqueado-por: 027
+- bloqueado-por: 027 (fechado)
 
 ## Question
 
@@ -65,3 +65,21 @@ o desfecho, é o começo dele.
 Números em `docs/pesquisa/` e a célula do `videos` na tabela § *O que escala, e como* perdendo
 o **"Nunca medido"** — para ganhar um número, seja ele qual for. Se o resultado reprovar, ele
 vai para § *Limitações conhecidas* com o número ao lado, que é o padrão que o 025 estabeleceu.
+
+
+## Desbloqueado pelo 027
+
+Os defeitos 1 e 2 que envenenavam o modo `mata-videos` estão corrigidos e remedidos (0/133
+terminais com a borda derrubada), então a pergunta desta ficha — *matar uma réplica de N deveria
+custar zero requisição* — já é medível. Três coisas que o 027 entrega prontas:
+
+- **`FIAPX_ATRASO_KILL`** no harness: os 3 s fixos não alcançavam a janela, e sob 400 VUs
+  simultâneos nada completa antes do kill. As rodadas úteis daqui saíram com `FIAPX_VUS=40`.
+- **Portão de validade de rodada** no modo `mata-videos`: rodada com 0 aceitos agora sai com
+  código 2 em vez de passar verde. Vale igual aqui, onde o alvo do kill também é a borda.
+- **Aviso de instrumento**: nada no repo constrói as imagens que o Compose referencia
+  (`ghcr.io/vandrep/fiapx-*:latest`). Construa antes de medir, ou meça o binário antigo em
+  silêncio.
+
+O número de linha de base continua o do 025: **361 recusados de 400** ao derrubar a réplica
+única.

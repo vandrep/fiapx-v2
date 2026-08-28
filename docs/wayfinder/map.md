@@ -44,8 +44,9 @@ test-first por construção); `writing-for-agents` ao editar `AGENTS.md`.
 | Notificação | SMTP com MailHog no Compose |
 | Health checks | Sim (`quarkus-smallrye-health`), para `depends_on: service_healthy` |
 | CI/CD | GitHub Actions: `verify` + build das imagens + push para o GHCR, tag do commit **e `latest`**, `amd64`+`arm64` (ticket 013). `main` protegida por ruleset: PR obrigatório, zero aprovações |
-| Escalabilidade | Medida ([026](tickets/026-linearidade-horizontal.md)): `extracao` linear até **6 réplicas** nesta máquina (eficiência 0,88, critério 0,80), 15,6 Vídeo/min; `ffmpeg` é 98,2% do tempo de serviço. Borda ainda não medida com réplicas ([028](tickets/028-escala-da-borda.md)) |
-| Testes | Por serviço e isolado (unitário do `core`, Cucumber pela borda HTTP, `ArchitectureConstraintsTest`); fluxo ponta-a-ponta por script de smoke versionado, não automatizado no CI |
+| Escalabilidade | Medida ([026](tickets/026-linearidade-horizontal.md)): `extracao` linear até **6 réplicas** nesta máquina (eficiência 0,88, critério 0,80), 15,6 Vídeo/min; `ffmpeg` é 98,2% do tempo de serviço, e desde o [027](tickets/027-melhorias-medidas.md) roda com `-threads` derivado da cota do cgroup (−31,6%). Borda ainda não medida com réplicas ([028](tickets/028-escala-da-borda.md)) |
+| Conservação | Medida e reprovada no [025](tickets/025-carga-conservacao.md), corrigida e remedida no [027](tickets/027-melhorias-medidas.md): **0 presos** em 400 sob pico e em 133 com a borda derrubada. Terminal aceita `RECEBIDO` ou `PROCESSANDO` ([ADR 0002](../adr/0002-maquina-de-estados-em-duas-camadas.md)); `publish-confirms=true` faz a marca do [ADR 0003](../adr/0003-reconciliacao-por-varredura.md) parar de mentir |
+| Testes | **144 (103 sem Docker)**. Por serviço e isolado (unitário do `core`, Cucumber pela borda HTTP, `ArchitectureConstraintsTest`); fluxo ponta-a-ponta por script de smoke versionado, não automatizado no CI |
 
 **Base de código**: template em `/home/vandrep/projetos/oficina-soat/quarkus-clean-architecture-template`
 (leia o `AGENTS.md` dele antes de escrever qualquer classe — as regras de camada são
@@ -371,17 +372,42 @@ verificadas por teste, não são sugestão). Projeto original em
   [`docs/pesquisa/carga-escalabilidade.md`](../pesquisa/carga-escalabilidade.md); o primeiro
   candidato de **vazão** do 027 (`-threads 2` recupera 32%) saiu daqui
 
+
+- [Melhorias justificadas pela medição](tickets/027-melhorias-medidas.md) — as quatro condenadas
+  corrigidas, cada uma remedida: presos em `PROCESSANDO` de **11/400 para 0/400** sob pico e de
+  **34/39 para 0/133** com a borda derrubada; `ffmpeg` de 18,54 s para **12,68 s** (−31,6%) sob
+  `cpus=2`. O defeito 1 virou emenda ao **ADR 0002** — terminal aceita `RECEBIDO` **ou**
+  `PROCESSANDO`, porque `PROCESSANDO` é acompanhamento e não portão, e o desfecho descartado
+  estava no bucket. O achado que mais desarma: **um teste do repo afirmava o defeito**
+  (`concluirSemPassarPorProcessandoNaoMudaNada`), escrito com confiança e invertido aqui. O
+  dilema do defeito 4 **se dissolveu num fato** em vez de virar decisão: `availableProcessors()`
+  já lê a cota do cgroup (`Effective CPU Count: 2` enquanto `nproc` diz 20), então o número certo
+  é derivado e a propriedade configurável foi recusada — número que a JVM sabe ler não deve virar
+  conhecimento tribal em `.env`. E a condição de aceite dura do defeito 2 revelou a causa de a
+  varredura do ADR 0003 nunca ter sido flagrada: ela era **muda**, então nenhuma medição poderia
+  tê-la visto agir. Agora registra o que republica, e foi observada — mas contra um órfão
+  **semeado**, porque em duas rodadas `mata-videos` a queda não produziu órfão nenhum (134 linhas,
+  134 com marca): exercita o mecanismo, não a corrida que o cria, e o ADR diz isso. Duas previsões
+  minhas caíram na medição: o round-trip do `publish-confirms` **não custa nada mensurável**
+  (mediana do `202` 11233 ms contra 11504 ms sem), e o harness **dava falso verde** — `mata-videos`
+  passou duas vezes com **0 aceitos**, porque os critérios 2 a 5 se satisfazem com 0/0. Ganhou
+  portão de validade de rodada, na mesma família do sexto portão do 026. Dois buracos de
+  instrumento a mais: o `IN` novo não tinha teste que o alcançasse (nem `core` nem BDD — daí
+  `VideoDataSourceAdapterTest` contra Postgres de verdade), e o harness **mede a imagem que
+  estiver por perto**, porque nada no repo a constrói. **144 testes (103 sem Docker)**
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
      fronteira reabriu por escolha — `docs/arquitetura.md` § Limitações conhecidas declarava
      que "a escalabilidade é argumentada, não medida", e sobrava prazo para converter a frase
      em número. O 025 converteu a metade da conservação, e o número reprovou; o 026 converteu a
-     metade da linearidade, e o número confirmou. Restam quatro defeitos medidos — três de
-     correção, um de vazão — e o 027, que deixou de ser hipotético e é agora a única coisa na
-     fronteira. -->
+     metade da linearidade, e o número confirmou; o 027 corrigiu o que o 025 condenou e remediu.
+     Sobra o 028, agora desbloqueado e sozinho na fronteira: a borda é a única célula da tabela
+     § *O que escala, e como* que segue com "Nunca medido". -->
 
-- [028 — Escala da borda](tickets/028-escala-da-borda.md) — `bloqueado-por: 027`. Saiu do 026
+- [028 — Escala da borda](tickets/028-escala-da-borda.md) — **na fronteira** desde que o 027
+  fechou, e é o único ticket takeable. Saiu do 026
   por corte: escalar o `videos` é outro objeto (HTTP, não fila) e outro critério (recusa e
   latência, não vazão). Julga o **"Nunca medido"** da célula do `videos` na tabela § *O que
   escala, e como*, contra os 361 recusados de 400 que o 025 mediu ao derrubar a réplica única.
@@ -390,14 +416,6 @@ verificadas por teste, não são sugestão). Projeto original em
   depois da correção. Precisa de construção: proxy no overlay de carga. O 026 já lhe entrega um
   número: a réplica única **não é barata sob rajada** — 16 uploads simultâneos de 41 MB levaram o
   `videos` a ~12 núcleos de pico, o que a média de 91% durante a drenagem esconde inteiramente
-- [027 — Melhorias justificadas pela medição](tickets/027-melhorias-medidas.md) — **na fronteira**
-  desde que o 026 fechou, e é o único ticket takeable. Nasceu com o corpo vazio de propósito; o
-  025 o preencheu com três condenados de **correção** — evento terminal perdido fora de ordem,
-  marca de publicação que mente, varredura de boot que sabota as réplicas vivas — e o 026
-  acrescentou o primeiro de **vazão**: o `ffmpeg` dimensiona 20 threads por `nproc` em vez da cota
-  do cgroup, e `-threads 2` recupera 32%. Os dois primeiros são candidatos a ADR; o quarto
-  provavelmente não é, mas é decisão e não digitação — o número certo de threads depende da cota,
-  que é config de implantação e não de código
 
 ## Fora de escopo
 

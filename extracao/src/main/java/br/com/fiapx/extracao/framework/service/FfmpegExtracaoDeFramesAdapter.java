@@ -110,6 +110,7 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         var resultado = executarCapturandoStderr(timeoutFfmpegSegundos,
                 "ffmpeg", "-hide_banner", "-nostdin",
                 "-loglevel", "level+repeat+error",
+                "-threads", String.valueOf(threadsDoFfmpeg()),
                 "-xerror", "-nostats", "-progress", "pipe:1",
                 "-i", video.toString(),
                 "-vf", "fps=1", "-y", padraoSaida);
@@ -118,6 +119,23 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
             return;
         }
         throw classificarFalhaDoFfmpeg(resultado.exitCode(), resultado.stderr());
+    }
+
+    /**
+     * O {@code ffmpeg} dimensiona o pool dele por {@code nproc}, que dentro do container
+     * devolve os nucleos do <b>host</b> e nao a cota do cgroup — sob {@code cpus=2} num host
+     * de 20 nucleos ele abria 20 threads e o CFS as estrangulava em bloco. Medido no ticket
+     * 027 sobre um fixture de 2 min: 20,84 s com o default contra 14,14 s com {@code -threads
+     * 2}, 32% de perda, e o valor com {@code -threads 2} bate com dois nucleos dedicados via
+     * {@code taskset} (14,02 s) — a perda inteira era sobre-assinatura contra a cota.
+     *
+     * <p>O numero certo depende da cota, que e config de implantacao e nao de codigo, mas nao
+     * precisa virar propriedade: {@code availableProcessors()} na JVM ja e ciente do cgroup e
+     * devolve 2 sob {@code cpus=2} e 20 sem teto nenhum. Sem cota, portanto, isto reproduz o
+     * default de sempre — que ali e o valor <b>certo</b> (3,04 s medidos).
+     */
+    private static int threadsDoFfmpeg() {
+        return Runtime.getRuntime().availableProcessors();
     }
 
     /**

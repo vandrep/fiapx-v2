@@ -87,12 +87,32 @@ class VideoTest {
     }
 
     @Test
-    void concluirSemPassarPorProcessandoNaoMudaNada() {
+    void concluirSemPassarPorProcessandoConclui() {
+        // Este teste ja afirmou o contrario, e afirmava o defeito 1 do ticket 027: pular
+        // PROCESSANDO nao e ilegal, e o que acontece quando a ExtracaoConcluida ganha a
+        // corrida da ExtracaoIniciada — duas filas independentes, sem ordem entre si.
         var video = recebido();
 
-        assertFalse(video.marcaComoConcluida(Instant.now(), "pac.zip", 1, 1L));
-        assertEquals(EstadoVideo.RECEBIDO, video.estado());
-        assertNull(video.chavePacote());
+        assertTrue(video.marcaComoConcluida(Instant.now(), "pac.zip", 1, 1L));
+        assertEquals(EstadoVideo.CONCLUIDO, video.estado());
+        assertEquals("pac.zip", video.chavePacote());
+    }
+
+    @Test
+    void falharSemPassarPorProcessandoFalha() {
+        var video = recebido();
+
+        assertTrue(video.marcaComoFalha(Instant.now(), MotivoFalha.ARQUIVO_INVALIDO));
+        assertEquals(EstadoVideo.FALHOU, video.estado());
+    }
+
+    @Test
+    void iniciarDepoisDeConcluidoNaoMudaNada() {
+        var video = recebido();
+        video.marcaComoConcluida(Instant.now(), "pac.zip", 1, 1L);
+
+        assertFalse(video.marcaComoIniciada());
+        assertEquals(EstadoVideo.CONCLUIDO, video.estado());
     }
 
     @Test

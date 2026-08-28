@@ -40,13 +40,17 @@ public interface VideoGateway {
     /**
      * A Extracao comecou. {@code true} so quando esta chamada de fato tirou a linha de
      * RECEBIDO — reentrega fora de ordem devolve {@code false} e o consumidor da ack do
-     * mesmo jeito (ADR 0002). O predecessor exigido no {@code WHERE} vem de
-     * {@link EstadoVideo#predecessor()}, nao de um literal aqui: o grafo continua declarado
+     * mesmo jeito (ADR 0002). Os predecessores aceitos no {@code WHERE} vem de
+     * {@link EstadoVideo#predecessores()}, nao de literais aqui: o grafo continua declarado
      * uma vez so.
      */
     CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm);
 
-    /** Mesma guarda de {@link #marcarIniciada}, agora saindo de PROCESSANDO para CONCLUIDO. */
+    /**
+     * Mesma guarda de {@link #marcarIniciada}, agora para CONCLUIDO — e saindo de RECEBIDO
+     * <b>ou</b> de PROCESSANDO, porque a {@code ExtracaoConcluida} pode chegar antes da
+     * {@code ExtracaoIniciada} (ticket 027, ADR 0002).
+     */
     CompletableFuture<Boolean> marcarConcluida(UUID id,
                                                Instant concluidaEm,
                                                String chavePacote,

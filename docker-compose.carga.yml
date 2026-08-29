@@ -10,6 +10,12 @@
 # As duas variaveis abaixo sao o parametro que o ticket 026 varre. O 025 fixa
 # FIAPX_EXTRACAO_REPLICAS=4 para a drenagem da rajada nao levar meia hora; o 026 percorre
 # N em {1,2,4,6} com o mesmo teto de CPU por replica.
+#
+# `videos` e `videos-proxy` sao do ticket 028: escalar a borda por replicas exige um proxy na
+# frente, porque a porta publicada (`8080:8080`) nao pode ser aberta por N containers ao mesmo
+# tempo. `!override []` some com a publicacao de porta do `videos` so aqui — o
+# `docker-compose.yml` principal, que e a demo, continua publicando a porta como sempre porque
+# ali `deploy.replicas` nunca aparece (nasce implicitamente em 1).
 services:
   extracao:
     deploy:
@@ -20,3 +26,37 @@ services:
           # cores nao dobra nada — mede-se o host, nao o desenho. `cpus` como string porque
           # o Compose exige (aceita fracionario).
           cpus: "${FIAPX_EXTRACAO_CPUS:-2}"
+
+  videos:
+    ports: !override []
+    deploy:
+      replicas: ${FIAPX_VIDEOS_REPLICAS:-1}
+
+  # So existe neste overlay — a demo da banca fala com o `videos` direto. O entrypoint gera o
+  # nginx.conf em runtime porque o numero de replicas so existe em runtime: ver
+  # scripts/carga/proxy/entrypoint.sh para o porque de nao dar para usar upstream estatico.
+  videos-proxy:
+    image: nginx:1.27-alpine
+    environment:
+      FIAPX_VIDEOS_REPLICAS: ${FIAPX_VIDEOS_REPLICAS:-1}
+      # Precisa bater com o nome de projeto que o Compose usou de fato — o harness passa o
+      # mesmo valor usado para montar o nome da rede (`$(basename "$raiz")`), nunca um default
+      # deste arquivo, porque o nome de projeto real depende de onde o repo foi clonado.
+      FIAPX_PROXY_PROJETO: ${COMPOSE_PROJECT_NAME:?defina COMPOSE_PROJECT_NAME}
+    volumes:
+      - ./scripts/carga/proxy/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    ports:
+      - "8080:8080"
+    depends_on:
+      - videos
+    healthcheck:
+      # Bate no proprio caminho sob medicao: sobe uma replica do videos por tras do proxy, nao
+      # so o proxy isolado. 127.0.0.1, nao localhost: a imagem nginx:alpine resolve "localhost"
+      # para ::1 primeiro, e o nginx aqui so escuta em IPv4 (`listen 8080` sem `[::]`) — com
+      # "localhost" o wget do healthcheck batia em ::1 e ficava "unhealthy" para sempre mesmo
+      # com o proxy respondendo normal em 127.0.0.1. Achado ao rodar (ticket 028).
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/q/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 30

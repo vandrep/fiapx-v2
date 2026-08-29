@@ -2,8 +2,8 @@
 
 - id: 028
 - label: wayfinder:task
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: vandrep (sessão de 2026-08-29)
 - bloqueado-por: 027 (fechado)
 
 ## Question
@@ -83,3 +83,60 @@ custar zero requisição* — já é medível. Três coisas que o 027 entrega pr
 
 O número de linha de base continua o do 025: **361 recusados de 400** ao derrubar a réplica
 única.
+
+## Resolução
+
+Números completos em
+[`docs/pesquisa/carga-escala-borda.md`](../../pesquisa/carga-escala-borda.md). A célula do
+`videos` na tabela § *O que escala, e como* perde o "Nunca medido".
+
+**Pergunta 1 — a borda escala?** Sim, em latência de aceite: sob 400 conexões simultâneas, a
+mediana do `202` caiu de **630 ms (N=1) para 114 ms (N=3)**, 5,5×. A vazão de dreno não mudou
+(400 concluídos em 46s nos dois pontos) porque quem limita o dreno é o `extracao`, não o
+`videos` — a réplica extra da borda alivia o aceite, não tem o que acelerar depois dele. Não
+isolado onde o próximo teto está (Postgres, MinIO ou o próprio `extracao`) nem se o proxy em si
+vira gargalo em N maior que 3 — fica para o "Ainda não especificado" do mapa se algum dia
+importar.
+
+**Pergunta 2 — matar uma réplica de N custa zero requisição?** Quase, não zero: **39
+recusados de 400 (9,75%)**, contra os 361/400 (90,25%) da réplica única — 9,3× menos perda.
+Os 39 são todos `502` (zero timeout, EOF ou conexão recusada), e a causa é uma regra
+deliberada do nginx: `proxy_next_upstream` não reencaminha um `POST` (não-idempotente) para
+outra réplica depois que a conexão com a réplica morta já falhou esperando resposta — porque
+ela pode já ter completado o efeito colateral (linha gravada, ZIP no bucket) antes de morrer, e
+reencaminhar arriscaria duplicar o Vídeo. O parâmetro `non_idempotent` fecharia a lacuna às
+custas desse risco; **não foi ligado** — o endpoint `/videos` não tem hoje chave de
+idempotência que absorva um retry duplicado, e este ticket mede, não conserta (mesma fronteira
+que o 025 traçou para o 027). Fica registrado como candidato de melhoria não implementado.
+
+**O que precisou ser construído, e não estava previsto.** O overlay de carga ganhou um proxy
+L7 (`videos-proxy`, nginx) na frente de N réplicas do `videos` — só existe ali, a demo da
+banca continua com uma réplica e sem proxy. O `nginx.conf` é gerado em **runtime** pelo
+entrypoint do container, porque o número de réplicas e o hostname de cada uma
+(`<projeto>-videos-<índice>`, verificado por teste direto) só existem em runtime; um upstream
+estático nunca teria failover. A bufferização de corpo do `POST` ficou no **default (ligada)**
+de propósito — é o que permite ao nginx reencaminhar o corpo inteiro para a próxima réplica
+quando a atual morre no meio, e é exatamente essa propriedade que faz a pergunta 2 ter uma
+resposta diferente de "zero" e de "tudo".
+
+**Achado de instrumento, não de sistema.** Esta sessão roda em Docker-outside-of-Docker — o
+`dockerd` real fica fora do container onde o harness executa, e os dois só concordam no
+conteúdo de `/workspace`, não no caminho. Bind mount por caminho relativo precisou de
+`--project-directory` apontando para o caminho real do host (exposto em
+`LOCAL_WORKSPACE_FOLDER` pelo devcontainer), e a checagem "amostra pela API" (que batia em
+`localhost:8080`/`8081`, inalcançável de dentro do devcontainer) passou a rodar dentro de um
+container na rede do Compose, contra `videos-proxy:8080`/`keycloak:8080` — mesmo truque que o
+injetor já usava. Nenhuma das duas mexe em `oraculo.sh`, que continua certo para quem roda no
+mesmo host do `dockerd`; ambas vivem só em `scripts/carga/borda.sh`. Achado menor dentro do
+proxy: o healthcheck usava `http://localhost:8080`, e a imagem `nginx:alpine` resolve
+`localhost` para `::1` primeiro — o nginx aqui só escuta IPv4, e o healthcheck ficava
+"unhealthy" para sempre com o proxy respondendo normal em `127.0.0.1`. Trocado para
+`127.0.0.1` explícito.
+
+**Máquina diferente das medições 025-027** (6 vCPU nesta sessão contra 20 nas anteriores) — os
+números absolutos de vazão não são comparáveis entre sessões; só as comparações internas
+(N=1 × N=3, réplica única × N réplicas) valem, e são elas que respondem as duas perguntas.
+
+**Uma corrida por ponto**, não repetida — mesma postura do 025, não do 026. A mediana de
+latência (5,5×) é grande o bastante para não ser ruído; o p95/máximo e a taxa de 9,75% do
+`mata-replica` não têm repetição para calibrar variância.

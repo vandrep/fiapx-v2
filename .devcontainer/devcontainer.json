@@ -1,5 +1,5 @@
 {
-  "name": "project-dev",
+  "name": "fiapx-v2-dev",
 
   "build": {
     "dockerfile": "Dockerfile",
@@ -10,17 +10,51 @@
 
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 
-  "remoteUser": "vandrep",
+  "remoteUser": "root",
 
   "shutdownAction": "none",
 
+  "containerEnv": {
+    "NPM_CONFIG_UPDATE_NOTIFIER": "false"
+  },
+
+  "remoteEnv": {
+    "LOCAL_WORKSPACE_FOLDER": "${localWorkspaceFolder}"
+  },
+
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
+
     "ghcr.io/devcontainers/features/github-cli:1": {},
+
     "ghcr.io/devcontainers/features/node:1": {
       "version": "24"
+    },
+
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "moby": false,
+      "dockerDashComposeVersion": "latest",
+      "installDockerBuildx": true
     }
   },
 
-  "postCreateCommand": "npm install -g @openai/codex"
+  "mounts": [
+    {
+      "source": "/run/user/1000/docker.sock",
+      "target": "/var/run/docker-host.sock",
+      "type": "bind"
+    },
+    {
+      "source": "fiapx-v2-codex-data",
+      "target": "/root/.codex",
+      "type": "volume"
+    },
+    {
+      "source": "fiapx-v2-claude-data",
+      "target": "/root/.claude",
+      "type": "volume"
+    }
+  ],
+
+  "postCreateCommand": "npm install -g @openai/codex @anthropic-ai/claude-code && codex --version && claude --version"
 }

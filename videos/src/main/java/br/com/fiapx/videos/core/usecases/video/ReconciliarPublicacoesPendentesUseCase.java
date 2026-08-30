@@ -1,10 +1,7 @@
 package br.com.fiapx.videos.core.usecases.video;
 
 import br.com.fiapx.videos.core.entities.Video;
-import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
-import br.com.fiapx.videos.core.interfaces.sender.ExtracaoSender;
-import br.com.fiapx.videos.core.interfaces.sender.NotificacaoSender;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -30,7 +27,10 @@ import java.util.function.Function;
  * {@code Panache.withSession}/{@code withTransaction} reusa por contexto do Vert.x nao
  * tolera duas consultas concorrentes no mesmo contexto — medido em dev, onde duas queries
  * disparadas juntas corrompiam o {@code LoadContexts} do Hibernate Reactive
- * (`NoSuchElementException` em `StandardStack.pop`).
+ * (`NoSuchElementException` em `StandardStack.pop`). O "mesmo par" que o comentario acima
+ * promete e literalmente {@link PublicarExtrairVideo} e {@link PublicarVideoFalhou} — os
+ * mesmos objetos que {@code EnviarVideoUseCase} e {@code ProcessarExtracaoFalhouUseCase}
+ * chamam, nao uma reimplementacao.
  */
 public class ReconciliarPublicacoesPendentesUseCase {
 
@@ -38,18 +38,15 @@ public class ReconciliarPublicacoesPendentesUseCase {
     private static final int FOLGA_CONTRA_CRASH_MINUTOS = 1;
 
     private final VideoGateway videoGateway;
-    private final ArquivoGateway arquivoGateway;
-    private final ExtracaoSender extracaoSender;
-    private final NotificacaoSender notificacaoSender;
+    private final PublicarExtrairVideo publicarExtrairVideo;
+    private final PublicarVideoFalhou publicarVideoFalhou;
 
     public ReconciliarPublicacoesPendentesUseCase(VideoGateway videoGateway,
-                                                  ArquivoGateway arquivoGateway,
-                                                  ExtracaoSender extracaoSender,
-                                                  NotificacaoSender notificacaoSender) {
+                                                  PublicarExtrairVideo publicarExtrairVideo,
+                                                  PublicarVideoFalhou publicarVideoFalhou) {
         this.videoGateway = videoGateway;
-        this.arquivoGateway = arquivoGateway;
-        this.extracaoSender = extracaoSender;
-        this.notificacaoSender = notificacaoSender;
+        this.publicarExtrairVideo = publicarExtrairVideo;
+        this.publicarVideoFalhou = publicarVideoFalhou;
     }
 
     public CompletableFuture<Republicacoes> executar() {
@@ -58,10 +55,10 @@ public class ReconciliarPublicacoesPendentesUseCase {
         return videoGateway.buscarComandosPendentes(recebidosAntesDe, TAMANHO_DO_LOTE)
                 .thenCompose(pendentes -> {
                     comandos[0] = pendentes.size();
-                    return emSequencia(pendentes, this::republicarComando);
+                    return emSequencia(pendentes, publicarExtrairVideo::publicar);
                 })
                 .thenCompose(ignorado -> videoGateway.buscarFalhasPendentes(TAMANHO_DO_LOTE))
-                .thenCompose(pendentes -> emSequencia(pendentes, this::republicarFalha)
+                .thenCompose(pendentes -> emSequencia(pendentes, publicarVideoFalhou::publicar)
                         .thenApply(ignorado -> new Republicacoes(comandos[0], pendentes.size())));
     }
 
@@ -71,18 +68,6 @@ public class ReconciliarPublicacoesPendentesUseCase {
         public boolean houveAlgo() {
             return comandos > 0 || falhas > 0;
         }
-    }
-
-    private CompletableFuture<Void> republicarComando(Video video) {
-        return extracaoSender
-                .enviarExtrairVideo(video.id(), video.chaveVideo(), arquivoGateway.chaveDoPacote(video.id()))
-                .thenCompose(ignorado -> videoGateway.marcarComandoPublicado(video.id(), Instant.now()));
-    }
-
-    private CompletableFuture<Void> republicarFalha(Video video) {
-        return notificacaoSender
-                .enviarVideoFalhou(video.id(), video.dono(), video.nome(), video.motivo(), video.finalizadoEm())
-                .thenCompose(ignorado -> videoGateway.marcarFalhaPublicada(video.id(), Instant.now()));
     }
 
     private static CompletableFuture<Void> emSequencia(List<Video> itens, Function<Video, CompletableFuture<Void>> acao) {

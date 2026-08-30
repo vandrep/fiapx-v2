@@ -37,7 +37,9 @@ class ReconciliarPublicacoesPendentesUseCaseTest {
         arquivos = new GatewaysEmMemoria.Arquivos();
         extracao = new GatewaysEmMemoria.ExtracaoEnvios();
         notificacao = new GatewaysEmMemoria.NotificacaoEnvios();
-        useCase = new ReconciliarPublicacoesPendentesUseCase(videos, arquivos, extracao, notificacao);
+        useCase = new ReconciliarPublicacoesPendentesUseCase(videos,
+                new PublicarExtrairVideo(arquivos, extracao, videos),
+                new PublicarVideoFalhou(notificacao, videos));
     }
 
     @Test

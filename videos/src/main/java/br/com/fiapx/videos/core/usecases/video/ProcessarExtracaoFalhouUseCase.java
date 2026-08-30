@@ -1,9 +1,7 @@
 package br.com.fiapx.videos.core.usecases.video;
 
 import br.com.fiapx.videos.core.entities.MotivoFalha;
-import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
-import br.com.fiapx.videos.core.interfaces.sender.NotificacaoSender;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -15,29 +13,24 @@ import java.util.concurrent.CompletableFuture;
  * <b>esta</b> chamada de fato tirou a linha de PROCESSANDO — reentregas do mesmo evento
  * (o contrato nao garante ordem, e {@code x-delivery-limit} conta entregas) encontram o
  * Optional vazio e nao publicam nada. Tres entregas do mesmo evento produzem, portanto,
- * exatamente um {@code VideoFalhou}.
+ * exatamente um {@code VideoFalhou}. O publish em si e {@link PublicarVideoFalhou}, o mesmo
+ * caminho que a reconciliacao usa.
  */
 public class ProcessarExtracaoFalhouUseCase {
 
     private final VideoGateway videoGateway;
-    private final NotificacaoSender notificacaoSender;
+    private final PublicarVideoFalhou publicarVideoFalhou;
 
-    public ProcessarExtracaoFalhouUseCase(VideoGateway videoGateway, NotificacaoSender notificacaoSender) {
+    public ProcessarExtracaoFalhouUseCase(VideoGateway videoGateway, PublicarVideoFalhou publicarVideoFalhou) {
         this.videoGateway = videoGateway;
-        this.notificacaoSender = notificacaoSender;
+        this.publicarVideoFalhou = publicarVideoFalhou;
     }
 
     public CompletableFuture<Void> executar(Command command) {
         return videoGateway.marcarFalha(command.idVideo(), command.ocorridoEm(), command.motivo())
                 .thenCompose(video -> video.isEmpty()
                         ? CompletableFuture.completedFuture(null)
-                        : publicarVideoFalhouEMarcar(video.get()));
-    }
-
-    private CompletableFuture<Void> publicarVideoFalhouEMarcar(Video video) {
-        return notificacaoSender
-                .enviarVideoFalhou(video.id(), video.dono(), video.nome(), video.motivo(), video.finalizadoEm())
-                .thenCompose(ignorado -> videoGateway.marcarFalhaPublicada(video.id(), Instant.now()));
+                        : publicarVideoFalhou.publicar(video.get()));
     }
 
     public record Command(UUID idVideo, MotivoFalha motivo, Instant ocorridoEm) {

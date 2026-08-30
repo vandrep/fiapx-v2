@@ -7,32 +7,32 @@ import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
 import br.com.fiapx.videos.core.interfaces.presenter.VideoPresenter;
 import br.com.fiapx.videos.core.interfaces.presenter.dto.VideoDTO;
-import br.com.fiapx.videos.core.interfaces.sender.ExtracaoSender;
 
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 
 /**
  * Origem do {@code POST /videos}. Toca tres sistemas sem transacao comum, e a ordem e fixa:
  * <b>objeto no armazenamento -> linha no banco (marca nula) -> publish do ExtrairVideo ->
  * marca gravada</b>, para que nenhum passo referencie algo que ainda nao existe e para que
- * um crash entre publish e marca apenas republique, nunca perca a mensagem (ADR 0003).
+ * um crash entre publish e marca apenas republique, nunca perca a mensagem (ADR 0003). O
+ * publish e a marca em si sao {@link PublicarExtrairVideo}, o mesmo caminho que a
+ * reconciliacao usa.
  */
 public class EnviarVideoUseCase {
 
     private final ArquivoGateway arquivoGateway;
     private final VideoGateway videoGateway;
-    private final ExtracaoSender extracaoSender;
+    private final PublicarExtrairVideo publicarExtrairVideo;
     private final VideoPresenter videoPresenter;
 
     public EnviarVideoUseCase(ArquivoGateway arquivoGateway,
                               VideoGateway videoGateway,
-                              ExtracaoSender extracaoSender,
+                              PublicarExtrairVideo publicarExtrairVideo,
                               VideoPresenter videoPresenter) {
         this.arquivoGateway = arquivoGateway;
         this.videoGateway = videoGateway;
-        this.extracaoSender = extracaoSender;
+        this.publicarExtrairVideo = publicarExtrairVideo;
         this.videoPresenter = videoPresenter;
     }
 
@@ -43,19 +43,11 @@ public class EnviarVideoUseCase {
         return arquivoGateway.gravarVideo(video.id(), video.nome(), command.arquivo())
                 .thenApply(video::armazenadoEm)
                 .thenCompose(armazenado -> videoGateway.adicionar(armazenado).thenApply(ignorado -> armazenado))
-                .thenCompose(this::publicarExtrairVideoEMarcar)
+                .thenCompose(armazenado -> publicarExtrairVideo.publicar(armazenado).thenApply(ignorado -> armazenado))
                 .thenApply(armazenado -> {
                     videoPresenter.present(VideoDTO.de(armazenado));
                     return armazenado;
                 });
-    }
-
-    private CompletableFuture<Video> publicarExtrairVideoEMarcar(Video armazenado) {
-        var chaveDestinoPacote = arquivoGateway.chaveDoPacote(armazenado.id());
-        return extracaoSender
-                .enviarExtrairVideo(armazenado.id(), armazenado.chaveVideo(), chaveDestinoPacote)
-                .thenCompose(ignorado -> videoGateway.marcarComandoPublicado(armazenado.id(), Instant.now()))
-                .thenApply(ignorado -> armazenado);
     }
 
     /**

@@ -32,7 +32,8 @@ class EnviarVideoUseCaseTest {
         arquivos = new GatewaysEmMemoria.Arquivos();
         extracao = new GatewaysEmMemoria.ExtracaoEnvios();
         presenter = new GatewaysEmMemoria.Presenter();
-        useCase = new EnviarVideoUseCase(arquivos, videos, extracao, presenter);
+        useCase = new EnviarVideoUseCase(arquivos, videos,
+                new PublicarExtrairVideo(arquivos, extracao, videos), presenter);
     }
 
     @Test

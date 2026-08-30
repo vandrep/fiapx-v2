@@ -13,6 +13,8 @@ import br.com.fiapx.videos.core.usecases.video.ListarVideosDoDonoUseCase;
 import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoConcluidaUseCase;
 import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoFalhouUseCase;
 import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoIniciadaUseCase;
+import br.com.fiapx.videos.core.usecases.video.PublicarExtrairVideo;
+import br.com.fiapx.videos.core.usecases.video.PublicarVideoFalhou;
 import br.com.fiapx.videos.core.usecases.video.ReconciliarPublicacoesPendentesUseCase;
 import br.com.fiapx.videos.interfaces.controllers.ExtracaoEventosController;
 import br.com.fiapx.videos.interfaces.controllers.ReconciliacaoController;
@@ -31,13 +33,27 @@ import jakarta.enterprise.inject.Produces;
 public class VideosConfiguration {
 
     @Produces
+    @ApplicationScoped
+    PublicarExtrairVideo publicarExtrairVideo(ArquivoGateway arquivoGateway,
+                                              ExtracaoSender extracaoSender,
+                                              VideoGateway videoGateway) {
+        return new PublicarExtrairVideo(arquivoGateway, extracaoSender, videoGateway);
+    }
+
+    @Produces
+    @ApplicationScoped
+    PublicarVideoFalhou publicarVideoFalhou(NotificacaoSender notificacaoSender, VideoGateway videoGateway) {
+        return new PublicarVideoFalhou(notificacaoSender, videoGateway);
+    }
+
+    @Produces
     VideosController videosController(VideoGateway videoGateway,
                                       ArquivoGateway arquivoGateway,
-                                      ExtracaoSender extracaoSender,
                                       VideoPresenter videoPresenter,
-                                      VideosPaginadosPresenter videosPaginadosPresenter) {
+                                      VideosPaginadosPresenter videosPaginadosPresenter,
+                                      PublicarExtrairVideo publicarExtrairVideo) {
         return new VideosController(
-                new EnviarVideoUseCase(arquivoGateway, videoGateway, extracaoSender, videoPresenter),
+                new EnviarVideoUseCase(arquivoGateway, videoGateway, publicarExtrairVideo, videoPresenter),
                 new ListarVideosDoDonoUseCase(videoGateway, videosPaginadosPresenter),
                 new ConsultarVideoUseCase(videoGateway, videoPresenter),
                 new BaixarPacoteUseCase(videoGateway, arquivoGateway));
@@ -45,20 +61,19 @@ public class VideosConfiguration {
 
     @Produces
     ExtracaoEventosController extracaoEventosController(VideoGateway videoGateway,
-                                                        NotificacaoSender notificacaoSender) {
+                                                        PublicarVideoFalhou publicarVideoFalhou) {
         return new ExtracaoEventosController(
                 new ProcessarExtracaoIniciadaUseCase(videoGateway),
                 new ProcessarExtracaoConcluidaUseCase(videoGateway),
-                new ProcessarExtracaoFalhouUseCase(videoGateway, notificacaoSender));
+                new ProcessarExtracaoFalhouUseCase(videoGateway, publicarVideoFalhou));
     }
 
     @Produces
     ReconciliacaoController reconciliacaoController(VideoGateway videoGateway,
-                                                    ArquivoGateway arquivoGateway,
-                                                    ExtracaoSender extracaoSender,
-                                                    NotificacaoSender notificacaoSender) {
-        return new ReconciliacaoController(new ReconciliarPublicacoesPendentesUseCase(
-                videoGateway, arquivoGateway, extracaoSender, notificacaoSender));
+                                                    PublicarExtrairVideo publicarExtrairVideo,
+                                                    PublicarVideoFalhou publicarVideoFalhou) {
+        return new ReconciliacaoController(
+                new ReconciliarPublicacoesPendentesUseCase(videoGateway, publicarExtrairVideo, publicarVideoFalhou));
     }
 
     /** Request-scoped: o presenter guarda o resultado de <b>uma</b> requisicao. */

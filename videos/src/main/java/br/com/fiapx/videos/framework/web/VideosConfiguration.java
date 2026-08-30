@@ -33,14 +33,27 @@ import jakarta.enterprise.inject.Produces;
 public class VideosConfiguration {
 
     @Produces
+    @ApplicationScoped
+    PublicarExtrairVideo publicarExtrairVideo(ArquivoGateway arquivoGateway,
+                                              ExtracaoSender extracaoSender,
+                                              VideoGateway videoGateway) {
+        return new PublicarExtrairVideo(arquivoGateway, extracaoSender, videoGateway);
+    }
+
+    @Produces
+    @ApplicationScoped
+    PublicarVideoFalhou publicarVideoFalhou(NotificacaoSender notificacaoSender, VideoGateway videoGateway) {
+        return new PublicarVideoFalhou(notificacaoSender, videoGateway);
+    }
+
+    @Produces
     VideosController videosController(VideoGateway videoGateway,
                                       ArquivoGateway arquivoGateway,
-                                      ExtracaoSender extracaoSender,
                                       VideoPresenter videoPresenter,
-                                      VideosPaginadosPresenter videosPaginadosPresenter) {
+                                      VideosPaginadosPresenter videosPaginadosPresenter,
+                                      PublicarExtrairVideo publicarExtrairVideo) {
         return new VideosController(
-                new EnviarVideoUseCase(arquivoGateway, videoGateway,
-                        new PublicarExtrairVideo(arquivoGateway, extracaoSender, videoGateway), videoPresenter),
+                new EnviarVideoUseCase(arquivoGateway, videoGateway, publicarExtrairVideo, videoPresenter),
                 new ListarVideosDoDonoUseCase(videoGateway, videosPaginadosPresenter),
                 new ConsultarVideoUseCase(videoGateway, videoPresenter),
                 new BaixarPacoteUseCase(videoGateway, arquivoGateway));
@@ -48,23 +61,19 @@ public class VideosConfiguration {
 
     @Produces
     ExtracaoEventosController extracaoEventosController(VideoGateway videoGateway,
-                                                        NotificacaoSender notificacaoSender) {
+                                                        PublicarVideoFalhou publicarVideoFalhou) {
         return new ExtracaoEventosController(
                 new ProcessarExtracaoIniciadaUseCase(videoGateway),
                 new ProcessarExtracaoConcluidaUseCase(videoGateway),
-                new ProcessarExtracaoFalhouUseCase(videoGateway,
-                        new PublicarVideoFalhou(notificacaoSender, videoGateway)));
+                new ProcessarExtracaoFalhouUseCase(videoGateway, publicarVideoFalhou));
     }
 
     @Produces
     ReconciliacaoController reconciliacaoController(VideoGateway videoGateway,
-                                                    ArquivoGateway arquivoGateway,
-                                                    ExtracaoSender extracaoSender,
-                                                    NotificacaoSender notificacaoSender) {
-        return new ReconciliacaoController(new ReconciliarPublicacoesPendentesUseCase(
-                videoGateway,
-                new PublicarExtrairVideo(arquivoGateway, extracaoSender, videoGateway),
-                new PublicarVideoFalhou(notificacaoSender, videoGateway)));
+                                                    PublicarExtrairVideo publicarExtrairVideo,
+                                                    PublicarVideoFalhou publicarVideoFalhou) {
+        return new ReconciliacaoController(
+                new ReconciliarPublicacoesPendentesUseCase(videoGateway, publicarExtrairVideo, publicarVideoFalhou));
     }
 
     /** Request-scoped: o presenter guarda o resultado de <b>uma</b> requisicao. */

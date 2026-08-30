@@ -44,7 +44,7 @@ test-first por construção); `writing-for-agents` ao editar `AGENTS.md`.
 | Notificação | SMTP com MailHog no Compose |
 | Health checks | Sim (`quarkus-smallrye-health`), para `depends_on: service_healthy` |
 | CI/CD | GitHub Actions: `verify` + build das imagens + push para o GHCR, tag do commit **e `latest`**, `amd64`+`arm64` (ticket 013). `main` protegida por ruleset: PR obrigatório, zero aprovações |
-| Escalabilidade | Medida ([026](tickets/026-linearidade-horizontal.md)): `extracao` linear até **6 réplicas** nesta máquina (eficiência 0,88, critério 0,80), 15,6 Vídeo/min; `ffmpeg` é 98,2% do tempo de serviço, e desde o [027](tickets/027-melhorias-medidas.md) roda com `-threads` derivado da cota do cgroup (−31,6%). Borda ainda não medida com réplicas ([028](tickets/028-escala-da-borda.md)) |
+| Escalabilidade | Medida ([026](tickets/026-linearidade-horizontal.md)): `extracao` linear até **6 réplicas** nesta máquina (eficiência 0,88, critério 0,80), 15,6 Vídeo/min; `ffmpeg` é 98,2% do tempo de serviço, e desde o [027](tickets/027-melhorias-medidas.md) roda com `-threads` derivado da cota do cgroup (−31,6%). Borda medida com réplicas atrás de proxy ([028](tickets/028-escala-da-borda.md), máquina diferente — 6 vCPU): mediana do `202` cai 5,5× (N=1→N=3); matar uma réplica de N=3 custa 39/400 recusados (9,75%) contra 361/400 (90,25%) com réplica única — não zero, por design do nginx contra `POST` não-idempotente |
 | Conservação | Medida e reprovada no [025](tickets/025-carga-conservacao.md), corrigida e remedida no [027](tickets/027-melhorias-medidas.md): **0 presos** em 400 sob pico e em 133 com a borda derrubada. Terminal aceita `RECEBIDO` ou `PROCESSANDO` ([ADR 0002](../adr/0002-maquina-de-estados-em-duas-camadas.md)); `publish-confirms=true` faz a marca do [ADR 0003](../adr/0003-reconciliacao-por-varredura.md) parar de mentir |
 | Testes | **144 (103 sem Docker)**. Por serviço e isolado (unitário do `core`, Cucumber pela borda HTTP, `ArchitectureConstraintsTest`); fluxo ponta-a-ponta por script de smoke versionado, não automatizado no CI |
 
@@ -396,26 +396,35 @@ verificadas por teste, não são sugestão). Projeto original em
   `VideoDataSourceAdapterTest` contra Postgres de verdade), e o harness **mede a imagem que
   estiver por perto**, porque nada no repo a constrói. **144 testes (103 sem Docker)**
 
+- [Escala da borda](tickets/028-escala-da-borda.md) — **a afirmação quase se sustenta**. N=3
+  réplicas do `videos` atrás de um proxy L7 (`nginx`, novo no overlay de carga) reduzem a
+  mediana de latência do `202` em **5,5×** (630→114 ms) sob 400 conexões simultâneas contra
+  N=1; a vazão de dreno não muda, porque quem limita é o `extracao`, não a borda. Matar uma
+  réplica de N=3 durante a rajada custou **39 recusados de 400 (9,75%)**, contra os 361/400
+  (90,25%) do [025](tickets/025-carga-conservacao.md) com réplica única — 9,3× menos perda,
+  mas não zero. Os 39 são todos `502`, nenhum timeout: o nginx recusa, por padrão, reencaminhar
+  um `POST` (não-idempotente) para outra réplica depois que a conexão já falhou esperando
+  resposta, porque a réplica morta pode já ter completado o efeito colateral antes de morrer —
+  reencaminhar arriscaria duplicar o Vídeo. `non_idempotent` fecharia a lacuna às custas desse
+  risco; **não foi ligado**, fica como candidato não implementado — o endpoint não tem chave de
+  idempotência que absorva o retry. Achado de instrumento: esta sessão roda
+  Docker-outside-of-Docker, e bind mount por caminho relativo e checagem por `localhost`
+  precisaram de tratamento novo no harness (`--project-directory` com o caminho real do host,
+  oráculo de amostra rodando dentro de um container na rede do Compose) — não mexeu em
+  `oraculo.sh`. Máquina diferente das três medições anteriores (6 vCPU, não 20): números de
+  vazão não comparáveis entre sessões, só as comparações internas valem. Números completos em
+  [`docs/pesquisa/carga-escala-borda.md`](../pesquisa/carga-escala-borda.md)
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
      fronteira reabriu por escolha — `docs/arquitetura.md` § Limitações conhecidas declarava
      que "a escalabilidade é argumentada, não medida", e sobrava prazo para converter a frase
      em número. O 025 converteu a metade da conservação, e o número reprovou; o 026 converteu a
-     metade da linearidade, e o número confirmou; o 027 corrigiu o que o 025 condenou e remediu.
-     Sobra o 028, agora desbloqueado e sozinho na fronteira: a borda é a única célula da tabela
-     § *O que escala, e como* que segue com "Nunca medido". -->
-
-- [028 — Escala da borda](tickets/028-escala-da-borda.md) — **na fronteira** desde que o 027
-  fechou, e é o único ticket takeable. Saiu do 026
-  por corte: escalar o `videos` é outro objeto (HTTP, não fila) e outro critério (recusa e
-  latência, não vazão). Julga o **"Nunca medido"** da célula do `videos` na tabela § *O que
-  escala, e como*, contra os 361 recusados de 400 que o 025 mediu ao derrubar a réplica única.
-  Nasce bloqueado porque o modo `mata-videos` hoje mede os defeitos 1 e 2 do 025, não a borda —
-  a pergunta que importa (matar uma réplica de N deveria custar zero requisição) só é medível
-  depois da correção. Precisa de construção: proxy no overlay de carga. O 026 já lhe entrega um
-  número: a réplica única **não é barata sob rajada** — 16 uploads simultâneos de 41 MB levaram o
-  `videos` a ~12 núcleos de pico, o que a média de 91% durante a drenagem esconde inteiramente
+     metade da linearidade, e o número confirmou; o 027 corrigiu o que o 025 condenou e remediu;
+     o 028 converteu a última metade, a da borda, e o número quase confirmou. As quatro células
+     da tabela § *O que escala, e como* estão medidas agora — nenhuma pergunta sharp restante
+     desta rodada de escolha. Vazio de propósito: não é fog, é a fronteira fechada. -->
 
 ## Fora de escopo
 

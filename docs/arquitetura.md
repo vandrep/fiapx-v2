@@ -247,7 +247,7 @@ Os dois requisitos que não aparecem numa demonstração. Ambos têm mecanismo, 
 | Serviço | Escala | Por quê |
 |---|---|---|
 | `extracao` | réplicas, **linear até 6 réplicas nesta máquina** | sem estado, `max-outstanding-messages=1` — cada réplica pega **uma** extração por vez e só volta à fila quando termina. *Competing consumers* puro. **Medido** ([ticket 026](wayfinder/tickets/026-linearidade-horizontal.md)): eficiência de escala 0,99 / 0,90 / 0,88 em 2 / 4 / 6 réplicas, de 2,96 para 15,6 Vídeo/min. Acima disso é desconhecido — os 20 núcleos do host já estavam a 77% |
-| `videos` | réplicas | o estado está no Postgres, não em memória; a transição é `UPDATE` condicional, então duas réplicas processando a mesma mensagem chegam ao mesmo resultado. **Nunca medido com réplicas**: o Compose sobe uma réplica só, e derrubá-la custou 361 envios recusados de 400 ([§ O que a medição mostrou](#o-que-a-medição-mostrou)). O que se sabe da réplica única é que ela **não é barata sob rajada**: 16 uploads simultâneos de 41 MB a levaram a ~12 núcleos de pico ([ticket 026](wayfinder/tickets/026-linearidade-horizontal.md)) |
+| `videos` | réplicas atrás de um proxy L7 | o estado está no Postgres, não em memória; a transição é `UPDATE` condicional, então duas réplicas processando a mesma mensagem chegam ao mesmo resultado. **Medido** ([ticket 028](wayfinder/tickets/028-escala-da-borda.md)): com N=3 atrás de um proxy, a mediana de latência do `202` cai **5,5×** (630→114 ms) sob 400 conexões simultâneas contra N=1; matar uma réplica durante a rajada custou **39 recusados de 400 (9,75%)**, contra 361/400 (90,25%) com réplica única — não chega a zero porque o proxy recusa, por padrão, reencaminhar um `POST` (não-idempotente) para outra réplica depois de a conexão falhar, para não arriscar duplicar o Vídeo |
 | `notificacao` | réplicas | idempotente por construção — a unicidade mora na transição de estado do `videos`, não aqui |
 
 O `prefetch=1` do `extracao` é a escolha central: extração de vídeo é limitada por CPU e
@@ -391,12 +391,48 @@ um portão de validade de rodada, na mesma linha do sexto portão do 026.
 Tudo isto está aqui, e não escondido, porque um documento de arquitetura que descreve o
 mecanismo e omite a medição que o reprovou é pior que um que não mede.
 
+### E o que a quarta medição mostrou: a borda escala, matar uma réplica quase não custa nada
+
+O [ticket 028](wayfinder/tickets/028-escala-da-borda.md) fechou a última célula "Nunca medido"
+da tabela acima — números em
+[`docs/pesquisa/carga-escala-borda.md`](pesquisa/carga-escala-borda.md). Precisou de construção
+nova: um proxy L7 (`nginx`, só no overlay de carga) na frente de N réplicas do `videos`, porque
+a porta publicada não abre em N containers ao mesmo tempo.
+
+Duas perguntas, deliberadamente separadas. A primeira — **N réplicas seguram mais rajada que
+uma?** — sim, em latência: sob 400 conexões simultâneas, a mediana do `202` caiu de 630 ms
+(N=1) para **114 ms** (N=3). A vazão de dreno não mudou (400 concluídos em 46 s nos dois
+pontos) porque quem limita o dreno é o `extracao`, não o `videos` — a réplica extra da borda
+alivia o aceite, não tem o que acelerar depois dele.
+
+A segunda — **matar uma réplica de N custa zero requisição, como o desenho promete?** — quase:
+**39 recusados de 400 (9,75%)**, contra **361 de 400 (90,25%)** com a réplica única do
+[ticket 025](wayfinder/tickets/025-carga-conservacao.md). Os 39 são todos `502` — nenhum
+timeout, EOF ou conexão recusada — e a causa é uma regra deliberada do nginx, não um defeito:
+ele recusa reencaminhar um `POST` (não-idempotente) para outra réplica depois que a conexão com
+a réplica morta já falhou esperando resposta, porque ela pode já ter completado o efeito
+colateral (linha gravada, ZIP no bucket) antes de morrer — reencaminhar arriscaria duplicar o
+Vídeo. O parâmetro que destravaria isso (`non_idempotent`) não foi ligado: fecharia a lacuna às
+custas desse risco, e o endpoint `/videos` não tem hoje chave de idempotência que o absorva.
+Fica registrado como candidato não implementado, não como conserto pendente.
+
+### E o que a quarta medição não mostrou
+
+- **Onde o próximo teto está.** A pergunta original incluía "a partir de onde o gargalo deixa
+  de ser a borda e passa a ser Postgres ou MinIO" — não isolado: o `extracao` já limita a
+  vazão de dreno antes de qualquer um dos dois aparecer no horizonte.
+- **N maior que 3.** Só N=1 e N=3 foram medidos; se o proxy em si (um único processo nginx)
+  vira gargalo em N alto é desconhecido.
+- **O número "com" `non_idempotent`.** Diagnosticado a partir do comportamento observado e da
+  documentação do nginx, não medido — faltaria também verificar se ele cria Vídeos duplicados
+  no Postgres, o que uma rodada dessas exigiria checar.
+
 ## Requisitos do enunciado
 
 | Requisito | Como é atendido | Onde |
 |---|---|---|
 | Processar mais de um vídeo ao mesmo tempo | *competing consumers* no `extracao`, `prefetch=1`, réplicas independentes | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
-| Não perder requisição em pico | `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit`, reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada; a ressalva que resta é a réplica única da borda | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
+| Não perder requisição em pico | `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit`, reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada. Escalar a borda por réplicas atrás de um proxy reduz a perda ao derrubar uma delas de 90,25% para 9,75% (ticket 028) — a ressalva que resta é que esse número não é zero | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
 | Protegido por usuário e senha | Keycloak, OIDC *bearer-only*; o dono vem do `sub` do token | [pesquisa](pesquisa/oidc-keycloak.md) |
 | Listagem de status dos vídeos do usuário | `GET /videos` paginado, escopado pelo dono; não existe consulta sem dono na interface do gateway | [contrato HTTP](contratos/http-videos.md) |
 | Notificar o usuário em caso de erro | `VideoFalhou` → `notificacao` → SMTP; unicidade garantida pela transição de estado | [ADR 0001](adr/0001-politica-de-falhas.md) |
@@ -438,10 +474,12 @@ O que eu não defendo — apenas aceitei.
   mesmo cenário e 0 em 133 com a borda derrubada. Deixa de ser limitação; fica aqui como
   histórico porque foi a única a contrariar um requisito explícito do enunciado, e porque
   ninguém a teria encontrado sem medir.
-- **A borda é réplica única, e derrubá-la perde envio.** O Compose sobe um `videos`, e
-  derrubá-lo durante uma rajada custou 361 envios recusados de 400. Escalar a borda por
-  réplicas continua sendo afirmação de desenho, não medição — é o que o
-  [ticket 028](wayfinder/tickets/028-escala-da-borda.md) existe para julgar. A varredura do
+- **A demo sobe uma réplica só, e escalar por réplicas não zera a perda.** O
+  [ticket 028](wayfinder/tickets/028-escala-da-borda.md) mediu N=3 réplicas atrás de um proxy
+  no overlay de carga (não no `docker-compose.yml` da demo, que segue com uma só): matar uma
+  durante a rajada caiu de 361/400 recusados para **39/400 (9,75%)** — melhor por 9,3×, mas não
+  zero, porque o proxy recusa reencaminhar um `POST` para outra réplica depois que a conexão já
+  falhou esperando resposta, para não arriscar duplicar o Vídeo. A varredura do
   [ADR 0003](adr/0003-reconciliacao-por-varredura.md), essa **já foi vista funcionando**: ela
   passou a registrar o que republica, e um Vídeo órfão em `RECEBIDO` foi observado sendo
   republicado e chegando a `CONCLUIDO` (ticket 027).
@@ -472,5 +510,5 @@ O que eu não defendo — apenas aceitei.
 ---
 
 Cada decisão deste documento tem a discussão que a produziu registrada em
-[`docs/wayfinder/map.md`](wayfinder/map.md) — 24 tickets, com as alternativas consideradas e
+[`docs/wayfinder/map.md`](wayfinder/map.md) — 28 tickets, com as alternativas consideradas e
 o que foi medido em cada um.

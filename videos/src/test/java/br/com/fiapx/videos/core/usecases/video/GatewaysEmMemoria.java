@@ -134,10 +134,14 @@ final class GatewaysEmMemoria {
     static final class ExtracaoEnvios implements ExtracaoSender {
 
         final List<UUID> idsEnviados = new ArrayList<>();
+        String ultimaChaveVideo;
+        String ultimaChaveDestinoPacote;
 
         @Override
         public CompletableFuture<Void> enviarExtrairVideo(UUID idVideo, String chaveVideo, String chaveDestinoPacote) {
             idsEnviados.add(idVideo);
+            ultimaChaveVideo = chaveVideo;
+            ultimaChaveDestinoPacote = chaveDestinoPacote;
             return CompletableFuture.completedFuture(null);
         }
     }
@@ -145,6 +149,10 @@ final class GatewaysEmMemoria {
     static final class NotificacaoEnvios implements NotificacaoSender {
 
         final List<UUID> idsEnviados = new ArrayList<>();
+        Dono ultimoDono;
+        String ultimoNomeArquivo;
+        MotivoFalha ultimoMotivo;
+        Instant ultimoOcorridoEm;
 
         @Override
         public CompletableFuture<Void> enviarVideoFalhou(UUID idVideo,
@@ -153,6 +161,10 @@ final class GatewaysEmMemoria {
                                                           MotivoFalha motivo,
                                                           Instant ocorridoEm) {
             idsEnviados.add(idVideo);
+            ultimoDono = dono;
+            ultimoNomeArquivo = nomeArquivoOriginal;
+            ultimoMotivo = motivo;
+            ultimoOcorridoEm = ocorridoEm;
             return CompletableFuture.completedFuture(null);
         }
     }

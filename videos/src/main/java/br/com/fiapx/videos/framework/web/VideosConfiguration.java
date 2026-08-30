@@ -13,6 +13,8 @@ import br.com.fiapx.videos.core.usecases.video.ListarVideosDoDonoUseCase;
 import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoConcluidaUseCase;
 import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoFalhouUseCase;
 import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoIniciadaUseCase;
+import br.com.fiapx.videos.core.usecases.video.PublicarExtrairVideo;
+import br.com.fiapx.videos.core.usecases.video.PublicarVideoFalhou;
 import br.com.fiapx.videos.core.usecases.video.ReconciliarPublicacoesPendentesUseCase;
 import br.com.fiapx.videos.interfaces.controllers.ExtracaoEventosController;
 import br.com.fiapx.videos.interfaces.controllers.ReconciliacaoController;
@@ -37,7 +39,8 @@ public class VideosConfiguration {
                                       VideoPresenter videoPresenter,
                                       VideosPaginadosPresenter videosPaginadosPresenter) {
         return new VideosController(
-                new EnviarVideoUseCase(arquivoGateway, videoGateway, extracaoSender, videoPresenter),
+                new EnviarVideoUseCase(arquivoGateway, videoGateway,
+                        new PublicarExtrairVideo(arquivoGateway, extracaoSender, videoGateway), videoPresenter),
                 new ListarVideosDoDonoUseCase(videoGateway, videosPaginadosPresenter),
                 new ConsultarVideoUseCase(videoGateway, videoPresenter),
                 new BaixarPacoteUseCase(videoGateway, arquivoGateway));
@@ -49,7 +52,8 @@ public class VideosConfiguration {
         return new ExtracaoEventosController(
                 new ProcessarExtracaoIniciadaUseCase(videoGateway),
                 new ProcessarExtracaoConcluidaUseCase(videoGateway),
-                new ProcessarExtracaoFalhouUseCase(videoGateway, notificacaoSender));
+                new ProcessarExtracaoFalhouUseCase(videoGateway,
+                        new PublicarVideoFalhou(notificacaoSender, videoGateway)));
     }
 
     @Produces
@@ -58,7 +62,9 @@ public class VideosConfiguration {
                                                     ExtracaoSender extracaoSender,
                                                     NotificacaoSender notificacaoSender) {
         return new ReconciliacaoController(new ReconciliarPublicacoesPendentesUseCase(
-                videoGateway, arquivoGateway, extracaoSender, notificacaoSender));
+                videoGateway,
+                new PublicarExtrairVideo(arquivoGateway, extracaoSender, videoGateway),
+                new PublicarVideoFalhou(notificacaoSender, videoGateway)));
     }
 
     /** Request-scoped: o presenter guarda o resultado de <b>uma</b> requisicao. */

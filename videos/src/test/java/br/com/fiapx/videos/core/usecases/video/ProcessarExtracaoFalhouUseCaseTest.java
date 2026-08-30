@@ -30,7 +30,7 @@ class ProcessarExtracaoFalhouUseCaseTest {
     void montar() {
         videos = new GatewaysEmMemoria.Videos();
         notificacao = new GatewaysEmMemoria.NotificacaoEnvios();
-        useCase = new ProcessarExtracaoFalhouUseCase(videos, notificacao);
+        useCase = new ProcessarExtracaoFalhouUseCase(videos, new PublicarVideoFalhou(notificacao, videos));
 
         video = Video.novo("ferias.mp4", 1_024L, DONO).armazenadoEm("id/original.mp4");
         video.marcaComoIniciada();

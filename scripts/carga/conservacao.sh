@@ -41,6 +41,11 @@ modo="${1:-limpo}"
 # replica. 400 nesse modo seriam horas, nao minutos — por isso o default e outro.
 if [[ "$modo" == mata-publicacao ]]; then
     envios="${2:-${FIAPX_ENVIOS:-3}}"
+    # FIAPX_ENVIOS e compartilhado com os outros modos de proposito (mesma logica do
+    # FIAPX_FIXTURE, FIAPX_VUS etc.) — mas um valor grande deixado exportado de uma rodada
+    # anterior de outro modo vira horas aqui, entao o aviso e o minimo custo para nao passar
+    # batido.
+    (( envios > 20 )) && echo "AVISO: mata-publicacao com $envios envios pode levar horas (cada um serializa ate ~${FIAPX_LIMITE_ESTACIONAMENTO:-240}s)." >&2
 else
     envios="${2:-${FIAPX_ENVIOS:-400}}"
 fi
@@ -87,6 +92,15 @@ passo()  { echo; echo "${negrito}==> $*${normal}"; }
 ok()     { echo "    ${verde}OK${normal}  $*"; }
 aviso()  { echo "    ${amarelo}!${normal}   $*"; }
 falha()  { echo "    ${vermelho}FALHOU${normal}  $*" >&2; exit 1; }
+# So mata-publicacao: le direto do management API, nao do censo (que e por id no Postgres e
+# nao enxerga fila nenhuma). Usado duas vezes — antes de enviar (linha de base) e depois
+# (medida) — porque a fila e persistente entre corridas e nada aqui faz `down -v`: sem a
+# linha de base, mensagens de uma rodada anterior fariam o criterio 3 passar sem medir nada.
+profundidade_estacionamento() {
+    curl -sS -u "$rabbitmq_usuario:$rabbitmq_senha" \
+        "$rabbitmq_url/api/queues/%2F/extracao.extrair.estacionamento" \
+        | jq -r '.messages // 0'
+}
 
 case "$modo" in limpo|mata-extracao|mata-videos|mata-publicacao) ;; *) falha "modo desconhecido: $modo" ;; esac
 
@@ -101,6 +115,9 @@ if [[ "$modo" == mata-publicacao ]]; then
     # Extensao e content-type precisam passar pela borda (docs/contratos/http-videos.md §
     # Rejeicoes): o que faz este arquivo falhar e o ffprobe do `extracao`, nao o `videos`.
     fixture="invalido.mp4"
+    # fixtures/ e gerado por gera-fixtures.sh (.gitignore) e este modo nao o chama — sem o
+    # mkdir, a primeira rodada num clone novo falha aqui em vez de escrever o arquivo.
+    mkdir -p scripts/carga/fixtures
     echo "isto nao e um video" > "scripts/carga/fixtures/$fixture"
     ok "fixture $fixture (formato invalido de proposito), saida em scripts/carga/saida/$rotulo/"
 else
@@ -136,6 +153,11 @@ while :; do
 done
 ok "$esperados containers saudaveis ($replicas de extracao, teto de ${FIAPX_EXTRACAO_CPUS:-2} CPU cada)"
 
+if [[ "$modo" == mata-publicacao ]]; then
+    profundidade_base="$(profundidade_estacionamento)"
+    ok "estacionamento antes do envio: $profundidade_base mensagem(ns) ja presentes"
+fi
+
 # ---------------------------------------------------------------------------------------
 passo "2. Criterio, fixado antes de rodar"
 
@@ -149,10 +171,11 @@ if [[ "$modo" == mata-publicacao ]]; then
     echo "    2. Cada video aceito aparece em PROCESSANDO no censo, e la permanece — o"
     echo "       ExtracaoFalhou nunca alcanca o videos neste modo, de proposito (ticket 029:"
     echo "       'O Video continua preso, e isso e aceite explicito')."
-    echo "    3. A extracao.extrair.estacionamento acumula exatamente $envios mensagens em"
-    echo "       ate ${limite_estacionamento}s — nem sumiu (perda silenciosa, o defeito"
-    echo "       original) nem ficou circulando para sempre (o loop que o failure-strategy=fail"
-    echo "       teria virado)."
+    echo "    3. A extracao.extrair.estacionamento ganha ao menos $envios mensagens NOVAS"
+    echo "       (acima da linha de base medida antes do envio) em ate"
+    echo "       ${limite_estacionamento}s — nem sumiu (perda silenciosa, o defeito original)"
+    echo "       nem ficou circulando para sempre (o loop que o failure-strategy=fail teria"
+    echo "       virado)."
     echo
 else
 drenagem_esperada=$(( envios * segundos_por_video / replicas ))
@@ -278,14 +301,14 @@ passo "4. Drenagem"
 
 if [[ "$modo" == mata-publicacao ]]; then
     inicio_espera=$SECONDS
-    profundidade=0
+    novas=0
     while :; do
-        profundidade="$(curl -sS -u "$rabbitmq_usuario:$rabbitmq_senha" \
-            "$rabbitmq_url/api/queues/%2F/extracao.extrair.estacionamento" \
-            | jq -r '.messages // 0')"
+        profundidade="$(profundidade_estacionamento)"
+        novas=$(( profundidade - profundidade_base ))
         decorrido=$(( SECONDS - inicio_espera ))
-        printf '    %4ds  estacionamento=%s/%s\n' "$decorrido" "$profundidade" "$aceitos"
-        (( profundidade >= aceitos )) && break
+        printf '    %4ds  estacionamento=%s/%s (base %s, total %s)\n' \
+            "$decorrido" "$novas" "$aceitos" "$profundidade_base" "$profundidade"
+        (( novas >= aceitos )) && break
         (( decorrido > limite_estacionamento )) && { aviso "limite de ${limite_estacionamento}s estourado"; break; }
         sleep 5
     done
@@ -352,11 +375,11 @@ if [[ "$modo" == mata-publicacao ]]; then
           "$recusados recusas em $envios envios"
     julga "2. Todos presos em PROCESSANDO" "$([[ $processando == "$aceitos" && $concluidos == 0 && $falhados == 0 && $ausentes == 0 ]] && echo true || echo false)" \
           "$processando/$aceitos em PROCESSANDO, $concluidos CONCLUIDO, $falhados FALHOU, $ausentes AUSENTE"
-    julga "3. Estacionamento recebeu a falha definitiva" "$([[ $profundidade -ge $aceitos ]] && echo true || echo false)" \
-          "$profundidade/$aceitos mensagens em extracao.extrair.estacionamento em ${espera}s (limite ${limite_estacionamento}s)"
+    julga "3. Estacionamento recebeu a falha definitiva" "$([[ $novas -ge $aceitos ]] && echo true || echo false)" \
+          "$novas/$aceitos mensagens novas em extracao.extrair.estacionamento em ${espera}s (base $profundidade_base, limite ${limite_estacionamento}s)"
     echo
     if (( reprovacoes == 0 )); then
-        echo "${negrito}${verde}Falha definitiva parou no estacionamento${normal} no modo $modo: $aceitos aceitos, $profundidade estacionados."
+        echo "${negrito}${verde}Falha definitiva parou no estacionamento${normal} no modo $modo: $aceitos aceitos, $novas estacionados."
     else
         echo "${negrito}${vermelho}$reprovacoes criterio(s) reprovado(s)${normal} no modo $modo."
     fi

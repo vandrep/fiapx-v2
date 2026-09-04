@@ -143,6 +143,17 @@ services:
       MINIO_SECRET_KEY: minioadmin
     volumes:
       - fiapx-extracao-scratch:/var/fiapx/extracao
+    # O terceiro dos tres numeros do ticket 035, e o unico que mora fora do JVM. O
+    # DrenoDaExtracao segura o desligamento por ate `fiapx.extracao.dreno-timeout-segundos`
+    # (420s) esperando a Extracao em voo terminar e dar ack, para o deploy nao gastar uma das
+    # tres entregas de `extracao.extrair`. O default do Docker aqui e 10s — SIGKILL bem no
+    # meio do dreno, que e o pior dos dois mundos: nao poupa entrega e ainda atrasa o deploy.
+    # 480 > 420 de proposito, para o JVM sempre ganhar essa corrida.
+    #
+    # Nao e o custo tipico de um deploy: o dreno libera no ack, entao o que se paga e o que
+    # sobra da Extracao em voo (segundos, no fixture de controle). 480 e so o teto — medido em
+    # scripts/carga/conservacao.sh, modo `redeploy-extracao`.
+    stop_grace_period: 480s
     depends_on:
       rabbitmq:
         condition: service_healthy

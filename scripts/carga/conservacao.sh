@@ -253,7 +253,18 @@ else
 # --user: a imagem do k6 roda como um usuario proprio (uid 12345), que nao consegue
 # escrever no diretorio de saida montado do host. Sem isto o `--console-output` morre com
 # "permission denied" e o experimento fica sem denominador.
-docker run --rm --network "$rede" --user "$(id -u):$(id -g)" \
+# Qual uid depende de o daemon ser rootless (ticket 036, e achado ao rodar no ticket 035):
+# sob rootless, o usuario do host ja entra no user namespace como 0, entao o diretorio de
+# saida — dono 1000 do lado de fora — aparece como dono 0 dentro do container, e `--user 1000`
+# vira um estranho sem permissao de escrita. Com daemon rootful vale o inverso, e `--user 0`
+# deixaria a saida do experimento com dono root no repositorio. Nao da para fixar um dos dois:
+# a resposta certa e a pergunta ao daemon.
+if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q 'name=rootless'; then
+    k6_usuario="0:0"
+else
+    k6_usuario="$(id -u):$(id -g)"
+fi
+docker run --rm --network "$rede" --user "$k6_usuario" \
     -v "$raiz/scripts/carga/injetor.js:/injetor.js:ro" \
     -v "$raiz/scripts/carga/fixtures:/fixtures:ro" \
     -v "$saida:/saida" \

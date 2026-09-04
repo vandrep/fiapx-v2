@@ -7,7 +7,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Consumidor de {@code ExtracaoConcluida}: PROCESSANDO -> CONCLUIDO. A chave do Pacote volta
+ * Consumidor de {@code ExtracaoConcluida}: RECEBIDO/PROCESSANDO -> CONCLUIDO. A chave do Pacote volta
  * no proprio evento em vez de ser assumida a partir do comando — o {@code extracao} declara
  * o que de fato gravou (docs/contratos/mensagens.md).
  */
@@ -20,13 +20,17 @@ public class ProcessarExtracaoConcluidaUseCase {
     }
 
     public CompletableFuture<Void> executar(Command command) {
-        return videoGateway.marcarConcluida(
-                        command.idVideo(),
-                        command.concluidaEm(),
-                        command.chavePacote(),
-                        command.quantidadeFrames(),
-                        command.tamanhoPacoteBytes())
-                .thenApply(ignorado -> null);
+        return videoGateway.buscarPorId(command.idVideo())
+                .thenCompose(video -> {
+                    if (video.isEmpty() || !video.get().marcaComoConcluida(command.concluidaEm(),
+                            command.chavePacote(), command.quantidadeFrames(), command.tamanhoPacoteBytes())) {
+                        return CompletableFuture.completedFuture(false);
+                    }
+                    return videoGateway.marcarConcluida(
+                            command.idVideo(), command.concluidaEm(), command.chavePacote(),
+                            command.quantidadeFrames(), command.tamanhoPacoteBytes());
+                })
+                .thenApply(mudou -> null);
     }
 
     public record Command(UUID idVideo,

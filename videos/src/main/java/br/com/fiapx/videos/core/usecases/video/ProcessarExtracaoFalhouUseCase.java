@@ -27,10 +27,16 @@ public class ProcessarExtracaoFalhouUseCase {
     }
 
     public CompletableFuture<Void> executar(Command command) {
-        return videoGateway.marcarFalha(command.idVideo(), command.ocorridoEm(), command.motivo())
-                .thenCompose(video -> video.isEmpty()
-                        ? CompletableFuture.completedFuture(null)
-                        : publicarVideoFalhou.publicar(video.get()));
+        return videoGateway.buscarPorId(command.idVideo())
+                .thenCompose(video -> {
+                    if (video.isEmpty() || !video.get().marcaComoFalha(command.ocorridoEm(), command.motivo())) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    return videoGateway.marcarFalha(command.idVideo(), command.ocorridoEm(), command.motivo())
+                            .thenCompose(mudou -> mudou
+                                    ? publicarVideoFalhou.publicar(video.get())
+                                    : CompletableFuture.completedFuture(null));
+                });
     }
 
     public record Command(UUID idVideo, MotivoFalha motivo, Instant ocorridoEm) {

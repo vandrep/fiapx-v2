@@ -38,6 +38,7 @@ final class GatewaysEmMemoria {
 
         final Map<UUID, Video> armazenados = new LinkedHashMap<>();
         final Map<UUID, Instant> comandoPublicadoEm = new LinkedHashMap<>();
+        boolean proximaTransicaoMudaLinha = true;
         final Map<UUID, Instant> falhaPublicadaEm = new LinkedHashMap<>();
 
         @Override
@@ -50,6 +51,11 @@ final class GatewaysEmMemoria {
         public CompletableFuture<Optional<Video>> buscarPorIdEDono(UUID id, Dono dono) {
             return CompletableFuture.completedFuture(Optional.ofNullable(armazenados.get(id))
                     .filter(video -> video.dono().sub().equals(dono.sub())));
+        }
+
+        @Override
+        public CompletableFuture<Optional<Video>> buscarPorId(UUID id) {
+            return CompletableFuture.completedFuture(Optional.ofNullable(armazenados.get(id)));
         }
 
         @Override
@@ -69,12 +75,11 @@ final class GatewaysEmMemoria {
                     new Pagina<>(List.copyOf(fatia), pagina, tamanho, doDono.size()));
         }
 
-        /** A "guarda do WHERE" aqui e a propria entidade: {@code marcaComoIniciada} devolve
-         * false para reentrega fora de ordem, exatamente como o UPDATE condicional real. */
         @Override
         public CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm) {
             var video = armazenados.get(id);
-            return CompletableFuture.completedFuture(video != null && video.marcaComoIniciada());
+            return CompletableFuture.completedFuture(proximaTransicaoMudaLinha
+                    && video != null && video.estado() == EstadoVideo.PROCESSANDO);
         }
 
         @Override
@@ -84,15 +89,15 @@ final class GatewaysEmMemoria {
                                                           int quantidadeFrames,
                                                           long tamanhoPacoteBytes) {
             var video = armazenados.get(id);
-            return CompletableFuture.completedFuture(video != null
-                    && video.marcaComoConcluida(concluidaEm, chavePacote, quantidadeFrames, tamanhoPacoteBytes));
+            return CompletableFuture.completedFuture(proximaTransicaoMudaLinha
+                    && video != null && video.estado() == EstadoVideo.CONCLUIDO);
         }
 
         @Override
-        public CompletableFuture<Optional<Video>> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
+        public CompletableFuture<Boolean> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
             var video = armazenados.get(id);
-            var mudou = video != null && video.marcaComoFalha(falhouEm, motivo);
-            return CompletableFuture.completedFuture(mudou ? Optional.of(video) : Optional.empty());
+            return CompletableFuture.completedFuture(proximaTransicaoMudaLinha
+                    && video != null && video.estado() == EstadoVideo.FALHOU);
         }
 
         @Override

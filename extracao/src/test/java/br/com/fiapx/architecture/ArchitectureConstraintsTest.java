@@ -271,6 +271,20 @@ class ArchitectureConstraintsTest {
     }
 
     @Test
+    void bordaNaoPodeBuscarVideoSemDono() {
+        var violations = new ArrayList<String>();
+
+        javaSources().stream()
+                .filter(source -> source.relativePath().endsWith("Resource.java")
+                        || source.relativePath().endsWith("Controller.java"))
+                .filter(source -> source.content().contains(".buscarPorId("))
+                .forEach(source -> violations.add(source.relativePath()
+                        + ": Resource e controller nao podem buscar Video sem Dono; use buscarPorIdEDono"));
+
+        assertNoViolations(violations);
+    }
+
+    @Test
     void dataSourceAdaptersDevemImplementarGatewayComApplicationScopedECompletionStage() {
         var adapterSources = javaSources().stream()
                 .filter(source -> source.relativePath().contains("/framework/"))

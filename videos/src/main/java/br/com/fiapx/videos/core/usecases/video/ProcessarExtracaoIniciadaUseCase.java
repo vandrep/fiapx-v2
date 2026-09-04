@@ -7,9 +7,8 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Consumidor de {@code ExtracaoIniciada}: RECEBIDO -> PROCESSANDO. Sem regra alem de chamar
- * o gateway — o {@code true}/{@code false} de volta nao importa aqui, uma reentrega fora de
- * ordem so significa "nao mudou nada" (ADR 0002).
+ * Consumidor de {@code ExtracaoIniciada}: carrega o Video, consulta a entidade e somente
+ * tenta o UPDATE condicional quando a transicao e legal (ADR 0002).
  */
 public class ProcessarExtracaoIniciadaUseCase {
 
@@ -20,8 +19,11 @@ public class ProcessarExtracaoIniciadaUseCase {
     }
 
     public CompletableFuture<Void> executar(Command command) {
-        return videoGateway.marcarIniciada(command.idVideo(), command.iniciadaEm())
-                .thenApply(ignorado -> null);
+        return videoGateway.buscarPorId(command.idVideo())
+                .thenCompose(video -> video.isEmpty() || !video.get().marcaComoIniciada()
+                        ? CompletableFuture.completedFuture(false)
+                        : videoGateway.marcarIniciada(command.idVideo(), command.iniciadaEm()))
+                .thenApply(mudou -> null);
     }
 
     public record Command(UUID idVideo, Instant iniciadaEm) {

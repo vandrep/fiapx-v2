@@ -80,6 +80,17 @@ class ProcessarExtracaoFalhouUseCaseTest {
     }
 
     @Test
+    void compareAndSwapQuePerdeACorridaNaoPublicaVideoFalhou() {
+        videos.proximaTransicaoMudaLinha = false;
+        var comando = new ProcessarExtracaoFalhouUseCase.Command(
+                video.id(), MotivoFalha.ARQUIVO_INVALIDO, Instant.now());
+
+        useCase.executar(comando).join();
+
+        assertEquals(0, notificacao.idsEnviados.size());
+    }
+
+    @Test
     void umEventoParaUmVideoQueNuncaExistiuNaoPublicaNada() {
         var comando = new ProcessarExtracaoFalhouUseCase.Command(
                 java.util.UUID.randomUUID(), MotivoFalha.ARQUIVO_INVALIDO, Instant.now());

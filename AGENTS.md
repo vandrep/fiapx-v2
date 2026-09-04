@@ -90,6 +90,28 @@ infraestrutura, igual a `@ApplicationScoped` ou `@Path`). O template não trazia
 porque não cobria mensageria nem scheduler — ver
 [`docs/contratos/mensagens.md` § Camadas](docs/contratos/mensagens.md).
 
+Uma quinta chegou no ticket 034, e é a primeira que não julga código Java: todo canal
+`mp.messaging.outgoing.*` do `application.properties` do próprio serviço precisa declarar
+`publish-confirms=true` no mesmo prefixo, a não ser que declare um `connector` que não seja
+`smallrye-rabbitmq`. A obrigação recai também sobre o canal **sem** `connector` explícito, de
+propósito: com um conector só no classpath — o caso dos três serviços — o Quarkus liga o canal
+mudo ao RabbitMQ do mesmo jeito.
+Sem confirms o `send` completa quando o byte sai no socket, não quando o broker aceita — a
+recusa vira ack e a mensagem some em silêncio, e a varredura do
+[ADR 0003](docs/adr/0003-reconciliacao-por-varredura.md) não alcança o Vídeo perdido
+([ADR 0001](docs/adr/0001-politica-de-falhas.md),
+[`docs/contratos/mensagens.md`](docs/contratos/mensagens.md)). O default do conector é `false`,
+e o mesmo buraco já nasceu duas vezes, em dois serviços (027, 029), achado nas duas por medição
+ou revisão manual. Como cada cópia do teste roda com o CWD no seu módulo, a regra cobre os três
+`application.properties` sem que o teste precise enxergar o diretório do vizinho — e vale para
+`notificacao`, que hoje não publica: ela protege o serviço, não o canal que existe.
+
+O limite conhecido dela: a regra lê `application.properties`, então canal ou override que
+chegue por variável de ambiente (`MP_MESSAGING_OUTGOING_*`, como o overlay de carga faz em
+`docker-compose.carga.yml`) passa por fora. Overrides de Compose são deliberados e revisados
+junto do arquivo que os declara; o defeito que este teste persegue é o canal esquecido no
+`.properties`.
+
 ## BDD
 
 Cenários de aceite em Gherkin **em português** (`# language: pt` na primeira linha), em

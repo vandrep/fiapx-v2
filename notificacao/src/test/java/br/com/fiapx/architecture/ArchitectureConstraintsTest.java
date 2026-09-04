@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ArchitectureConstraintsTest {
 
     private static final Path MAIN_SOURCES = Path.of("src/main/java");
+    private static final Path CONFIG_PROPERTIES = Path.of("src/main/resources/application.properties");
     private static final String BASE_PACKAGE = "br.com.fiapx";
     /**
      * Cada servico deployavel carrega exatamente um modulo de negocio, homonimo do servico.
@@ -76,6 +78,26 @@ class ArchitectureConstraintsTest {
      * em ExtracaoDeFramesGateway, nunca em processo.
      */
     private static final Pattern PROCESSO_EXTERNO = Pattern.compile("\\bnew\\s+ProcessBuilder\\b");
+    /**
+     * Publicar sem publish-confirms perde mensagem em silencio: o send completa quando o byte
+     * sai no socket, nao quando o broker aceita, entao uma recusa do broker vira ack do
+     * consumidor e a mensagem some, e a varredura do ADR 0003 nao alcanca o Video perdido
+     * (docs/contratos/mensagens.md, ADR 0001, ADR 0003, tickets 027 e 029). O default do
+     * conector e false, e o mesmo buraco ja nasceu duas vezes em dois servicos, as duas
+     * achado por medicao ou revisao manual. Daqui em diante quem acha e o build (ticket 034).
+     * Vale tambem para servico que hoje nao publica: a regra protege o servico, nao o canal
+     * que existe.
+     *
+     * <p>Casa chave, valor e prefixo de perfil de uma linha de canal de saida. O separador
+     * aceita "=", ":" e espaco porque .properties aceita os tres, e o nome do canal e ganancioso
+     * porque canal com ponto e legal — os dois seriam saidas silenciosas de uma regra cujo
+     * ponto inteiro e nao ter saida silenciosa.
+     */
+    private static final Pattern CHAVE_DE_CANAL_DE_SAIDA = Pattern.compile(
+            "^(%[^.=:\\s]+\\.)?(mp\\.messaging\\.outgoing\\.[^=:\\s]+)\\s*[=:\\s]\\s*(.*)$");
+    private static final String SUFIXO_CONECTOR = ".connector";
+    private static final String SUFIXO_CONFIRMS = ".publish-confirms";
+    private static final String CONECTOR_RABBITMQ = "smallrye-rabbitmq";
 
     @Test
     void deveManterLayoutModularComCoreInterfacesEFramework() {
@@ -345,6 +367,67 @@ class ArchitectureConstraintsTest {
         assertNoViolations(violations);
     }
 
+    @Test
+    void canalDeSaidaRabbitmqDeveDeclararPublishConfirms() {
+        var conector = new TreeMap<String, String>();
+        var confirms = new TreeMap<String, String>();
+        var canaisDeclarados = new TreeSet<String>();
+        var canaisSupostos = new TreeSet<String>();
+
+        for (String linha : configLines()) {
+            var matcher = CHAVE_DE_CANAL_DE_SAIDA.matcher(linha);
+            if (!matcher.matches()) {
+                continue;
+            }
+            var perfil = matcher.group(1) == null ? "" : matcher.group(1);
+            var chave = matcher.group(2);
+            var valor = matcher.group(3).strip();
+
+            if (chave.endsWith(SUFIXO_CONECTOR)) {
+                var canal = perfil + semSufixo(chave, SUFIXO_CONECTOR);
+                canaisDeclarados.add(canal);
+                conector.put(canal, valor);
+            } else if (chave.endsWith(SUFIXO_CONFIRMS)) {
+                var canal = perfil + semSufixo(chave, SUFIXO_CONFIRMS);
+                canaisDeclarados.add(canal);
+                confirms.put(canal, valor);
+            } else {
+                // Qualquer outra chave so revela o canal por convencao de nome (o proprio nome
+                // pode conter ponto). Vale como pista, e a pista cai fora logo abaixo se algum
+                // canal declarado a contiver.
+                canaisSupostos.add(perfil + primeiroSegmentoDoCanal(chave));
+            }
+        }
+
+        canaisSupostos.removeIf(suposto -> canaisDeclarados.stream()
+                .anyMatch(declarado -> declarado.startsWith(suposto + ".")));
+
+        var violations = new ArrayList<String>();
+        var arquivo = MODULO_DO_SERVICO + "/" + CONFIG_PROPERTIES.toString().replace('\\', '/');
+        var canais = new TreeSet<String>(canaisDeclarados);
+        canais.addAll(canaisSupostos);
+
+        for (String canal : canais) {
+            var conectorDoCanal = valorEfetivo(conector, canal);
+            // Sem connector explicito o Quarkus liga o canal ao unico conector do classpath, que
+            // nos tres servicos e o RabbitMQ: um canal novo que nasca mudo publica no broker do
+            // mesmo jeito, e e exatamente ele que este teste existe para nao deixar passar.
+            if (conectorDoCanal != null && !CONECTOR_RABBITMQ.equals(conectorDoCanal)) {
+                continue;
+            }
+            if ("true".equals(valorEfetivo(confirms, canal))) {
+                continue;
+            }
+            // O canal sai com o perfil junto quando tem um: e o prefixo exato da chave que falta.
+            violations.add(arquivo + ": canal de saida " + canal + " publica em RabbitMQ"
+                    + (conectorDoCanal == null ? " (sem connector explicito, logo pelo unico do classpath)" : "")
+                    + " sem " + canal + ".publish-confirms=true; sem confirms a publicacao"
+                    + " recusada pelo broker completa como sucesso e a mensagem some em silencio");
+        }
+
+        assertNoViolations(violations);
+    }
+
     private static List<SourceFile> javaSources() {
         try (Stream<Path> files = Files.walk(MAIN_SOURCES)) {
             return files
@@ -356,6 +439,44 @@ class ArchitectureConstraintsTest {
         } catch (IOException exception) {
             throw new UncheckedIOException(exception);
         }
+    }
+
+    private static List<String> configLines() {
+        assertTrue(Files.exists(CONFIG_PROPERTIES),
+                () -> "Nao encontrei " + CONFIG_PROPERTIES + " a partir de " + Path.of("").toAbsolutePath());
+        try {
+            return Files.readAllLines(CONFIG_PROPERTIES).stream()
+                    .map(String::strip)
+                    .filter(linha -> !linha.startsWith("#") && !linha.startsWith("!"))
+                    .toList();
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+    }
+
+    /**
+     * O valor que o canal enxerga: a chave do proprio perfil vence a chave sem perfil, como no
+     * MicroProfile Config. Devolve null quando nenhuma das duas existe.
+     */
+    private static String valorEfetivo(Map<String, String> valores, String canal) {
+        var doPerfil = valores.get(canal);
+        return doPerfil != null ? doPerfil : valores.get(semPerfil(canal));
+    }
+
+    private static String semPerfil(String canal) {
+        return canal.startsWith("%") ? canal.substring(canal.indexOf('.') + 1) : canal;
+    }
+
+    private static String semSufixo(String chave, String sufixo) {
+        return chave.substring(0, chave.length() - sufixo.length());
+    }
+
+    /** "mp.messaging.outgoing.extracao-falhou" a partir de "...extracao-falhou.exchange.name". */
+    private static String primeiroSegmentoDoCanal(String chave) {
+        var prefixo = "mp.messaging.outgoing.";
+        var resto = chave.substring(prefixo.length());
+        var ponto = resto.indexOf('.');
+        return prefixo + (ponto < 0 ? resto : resto.substring(0, ponto));
     }
 
     private static String packageName(SourceFile source) {

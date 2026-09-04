@@ -2,8 +2,8 @@
 
 - id: 034
 - label: wayfinder:task
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: vandrep
 - bloqueado-por:
 
 ## Question
@@ -50,3 +50,66 @@ O 029 fechou o buraco que existia; este ticket fecha a classe do buraco, para qu
 vez não precise de outra sessão de grilling para aparecer. Achado na revisão de código da
 própria implementação do 029, em 2026-09-04 — não faz parte da rodada de arquitetura que
 abriu os tickets 029–033 (ver `docs/wayfinder/map.md` § *Ainda não especificado*).
+
+## Como ficou
+
+Quinta regra no `ArchitectureConstraintsTest`, das três opções abertas acima. O mecanismo do
+primeiro item — ler os `.properties` — dentro do arquivo do segundo, porque o teste arquitetural
+já é *o* lugar onde as regras deste repositório moram (AGENTS.md § *Onde a verdade mora*), e
+porque cada cópia roda com o CWD no basedir do próprio módulo: o mesmo código, byte a byte
+idêntico nos três, cobre os três `application.properties` sem nenhuma cópia enxergar o diretório
+do vizinho. É o mesmo pressuposto que `MAIN_SOURCES` e `MODULO_DO_SERVICO` já faziam. Validação
+em boot foi descartada: avisa mais tarde e custa mais para testar, e o defeito é de configuração
+escrita, não de estado de runtime.
+
+`canalDeSaidaRabbitmqDeveDeclararPublishConfirms` cobra `publish-confirms=true` de todo canal
+`mp.messaging.outgoing.*` do arquivo, e não só dos que trazem `connector=smallrye-rabbitmq`
+escrito. Ficou mais largo que a redação acima por causa de um furo achado na revisão: com um
+conector só no classpath — o caso dos três serviços — o Quarkus liga ao RabbitMQ o canal que não
+declara `connector` nenhum, então cobrar só a linha `connector=` deixaria passar exatamente o
+"canal de saída novo" do título. Quem declara `connector` de outro tipo (`smallrye-in-memory`,
+por exemplo) sai da regra.
+
+Três outras saídas silenciosas foram fechadas junto, todas achadas na mesma revisão: separador
+`:` ou espaço (o `.properties` aceita os três, não só `=`), nome de canal com ponto, e
+`publish-confirms=false` explícito num perfil sobre um `true` sem perfil — a comparação é pelo
+valor efetivo, chave de perfil vencendo a chave sem perfil, como no MicroProfile Config. Serviço
+sem canal de saída — o `notificacao` de hoje — não casa nenhuma linha e passa sem asserção de
+não-vazio, de propósito: a regra fica de pé para o dia em que ele publicar, que é o que o corpo
+do ticket pediu.
+
+## Limite conhecido
+
+A regra lê `application.properties`. Canal ou override que chegue por variável de ambiente
+(`MP_MESSAGING_OUTGOING_*`) passa por fora — o `docker-compose.carga.yml` já usa esse caminho
+para quebrar de propósito o `extracao-falhou` no modo `mata-publicacao` do 029. Fica como está:
+override de Compose é deliberado e revisado junto do arquivo que o declara, e o defeito que este
+ticket persegue é o canal esquecido no `.properties`, não o canal ajustado de propósito no
+deploy.
+
+## Evidência
+
+Vermelho, apagando `mp.messaging.outgoing.extracao-falhou.publish-confirms=true` do `extracao`
+e rodando `./mvnw -pl extracao test -Dtest=ArchitectureConstraintsTest`:
+
+```
+ArchitectureConstraintsTest.canalDeSaidaRabbitmqDeveDeclararPublishConfirms
+Violacoes arquiteturais encontradas:
+- extracao/src/main/resources/application.properties: canal de saida
+  mp.messaging.outgoing.extracao-falhou publica em RabbitMQ sem
+  mp.messaging.outgoing.extracao-falhou.publish-confirms=true; sem confirms a publicacao
+  recusada pelo broker completa como sucesso e a mensagem some em silencio
+```
+
+Serviço, arquivo e canal na mensagem — a condição de aceite pedia arquivo e canal, e o nome do
+módulo entrou porque o caminho é relativo ao basedir e sairia idêntico nos três.
+
+Cada uma das quatro saídas silenciosas foi provada à mão no `extracao`, acrescentando a linha ao
+`application.properties` e rodando só este teste: canal sem `connector`, canal com ponto no nome,
+`connector:smallrye-rabbitmq` com dois-pontos, e `%prod....publish-confirms=false` sobre um `true`
+sem perfil. Os quatro reprovam, e o quarto nomeia `%prod.mp.messaging.outgoing.<canal>` — o
+prefixo exato da chave que falta. Um canal `connector=smallrye-in-memory` foi acrescentado no
+mesmo formato e **não** reprova: a regra não cobra quem não publica em RabbitMQ.
+
+Verde com o arquivo restaurado: 11 testes, 0 falhas, nos três módulos, e
+`scripts/verifica-testes-arquiteturais.sh` aprovando as três cópias.

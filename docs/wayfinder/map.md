@@ -462,6 +462,25 @@ verificadas por teste, não são sugestão). Projeto original em
   Linux com Docker rootless. A suíte da raiz chegou ao código e revelou uma falha funcional no
   Estacionamento, separada no [037](tickets/037-estacionamento-nao-recebe-falha-da-dlq.md).
 
+- [Nada impede um canal de saída novo de nascer sem publish-confirms](tickets/034-publish-confirms-sem-guarda.md)
+  — o buraco que o 029 fechou no `extracao` e o 027 já tinha fechado no `videos` virou regra de
+  build: quinta regra do `ArchitectureConstraintsTest`, a primeira que não julga código Java.
+  Ela lê o `application.properties` do próprio módulo e cobra `publish-confirms=true` em todo
+  canal `mp.messaging.outgoing.*` que publique em RabbitMQ, nomeando serviço, arquivo e canal
+  na falha. Não precisou de cópia divergente nem de módulo compartilhado: cada cópia do teste
+  roda com o CWD no seu basedir, o mesmo pressuposto de `MAIN_SOURCES`, então o arquivo idêntico
+  nos três cobre os três serviços. A revisão da própria implementação alargou a regra: cobra
+  também o canal **sem** `connector` declarado, porque com um conector só no classpath o Quarkus
+  o liga ao RabbitMQ do mesmo jeito — cobrar só a linha `connector=` deixaria passar justamente o
+  canal novo do título. Junto foram fechados separador `:`, nome de canal com ponto e
+  `publish-confirms=false` num perfil sobre um `true` sem perfil. Limite declarado: canal que
+  chegue por `MP_MESSAGING_OUTGOING_*` (o overlay de carga usa) passa por fora. Vale para o `notificacao`, que hoje não publica — a regra
+  protege o serviço, não o canal que existe. Validação em boot foi descartada: avisa mais tarde
+  e custa mais para testar. Provado nos dois sentidos: apagar o `publish-confirms` de
+  `extracao-falhou` reprova com a mensagem esperada; restaurado, 11 testes verdes nos três
+  módulos. Não vinha da rodada de arquitetura dos 029–033: saiu da revisão de código da
+  implementação do 029, na mesma sessão.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -494,16 +513,6 @@ verificadas por teste, não são sugestão). Projeto original em
 - **[033](tickets/033-iniciada-em-morto.md) — o `iniciadaEm` descartado.** Atravessa três
   camadas sem destino, e é exatamente a coluna que faltaria para varrer `PROCESSANDO` preso.
   Espera o 029 para saber se o cenário sobrevive à configuração.
-
-<!-- 034 não vem desta rodada de arquitetura — saiu da revisão de código da própria
-     implementação do 029, em 2026-09-04. Registrado aqui porque é a mesma seção de "buracos
-     do caminho de recuperação", não porque a origem seja a mesma. -->
-
-- **[034](tickets/034-publish-confirms-sem-guarda.md) — nada impede um canal de saída novo
-  de nascer sem publish-confirms.** O mesmo defeito que o 029 corrigiu no `extracao` já tinha
-  acontecido um serviço abaixo, no `videos` (027) — duas vezes, achado só por medição ou
-  revisão manual. Sem guarda automática, um canal de saída novo em qualquer um dos três
-  serviços pode reintroduzir a perda silenciosa pela terceira vez.
 
 <!-- 035 nasceu do 030, na mesma sessão de 2026-09-04 que o fechou: a leitura do código-fonte
      do conector e do `quarkus-arc` desmentiu a premissa de que `stop_grace_period` bastasse. -->

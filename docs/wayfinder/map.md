@@ -415,6 +415,32 @@ verificadas por teste, não são sugestão). Projeto original em
   vazão não comparáveis entre sessões, só as comparações internas valem. Números completos em
   [`docs/pesquisa/carga-escala-borda.md`](../pesquisa/carga-escala-borda.md)
 
+- [A falha definitiva do `extracao` tem confirmação e tem fundo](tickets/029-terminal-na-dlq-do-extracao.md)
+  — **a leitura do conector desmentiu a primeira redação**: não é reenfileiramento infinito,
+  é perda silenciosa — `publish-confirms=false` (default) nos três canais de saída do
+  `extracao` fazia uma publicação recusada pelo broker completar como sucesso, o consumidor
+  da própria DLQ dar ack, e a falha definitiva sumir sem circular e sem reentrega. Ligar
+  confirms sozinho criaria o loop que faltava limitar; as duas metades andaram juntas:
+  `publish-confirms=true` nos três canais de saída, `failure-strategy=reject` (não mais
+  `requeue`) na `extracao.extrair.dlq`, que ganhou DLX próprio (quorum, sem
+  `x-delivery-limit` — um salto é o desenho) para a `extracao.extrair.estacionamento`, nova
+  fila terminal sem consumidor. `ExtracaoDlqConsumer` ganhou um `WARN` com o `idVideo`. Achado
+  na revisão de código da própria implementação: o `@QuarkusTest` de topologia inicial
+  publicava payload inválido para forçar nack, mas a conversão de payload roda fora do `Uni`
+  por mensagem que o `failure-strategy` trata — uma exceção ali pode derrubar a subscription
+  do canal inteiro em vez de nackear só aquela entrega. Trocado para um `ExtrairVideo` válido
+  contra um canal de saída quebrado de propósito (`@TestProfile`), o mesmo mecanismo do modo
+  `mata-publicacao` novo em `scripts/carga/conservacao.sh`. Não medido nesta sessão: o
+  `@QuarkusTest` novo e o `mata-publicacao` contra o Compose de verdade — o sandbox usado
+  não roteia porta publicada de container (docker-outside-of-docker), então só compilação e
+  os testes sem Docker rodaram; falta confirmar os dois no ambiente normal. Migração
+  documentada e não testada: `extracao.extrair.dlq` clássica existente quebra o boot com 406
+  `PRECONDITION_FAILED` — a fila precisa ser apagada antes do deploy. O Vídeo continua preso
+  em `PROCESSANDO` sem e-mail ao Dono nesse caminho — visibilidade, não o desfecho, é o que
+  este ticket compra. Achado no processo, não no código: o defeito de `publish-confirms` já
+  tinha acontecido um serviço abaixo (027, no `videos`) e se repetiu aqui sem guarda nenhuma
+  — motivo do [034](tickets/034-publish-confirms-sem-guarda.md), aberto na mesma revisão.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -424,7 +450,51 @@ verificadas por teste, não são sugestão). Projeto original em
      metade da linearidade, e o número confirmou; o 027 corrigiu o que o 025 condenou e remediu;
      o 028 converteu a última metade, a da borda, e o número quase confirmou. As quatro células
      da tabela § *O que escala, e como* estão medidas agora — nenhuma pergunta sharp restante
-     desta rodada de escolha. Vazio de propósito: não é fog, é a fronteira fechada. -->
+     daquela rodada de escolha.
+
+     A fronteira reabriu de novo, em 2026-09-01, por uma revisão de arquitetura sobre
+     `develop @ 6128f33` que perguntou onde mora a máquina de estados do Vídeo. O que ela
+     achou não foi vazão: foi o ADR 0002 descrevendo um desenho de duas perguntas das quais
+     só uma rodava, e dois pontos sem fundo no caminho de recuperação quando o `extracao`
+     cai. Os cinco tickets desta rodada saem daí, e a ordem entre eles é a ordem do risco:
+     decidir e medir a recuperação primeiro, mexer no código do `videos` depois. O 029 já
+     fechou (ver Decisões até aqui); dos quatro que continuam abaixo, um ainda é decisão
+     (033) e um é pergunta contra fonte primária (030): o que a sessão fechou foi que esses
+     buracos existem, não com que forma se tapam. -->
+
+- **[030](tickets/030-deploy-nao-gasta-tentativa.md) — deploy não gasta tentativa.** Sem
+  `stop_grace_period` no serviço `extracao`, o default de 10 s do Docker mata uma Extração que
+  pode levar minutos. Determinístico, não azar. Precisa antes provar como o conector se comporta
+  no `SIGTERM`.
+- **[031](tickets/031-decisao-de-transicao-em-java.md) — a decisão de transição roda em Java.**
+  `transitaPara` e os `marcaComo*` têm zero chamadores em `src/main`: a suíte de use case inteira
+  valida uma implementação que não embarca. Emenda o ADR 0002 em duas frentes — a entidade entra
+  no caminho de produção, e terminal→terminal deixa de ser bug para ser corrida de rede.
+- **[032](tickets/032-ciclo-da-extracao-no-extracao.md) — o ciclo da Extração mora no
+  `extracao`.** A regra permanente contra transitória está dentro de um adapter de 280 linhas
+  sem teste. São duas máquinas de estado e só uma está modelada.
+- **[033](tickets/033-iniciada-em-morto.md) — o `iniciadaEm` descartado.** Atravessa três
+  camadas sem destino, e é exatamente a coluna que faltaria para varrer `PROCESSANDO` preso.
+  Espera o 029 para saber se o cenário sobrevive à configuração.
+
+<!-- 034 não vem desta rodada de arquitetura — saiu da revisão de código da própria
+     implementação do 029, em 2026-09-04. Registrado aqui porque é a mesma seção de "buracos
+     do caminho de recuperação", não porque a origem seja a mesma. -->
+
+- **[034](tickets/034-publish-confirms-sem-guarda.md) — nada impede um canal de saída novo
+  de nascer sem publish-confirms.** O mesmo defeito que o 029 corrigiu no `extracao` já tinha
+  acontecido um serviço abaixo, no `videos` (027) — duas vezes, achado só por medição ou
+  revisão manual. Sem guarda automática, um canal de saída novo em qualquer um dos três
+  serviços pode reintroduzir a perda silenciosa pela terceira vez.
+
+<!-- Recusadas nesta rodada, com o motivo, para a recusa não virar esquecimento: **banco no
+     `extracao`** (tentativa como entidade durável) — reverte o `AGENTS.md`, e o Dono lê o estado
+     por HTTP no `videos`, então o estado voltaria replicado, trocando um bug de ordenação medido
+     por um de replicação não medido. **`extracao` notificando o Dono direto** — sem banco não há
+     token de idempotência, e a reentrega é garantida por contrato: moveria a garantia do ADR 0001
+     para o único serviço estruturalmente incapaz de fornecê-la. **Um terminal só em vez de três**
+     — é a única mudança de contrato com defeito medido atrás dela (o 027), mas quebra o ticket 007
+     e `docs/contratos/mensagens.md`; fica de fora até o contrato abrir. -->
 
 ## Fora de escopo
 

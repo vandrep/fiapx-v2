@@ -18,6 +18,14 @@
 # ali `deploy.replicas` nunca aparece (nasce implicitamente em 1).
 services:
   extracao:
+    environment:
+      # Ticket 029, modo `mata-publicacao`: sobrescreve o canal de saida `extracao-falhou`
+      # para apontar a uma exchange inexistente sem declara-la, forcando a falha de
+      # publicacao que aquele modo mede. Default reproduz a config normal (`fiapx.eventos`,
+      # declarada) para os outros tres modos — so o `conservacao.sh` exporta valores
+      # diferentes, e so no modo que precisa deles.
+      MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_EXCHANGE_NAME: ${FIAPX_EXTRACAO_FALHOU_EXCHANGE:-fiapx.eventos}
+      MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_EXCHANGE_DECLARE: ${FIAPX_EXTRACAO_FALHOU_EXCHANGE_DECLARE:-true}
     deploy:
       replicas: ${FIAPX_EXTRACAO_REPLICAS:-4}
       resources:

@@ -6,35 +6,55 @@
 # um teste de carga so serve para *falsea-lo*. Por isso aqui nao se otimiza nada: mede-se se
 # algum envio ficou sem desfecho.
 #
-# Tres modos, cada um com o seu criterio impresso ANTES de rodar. Sem limiar declarado antes,
-# todo resultado vira narrativa pos-fato:
+# Quatro modos, cada um com o seu criterio impresso ANTES de rodar. Sem limiar declarado
+# antes, todo resultado vira narrativa pos-fato:
 #
-#   limpo          rajada sem falha injetada. A fila absorve — todo mundo sabe —, e e por
-#                  isso que este modo sozinho prova pouco. Ele e a linha de base.
-#   mata-extracao  `docker kill` numa replica do extracao durante a drenagem. Exercita ack
-#                  manual, requeue e x-delivery-limit: "o worker morre no meio", que a doc
-#                  afirma e nada verificava.
-#   mata-videos    `docker kill videos` durante a rajada. E o unico modo que exercita a
-#                  varredura de reconciliacao e as colunas marcadoras do ADR 0003 — aquele
-#                  ADR existe inteiro para fechar a janela entre gravar e publicar, e essa
-#                  janela nunca tinha sido aberta de verdade.
+#   limpo           rajada sem falha injetada. A fila absorve — todo mundo sabe —, e e por
+#                   isso que este modo sozinho prova pouco. Ele e a linha de base.
+#   mata-extracao   `docker kill` numa replica do extracao durante a drenagem. Exercita ack
+#                   manual, requeue e x-delivery-limit: "o worker morre no meio", que a doc
+#                   afirma e nada verificava.
+#   mata-videos     `docker kill videos` durante a rajada. E o unico modo que exercita a
+#                   varredura de reconciliacao e as colunas marcadoras do ADR 0003 — aquele
+#                   ADR existe inteiro para fechar a janela entre gravar e publicar, e essa
+#                   janela nunca tinha sido aberta de verdade.
+#   mata-publicacao sobe o `extracao` com o canal `extracao-falhou` apontando para uma
+#                   exchange inexistente (`exchange.declare=false`), envia videos de formato
+#                   invalido e mede se a falha definitiva para no estacionamento em vez de
+#                   circular pela DLQ para sempre ou sumir em silencio (ticket 029). Unico
+#                   modo que nao julga por estado terminal em `videos` — o video correspondente
+#                   fica preso em PROCESSANDO de proposito, e e essa a garantia sob teste.
 #
 # Uso:
-#   scripts/carga/conservacao.sh [limpo|mata-extracao|mata-videos] [envios]
+#   scripts/carga/conservacao.sh [limpo|mata-extracao|mata-videos|mata-publicacao] [envios]
 #
 # Variaveis: FIAPX_VUS (default = envios, rajada instantanea), FIAPX_EXTRACAO_REPLICAS,
-#            FIAPX_FIXTURE, FIAPX_AMOSTRA.
+#            FIAPX_FIXTURE, FIAPX_AMOSTRA, FIAPX_LIMITE_ESTACIONAMENTO (so mata-publicacao).
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$raiz"
 
 modo="${1:-limpo}"
-envios="${2:-${FIAPX_ENVIOS:-400}}"
+# mata-publicacao nao e rajada: cada envio ocupa o worker por ~100s ate estacionar (ver
+# limite_estacionamento abaixo), e serializa atras do max-outstanding-messages=1 por
+# replica. 400 nesse modo seriam horas, nao minutos — por isso o default e outro.
+if [[ "$modo" == mata-publicacao ]]; then
+    envios="${2:-${FIAPX_ENVIOS:-3}}"
+else
+    envios="${2:-${FIAPX_ENVIOS:-400}}"
+fi
 vus="${FIAPX_VUS:-$envios}"
 replicas="${FIAPX_EXTRACAO_REPLICAS:-4}"
 fixture="${FIAPX_FIXTURE:-controle-3s.mp4}"
 amostra="${FIAPX_AMOSTRA:-10}"
+# 3 entregas de extrair-video (x-delivery-limit=3) + 1 tentativa de publicacao no consumidor
+# da DLQ, cada uma esgotando retry-on-fail-attempts=6/retry-on-fail-interval=5s do publisher
+# (~25s de backoff por tentativa) antes de desistir: ~100s no pior caso. O dobro e a folga.
+limite_estacionamento="${FIAPX_LIMITE_ESTACIONAMENTO:-240}"
+rabbitmq_url="${FIAPX_RABBITMQ_URL:-http://localhost:15672}"
+rabbitmq_usuario="${FIAPX_RABBITMQ_USUARIO:-fiapx}"
+rabbitmq_senha="${FIAPX_RABBITMQ_SENHA:-fiapx}"
 # Quando derrubar o `videos`, contado do inicio da rajada. Precisa cair DEPOIS de o primeiro
 # 202 ter sido gravado e ANTES de a rajada acabar — cedo demais e a borda morre antes de
 # aceitar qualquer coisa, e a rodada nao exercita janela nenhuma (criterio 0). Era 3s fixo
@@ -68,7 +88,7 @@ ok()     { echo "    ${verde}OK${normal}  $*"; }
 aviso()  { echo "    ${amarelo}!${normal}   $*"; }
 falha()  { echo "    ${vermelho}FALHOU${normal}  $*" >&2; exit 1; }
 
-case "$modo" in limpo|mata-extracao|mata-videos) ;; *) falha "modo desconhecido: $modo" ;; esac
+case "$modo" in limpo|mata-extracao|mata-videos|mata-publicacao) ;; *) falha "modo desconhecido: $modo" ;; esac
 
 # ---------------------------------------------------------------------------------------
 passo "0. Dependencias e fixtures"
@@ -76,13 +96,28 @@ passo "0. Dependencias e fixtures"
 for ferramenta in docker curl jq shuf; do
     command -v "$ferramenta" >/dev/null || falha "$ferramenta nao esta no PATH"
 done
-scripts/carga/gera-fixtures.sh
-[[ -f "scripts/carga/fixtures/$fixture" ]] || falha "fixture $fixture nao existe"
 rm -rf "$saida"; mkdir -p "$saida"
-ok "fixture $fixture, saida em scripts/carga/saida/$rotulo/"
+if [[ "$modo" == mata-publicacao ]]; then
+    # Extensao e content-type precisam passar pela borda (docs/contratos/http-videos.md §
+    # Rejeicoes): o que faz este arquivo falhar e o ffprobe do `extracao`, nao o `videos`.
+    fixture="invalido.mp4"
+    echo "isto nao e um video" > "scripts/carga/fixtures/$fixture"
+    ok "fixture $fixture (formato invalido de proposito), saida em scripts/carga/saida/$rotulo/"
+else
+    scripts/carga/gera-fixtures.sh
+    [[ -f "scripts/carga/fixtures/$fixture" ]] || falha "fixture $fixture nao existe"
+    ok "fixture $fixture, saida em scripts/carga/saida/$rotulo/"
+fi
 
 # ---------------------------------------------------------------------------------------
 passo "1. Stack de pe com $replicas replicas do extracao"
+
+if [[ "$modo" == mata-publicacao ]]; then
+    # So aqui: quebra o canal de saida extracao-falhou do extracao (docker-compose.carga.yml),
+    # para que toda publicacao de ExtracaoFalhou falhe e force o caminho ate o estacionamento.
+    export FIAPX_EXTRACAO_FALHOU_EXCHANGE="extracao.eventos.inexistente"
+    export FIAPX_EXTRACAO_FALHOU_EXCHANGE_DECLARE="false"
+fi
 
 "${compose[@]}" up -d > "$saida/compose.log" 2>&1 \
     || { cat "$saida/compose.log" >&2; falha "compose up falhou"; }
@@ -104,6 +139,22 @@ ok "$esperados containers saudaveis ($replicas de extracao, teto de ${FIAPX_EXTR
 # ---------------------------------------------------------------------------------------
 passo "2. Criterio, fixado antes de rodar"
 
+if [[ "$modo" == mata-publicacao ]]; then
+    echo "    modo ............: $modo"
+    echo "    envios ..........: $envios videos de formato invalido ($fixture)"
+    echo "    limite ..........: ${limite_estacionamento}s por video ate estacionar"
+    echo
+    echo "    1. Zero respostas nao-202 aos envios — o defeito injetado e na publicacao de"
+    echo "       saida do extracao, nao na borda do videos."
+    echo "    2. Cada video aceito aparece em PROCESSANDO no censo, e la permanece — o"
+    echo "       ExtracaoFalhou nunca alcanca o videos neste modo, de proposito (ticket 029:"
+    echo "       'O Video continua preso, e isso e aceite explicito')."
+    echo "    3. A extracao.extrair.estacionamento acumula exatamente $envios mensagens em"
+    echo "       ate ${limite_estacionamento}s — nem sumiu (perda silenciosa, o defeito"
+    echo "       original) nem ficou circulando para sempre (o loop que o failure-strategy=fail"
+    echo "       teria virado)."
+    echo
+else
 drenagem_esperada=$(( envios * segundos_por_video / replicas ))
 limite_drenagem=$(( drenagem_esperada * 3 ))
 (( limite_drenagem < 120 )) && limite_drenagem=120
@@ -140,10 +191,40 @@ echo "    4. Amostra de $amostra ids conferida pela API, como dono: 200 e estado
 echo "    5. Zero FALHOU. O fixture e um h264 valido de $fixture — todo FALHOU aqui e um"
 echo "       Video bom declarado ruim ao usuario, e terminal-porem-errado passa batido pelos"
 echo "       criterios 2 e 3, que so olham se houve desfecho."
+fi
 
 # ---------------------------------------------------------------------------------------
 passo "3. Rajada"
 
+if [[ "$modo" == mata-publicacao ]]; then
+    # Poucos envios, sequenciais, via curl direto — nao e rajada, e o k6 (feito para medir
+    # latencia de centenas de conexoes) so acrescentaria complexidade sem medir nada aqui.
+    aceitos_arquivo="$saida/aceitos.txt"
+    : > "$aceitos_arquivo"
+    recusados=0
+
+    token="$(curl -sS -X POST "http://localhost:8081/realms/fiapx/protocol/openid-connect/token" \
+        -d grant_type=password -d client_id=fiapx-videos \
+        -d "username=$usuario" -d "password=$senha" | jq -r '.access_token // empty')"
+    [[ -n "$token" ]] || falha "Keycloak nao devolveu token para $usuario"
+
+    for _ in $(seq 1 "$envios"); do
+        resposta="$(curl -sS -o "$saida/envio.json" -w '%{http_code}' \
+            -X POST "http://localhost:8080/videos" \
+            -H "Authorization: Bearer $token" \
+            -F "arquivo=@scripts/carga/fixtures/$fixture;type=video/mp4;filename=$fixture")"
+        if [[ "$resposta" == 202 ]]; then
+            jq -r '.id' "$saida/envio.json" >> "$aceitos_arquivo"
+        else
+            recusados=$((recusados + 1))
+            aviso "envio recusado: HTTP $resposta"
+        fi
+    done
+
+    aceitos="$(wc -l < "$aceitos_arquivo")"
+    echo "    aceitos (202) ...: $aceitos"
+    echo "    recusados .......: $recusados"
+else
 # k6 na rede do Compose, falando com `videos:8080` direto: a porta publicada passaria pelo
 # docker-proxy, que entraria na medicao de latencia sem fazer parte do sistema medido.
 # --user: a imagem do k6 roda como um usuario proprio (uid 12345), que nao consegue
@@ -190,11 +271,26 @@ if [[ "$modo" == mata-videos ]]; then
     "${compose[@]}" up -d videos > /dev/null 2>&1
     aviso "videos de volta — a partir daqui a varredura de reconciliacao e quem responde"
 fi
+fi
 
 # ---------------------------------------------------------------------------------------
 passo "4. Drenagem"
 
-if [[ "$modo" == mata-extracao ]]; then
+if [[ "$modo" == mata-publicacao ]]; then
+    inicio_espera=$SECONDS
+    profundidade=0
+    while :; do
+        profundidade="$(curl -sS -u "$rabbitmq_usuario:$rabbitmq_senha" \
+            "$rabbitmq_url/api/queues/%2F/extracao.extrair.estacionamento" \
+            | jq -r '.messages // 0')"
+        decorrido=$(( SECONDS - inicio_espera ))
+        printf '    %4ds  estacionamento=%s/%s\n' "$decorrido" "$profundidade" "$aceitos"
+        (( profundidade >= aceitos )) && break
+        (( decorrido > limite_estacionamento )) && { aviso "limite de ${limite_estacionamento}s estourado"; break; }
+        sleep 5
+    done
+    espera=$(( SECONDS - inicio_espera ))
+elif [[ "$modo" == mata-extracao ]]; then
     sleep 5
     alvo="$("${compose[@]}" ps -q extracao | head -1)"
     docker kill "$alvo" >/dev/null
@@ -203,6 +299,7 @@ if [[ "$modo" == mata-extracao ]]; then
     aviso "replica de volta"
 fi
 
+if [[ "$modo" != mata-publicacao ]]; then
 inicio_drenagem=$SECONDS
 while :; do
     censo="$(scripts/carga/oraculo.sh censo "$aceitos_arquivo")"
@@ -214,6 +311,7 @@ while :; do
     sleep 5
 done
 drenagem=$(( SECONDS - inicio_drenagem ))
+fi
 
 # ---------------------------------------------------------------------------------------
 passo "5. Censo final e amostra pela API"
@@ -228,7 +326,11 @@ ausentes="$(conta AUSENTE)"; recebidos="$(conta RECEBIDO)"; processando="$(conta
 : "${concluidos:=0}" "${falhados:=0}" "${ausentes:=0}" "${recebidos:=0}" "${processando:=0}"
 
 echo
-if (( aceitos > 0 )); then
+if [[ "$modo" == mata-publicacao ]]; then
+    # Nao ha estado terminal para conferir pela API neste modo — o video fica em PROCESSANDO
+    # de proposito (ver criterio 2 acima). O censo acima ja e a prova; nao ha amostra a fazer.
+    amostra_ok=true
+elif (( aceitos > 0 )); then
     scripts/carga/oraculo.sh amostra "$aceitos_arquivo" "$(( amostra < aceitos ? amostra : aceitos ))" \
         && amostra_ok=true || amostra_ok=false
 else
@@ -244,6 +346,23 @@ julga() {
     if [[ "$condicao" == true ]]; then ok "$nome — $detalhe"
     else echo "    ${vermelho}REPROVA${normal}  $nome — $detalhe"; reprovacoes=$((reprovacoes + 1)); fi
 }
+
+if [[ "$modo" == mata-publicacao ]]; then
+    julga "1. Zero nao-202" "$([[ $recusados == 0 ]] && echo true || echo false)" \
+          "$recusados recusas em $envios envios"
+    julga "2. Todos presos em PROCESSANDO" "$([[ $processando == "$aceitos" && $concluidos == 0 && $falhados == 0 && $ausentes == 0 ]] && echo true || echo false)" \
+          "$processando/$aceitos em PROCESSANDO, $concluidos CONCLUIDO, $falhados FALHOU, $ausentes AUSENTE"
+    julga "3. Estacionamento recebeu a falha definitiva" "$([[ $profundidade -ge $aceitos ]] && echo true || echo false)" \
+          "$profundidade/$aceitos mensagens em extracao.extrair.estacionamento em ${espera}s (limite ${limite_estacionamento}s)"
+    echo
+    if (( reprovacoes == 0 )); then
+        echo "${negrito}${verde}Falha definitiva parou no estacionamento${normal} no modo $modo: $aceitos aceitos, $profundidade estacionados."
+    else
+        echo "${negrito}${vermelho}$reprovacoes criterio(s) reprovado(s)${normal} no modo $modo."
+    fi
+    echo "    Saida completa: scripts/carga/saida/$rotulo/"
+    exit $(( reprovacoes > 0 ? 1 : 0 ))
+fi
 
 if [[ "$modo" == mata-videos ]]; then
     # Portao de validade da RODADA, e nao criterio sobre o sistema: com zero aceitos os

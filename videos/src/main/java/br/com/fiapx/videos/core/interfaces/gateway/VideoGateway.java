@@ -47,7 +47,7 @@ public interface VideoGateway {
      * {@link EstadoVideo#predecessores()}, nao de literais aqui: o grafo continua declarado
      * uma vez so.
      */
-    CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm);
+    CompletableFuture<Boolean> marcarIniciada(UUID id);
 
     /**
      * Mesma guarda de {@link #marcarIniciada}, agora para CONCLUIDO — e saindo de RECEBIDO

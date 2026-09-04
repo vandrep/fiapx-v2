@@ -6,8 +6,6 @@ import br.com.fiapx.videos.core.entities.Video;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.time.Instant;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class ProcessarExtracaoIniciadaUseCaseTest {
@@ -28,17 +26,17 @@ class ProcessarExtracaoIniciadaUseCaseTest {
 
     @Test
     void recebidoViraProcessando() {
-        useCase.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id(), Instant.now())).join();
+        useCase.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id())).join();
 
         assertEquals(EstadoVideo.PROCESSANDO, video.estado());
     }
 
     @Test
     void reentregaForaDeOrdemNaoFalha() {
-        useCase.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id(), Instant.now())).join();
+        useCase.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id())).join();
 
         // Ja em PROCESSANDO: a segunda entrega e um no-op, e o consumidor da ack do mesmo jeito.
-        useCase.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id(), Instant.now())).join();
+        useCase.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id())).join();
 
         assertEquals(EstadoVideo.PROCESSANDO, video.estado());
     }

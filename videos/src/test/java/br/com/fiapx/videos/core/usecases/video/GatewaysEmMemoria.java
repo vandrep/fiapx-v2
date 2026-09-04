@@ -76,7 +76,7 @@ final class GatewaysEmMemoria {
         }
 
         @Override
-        public CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm) {
+        public CompletableFuture<Boolean> marcarIniciada(UUID id) {
             var video = armazenados.get(id);
             return CompletableFuture.completedFuture(proximaTransicaoMudaLinha
                     && video != null && video.estado() == EstadoVideo.PROCESSANDO);

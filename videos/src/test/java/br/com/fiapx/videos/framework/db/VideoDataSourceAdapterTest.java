@@ -184,7 +184,7 @@ class VideoDataSourceAdapterTest {
     }
 
     private Uni<Boolean> iniciar(UUID id) {
-        return Uni.createFrom().completionStage(() -> adapter.marcarIniciada(id, Instant.now()));
+        return Uni.createFrom().completionStage(() -> adapter.marcarIniciada(id));
     }
 
     private Uni<Boolean> concluir(UUID id) {

@@ -91,7 +91,7 @@ public class VideoDataSourceAdapter implements VideoGateway {
      * predecessores desde o ticket 027.
      */
     @Override
-    public CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm) {
+    public CompletableFuture<Boolean> marcarIniciada(UUID id) {
         return Panache.withTransaction(() -> VideoEntity.update(
                         "estado = ?1 where id = ?2 and estado in ?3",
                         EstadoVideo.PROCESSANDO, id, EstadoVideo.PROCESSANDO.predecessores())

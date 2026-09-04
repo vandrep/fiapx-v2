@@ -62,7 +62,7 @@ class ProcessarExtracaoConcluidaUseCaseTest {
         useCase.executar(new ProcessarExtracaoConcluidaUseCase.Command(
                 video.id(), Instant.now(), video.id() + ".zip", 1_200, 4_096L)).join();
 
-        iniciada.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id(), Instant.now())).join();
+        iniciada.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id())).join();
 
         assertEquals(EstadoVideo.CONCLUIDO, video.estado());
     }

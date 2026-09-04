@@ -2,7 +2,6 @@ package br.com.fiapx.videos.core.usecases.video;
 
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
 
-import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -22,10 +21,10 @@ public class ProcessarExtracaoIniciadaUseCase {
         return videoGateway.buscarPorId(command.idVideo())
                 .thenCompose(video -> video.isEmpty() || !video.get().marcaComoIniciada()
                         ? CompletableFuture.completedFuture(false)
-                        : videoGateway.marcarIniciada(command.idVideo(), command.iniciadaEm()))
+                        : videoGateway.marcarIniciada(command.idVideo()))
                 .thenApply(mudou -> null);
     }
 
-    public record Command(UUID idVideo, Instant iniciadaEm) {
+    public record Command(UUID idVideo) {
     }
 }

@@ -71,12 +71,15 @@ No repro mínimo, um `nginx:alpine` descartável publicado pelo mesmo daemon em
 registraram o Ryuk em execução e Postgres, RabbitMQ, LocalStack e Keycloak iniciados; todos os
 endereços entregues à aplicação usaram `127.0.0.1`.
 
-`./mvnw test`, executado da raiz, também iniciou os Dev Services dos três módulos sem erro de
-socket ou endereço e chegou aos testes funcionais. Terminou com código 1 porque
+`./mvnw test`, executado da raiz, iniciou os Dev Services de `videos` e `extracao` sem erro de
+socket ou endereço e chegou aos testes funcionais. Terminou com código 1 antes de entrar em
+`notificacao` porque
 `ExtracaoEstacionamentoTest.publicacaoFalhaNoConsumoDaDlqChegaAoEstacionamento` não encontrou a
 mensagem após 45 segundos (`53` testes do módulo, `1` falha). O teste isolado repetiu a mesma
-falha. Isso não reabre a infraestrutura comprovada aqui; é o defeito funcional separado no
-[ticket 037](037-estacionamento-nao-recebe-falha-da-dlq.md).
+falha. `./mvnw -pl notificacao test` foi executado em seguida, iniciou Ryuk e RabbitMQ por
+`127.0.0.1` e terminou com código 0. Assim, nenhuma das três suítes parou por infraestrutura.
+O vermelho da raiz não reabre a infraestrutura comprovada aqui; é o defeito funcional separado
+no [ticket 037](037-estacionamento-nao-recebe-falha-da-dlq.md).
 
 A imagem ganhou `ffmpeg` e `ffprobe`, pré-requisitos já declarados pelo `AGENTS.md`, para que a
 suíte do `extracao` pudesse de fato chegar ao código. O suporte fica restrito a Docker rootless

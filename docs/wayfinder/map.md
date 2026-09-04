@@ -454,6 +454,14 @@ verificadas por teste, não são sugestão). Projeto original em
   foi configurado sem essa prova. Achado com código-fonte citado por linha em
   [`docs/pesquisa/rabbitmq-retry-dlq.md` §8](../pesquisa/rabbitmq-retry-dlq.md#8-adendo-ticket-030-o-conector-espera-a-mensagem-em-voo-terminar-no-sigterm)
 
+- [Dev Services provados no devcontainer rootless](tickets/036-dev-services-no-devcontainer-rootless.md)
+  — o rebuild confirmou rede do host, loopback anunciado ao Testcontainers e caminho real do
+  socket entregue ao Ryuk. Um Nginx publicado pelo daemon respondeu de dentro do container, e
+  `VideoDataSourceAdapterTest` passou com Ryuk, Postgres, RabbitMQ, LocalStack e Keycloak reais.
+  O socket deixou de pressupor UID 1000: deriva de `XDG_RUNTIME_DIR`; o suporte documentado é
+  Linux com Docker rootless. A suíte da raiz chegou ao código e revelou uma falha funcional no
+  Estacionamento, separada no [037](tickets/037-estacionamento-nao-recebe-falha-da-dlq.md).
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -507,6 +515,11 @@ verificadas por teste, não são sugestão). Projeto original em
   `ShutdownListener` próprio que segura o desligamento até a Extração terminar, ou um processo
   de entrada que intercepta o `SIGTERM` — e medir o escolhido contra o mesmo critério que o
   030 não chegou a rodar.
+
+- **[037](tickets/037-estacionamento-nao-recebe-falha-da-dlq.md) — a falha da DLQ não chega ao
+  Estacionamento.** Com os Dev Services acessíveis, o teste do caminho terminal reprova de forma
+  repetível: o consumidor vê `x-delivery-limit=3`, mas a fila de estacionamento fica vazia por
+  45 segundos. É falha funcional, não de startup do RabbitMQ.
 
 <!-- Recusadas nesta rodada, com o motivo, para a recusa não virar esquecimento: **banco no
      `extracao`** (tentativa como entidade durável) — reverte o `AGENTS.md`, e o Dono lê o estado

@@ -441,6 +441,19 @@ verificadas por teste, não são sugestão). Projeto original em
   tinha acontecido um serviço abaixo (027, no `videos`) e se repetiu aqui sem guarda nenhuma
   — motivo do [034](tickets/034-publish-confirms-sem-guarda.md), aberto na mesma revisão.
 
+- [Deploy não gasta tentativa da Extração](tickets/030-deploy-nao-gasta-tentativa.md) — a
+  pergunta central tem resposta e é **não**: o conector cancela a assinatura e fecha o canal
+  de forma síncrona e incondicional em `@BeforeDestroyed(ApplicationScoped.class)`, sem
+  esperar mensagem em voo, e isso dispara em `Arc.shutdown()` — **depois** da fase graciosa
+  nova do Quarkus, não protegido por ela. `quarkus.shutdown.timeout` só espera
+  `HttpServerRequest` (`GracefulShutdownFilter`); Reactive Messaging não tem equivalente.
+  `stop_grace_period`, por maior que seja, não muda quando isso acontece — acontece em
+  milissegundos após o `SIGTERM`, sempre. A premissa não se sustenta como escrita, e como o
+  003 virou o 010, este vira o [035](tickets/035-drenar-extracao-antes-do-sigterm.md): falta
+  um mecanismo que atrase o desligamento gracioso até a Extração terminar e dar ack, e nada
+  foi configurado sem essa prova. Achado com código-fonte citado por linha em
+  [`docs/pesquisa/rabbitmq-retry-dlq.md` §8](../pesquisa/rabbitmq-retry-dlq.md#8-adendo-ticket-030-o-conector-espera-a-mensagem-em-voo-terminar-no-sigterm)
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -457,15 +470,12 @@ verificadas por teste, não são sugestão). Projeto original em
      achou não foi vazão: foi o ADR 0002 descrevendo um desenho de duas perguntas das quais
      só uma rodava, e dois pontos sem fundo no caminho de recuperação quando o `extracao`
      cai. Os cinco tickets desta rodada saem daí, e a ordem entre eles é a ordem do risco:
-     decidir e medir a recuperação primeiro, mexer no código do `videos` depois. O 029 já
-     fechou (ver Decisões até aqui); dos quatro que continuam abaixo, um ainda é decisão
-     (033) e um é pergunta contra fonte primária (030): o que a sessão fechou foi que esses
-     buracos existem, não com que forma se tapam. -->
+     decidir e medir a recuperação primeiro, mexer no código do `videos` depois. O 029 e o 030
+     já fecharam (ver Decisões até aqui); dos três que continuam abaixo, um ainda é decisão
+     (033), um é código testado sem chamador em produção (031) e um é código sem teste (032).
+     O 030 virou o 035, que continua a pergunta contra fonte primária: o que a sessão fechou
+     foi que a premissa original do 030 estava errada, não que o buraco fechou. -->
 
-- **[030](tickets/030-deploy-nao-gasta-tentativa.md) — deploy não gasta tentativa.** Sem
-  `stop_grace_period` no serviço `extracao`, o default de 10 s do Docker mata uma Extração que
-  pode levar minutos. Determinístico, não azar. Precisa antes provar como o conector se comporta
-  no `SIGTERM`.
 - **[031](tickets/031-decisao-de-transicao-em-java.md) — a decisão de transição roda em Java.**
   `transitaPara` e os `marcaComo*` têm zero chamadores em `src/main`: a suíte de use case inteira
   valida uma implementação que não embarca. Emenda o ADR 0002 em duas frentes — a entidade entra
@@ -486,6 +496,17 @@ verificadas por teste, não são sugestão). Projeto original em
   acontecido um serviço abaixo, no `videos` (027) — duas vezes, achado só por medição ou
   revisão manual. Sem guarda automática, um canal de saída novo em qualquer um dos três
   serviços pode reintroduzir a perda silenciosa pela terceira vez.
+
+<!-- 035 nasceu do 030, na mesma sessão de 2026-09-04 que o fechou: a leitura do código-fonte
+     do conector e do `quarkus-arc` desmentiu a premissa de que `stop_grace_period` bastasse. -->
+
+- **[035](tickets/035-drenar-extracao-antes-do-sigterm.md) — drenar a Extração em voo antes
+  do `SIGTERM`.** O 030 provou que `stop_grace_period` sozinho não entrega nada: o conector
+  cancela a assinatura e fecha o canal em milissegundos após o sinal, sem esperar mensagem em
+  voo, e `quarkus.shutdown.timeout` não cobre Reactive Messaging. Falta decidir entre um
+  `ShutdownListener` próprio que segura o desligamento até a Extração terminar, ou um processo
+  de entrada que intercepta o `SIGTERM` — e medir o escolhido contra o mesmo critério que o
+  030 não chegou a rodar.
 
 <!-- Recusadas nesta rodada, com o motivo, para a recusa não virar esquecimento: **banco no
      `extracao`** (tentativa como entidade durável) — reverte o `AGENTS.md`, e o Dono lê o estado

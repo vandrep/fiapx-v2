@@ -947,6 +947,142 @@ move a idempotência para onde já existe estado transacional.
 
 ---
 
+## 8. Adendo (ticket 030): o conector espera a mensagem em voo terminar no `SIGTERM`?
+
+Pergunta central do [ticket 030](../wayfinder/tickets/030-deploy-nao-gasta-tentativa.md):
+`stop_grace_period` acima do teto de relógio de uma Extração (`timeout-ffprobe-segundos=30`
++ `timeout-ffmpeg-segundos=300` + download/upload) resolve o deploy que mata uma Extração em
+voo **se e somente se** o conector parar de puxar mensagem no `SIGTERM` e deixar a que está
+em voo terminar e dar ack antes de fechar o canal.
+
+**Resposta: não.** O conector cancela a assinatura e fecha a conexão de forma síncrona e
+incondicional assim que o evento de destruição do CDI dispara — sem checar se há uma
+mensagem em processamento, sem esperar `@Blocking` terminar, e sem que `stop_grace_period`
+ou `quarkus.shutdown.timeout` participem dessa decisão. Um grace period de minutos não muda
+quando isso acontece: acontece em milissegundos após o `SIGTERM`, sempre.
+
+### O que o conector faz no shutdown
+
+`RabbitMQConnector.terminate()` 4.32.1 observa `@BeforeDestroyed(ApplicationScoped.class)` —
+o evento de início de destruição do contexto CDI `ApplicationScoped` — e não recebe nenhuma
+informação sobre trabalho em andamento
+([`RabbitMQConnector.java` L256-268](https://raw.githubusercontent.com/smallrye/smallrye-reactive-messaging/4.32.1/smallrye-reactive-messaging-rabbitmq/src/main/java/io/smallrye/reactive/messaging/rabbitmq/RabbitMQConnector.java)):
+
+```java
+public void terminate(
+        @SuppressWarnings("unused") @Observes(notifyObserver = Reception.IF_EXISTS) @Priority(50) @BeforeDestroyed(ApplicationScoped.class) Object ignored) {
+    for (IncomingRabbitMQChannel incoming : incomings) {
+        incoming.terminate();
+    }
+    for (OutgoingRabbitMQChannel outgoing : outgoings) {
+        outgoing.terminate();
+    }
+    clients.forEach((channel, rabbitMQClient) -> rabbitMQClient.stopAndAwait());
+    clients.clear();
+}
+```
+
+`incoming.terminate()` cancela a assinatura reativa direto, sem esperar nada
+([`IncomingRabbitMQChannel.java` L260-263](https://raw.githubusercontent.com/smallrye/smallrye-reactive-messaging/4.32.1/smallrye-reactive-messaging-rabbitmq/src/main/java/io/smallrye/reactive/messaging/rabbitmq/internals/IncomingRabbitMQChannel.java)):
+
+```java
+public void terminate() {
+    Flow.Subscription sub = subscription.getAndSet(null);
+    if (sub != null) {
+        sub.cancel();
+    }
+}
+```
+
+Essa `cancel()` propaga para o consumidor RabbitMQ do Vert.x via `.onTermination().call(receiver::cancel)`
+(mesmo arquivo, L249), e depois `clients.forEach(... rabbitMQClient.stopAndAwait())` fecha a
+conexão **de forma bloqueante e incondicional** (`stopAndAwait`, ao contrário do
+`stopAndForget` usado alhures no mesmo arquivo para descarte assíncrono). Uma mensagem que
+esteja em voo — unacked, ffmpeg ainda rodando na worker pool — perde o canal nesse instante;
+pela semântica do broker já citada na §5 acima, "any delivery that was not acked is
+automatically requeued when the channel (or connection) on which the delivery happened is
+closed". O ffmpeg pode continuar rodando na JVM depois disso (a `cancel()` não interrompe a
+thread), mas o `ack()` que ele tentaria dar ao final cai num canal morto — e o RabbitMQ já
+reenfileirou a mensagem muito antes disso, para o próximo consumidor que a receber (o
+substituto do deploy). É exatamente a entrega que o ticket 030 queria evitar.
+
+### Por que o grace period não protege esse instante
+
+O `@BeforeDestroyed(ApplicationScoped.class)` acima dispara dentro de `Arc.shutdown()`, que o
+`ArcRecorder` do Quarkus registra como uma tarefa de shutdown **simples** — a API antiga de
+`ShutdownContext.addShutdownTask(Runnable)`, executada em `doStop()`
+([`ArcRecorder.java` L54-57, tag 3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/extensions/arc/runtime/src/main/java/io/quarkus/arc/runtime/ArcRecorder.java)):
+
+```java
+shutdown.addShutdownTask(new Runnable() {
+    @Override
+    public void run() {
+        Arc.shutdown();
+    }
+});
+```
+
+E `doStop()` só roda **depois** da fase graciosa e nova, de dois passos
+(`ShutdownRecorder.runShutdown()`), não antes nem durante
+([`Application.java` L221-223, tag 3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/core/runtime/src/main/java/io/quarkus/runtime/Application.java)):
+
+```java
+ShutdownRecorder.runShutdown();
+doStop();
+```
+
+A fase graciosa (`preShutdown` → delay opcional → `shutdown`, com timeout) é orquestrada por
+`ShutdownListener`s registrados separadamente — e **nenhum deles conhece Reactive
+Messaging**. O único que existe no classpath do `extracao` e que conta trabalho em
+andamento é o `GracefulShutdownFilter` do `quarkus-vertx-http` (trazido pelo
+`quarkus-smallrye-health`, dono do `/q/health/ready` que o `docker-compose.yml` sonda), e ele
+só sabe contar `HttpServerRequest`
+([`GracefulShutdownFilter.java` L14-20, tag 3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/extensions/vertx-http/runtime/src/main/java/io/quarkus/vertx/http/runtime/filters/GracefulShutdownFilter.java)):
+
+```java
+public class GracefulShutdownFilter implements ShutdownListener, Handler<HttpServerRequest> {
+    ...
+    private final AtomicInteger currentRequestCount = new AtomicInteger();
+```
+
+O próprio javadoc de `quarkus.shutdown.timeout` já avisa isso, e a leitura do código
+confirma que "requests" aqui é literal, não uma metáfora para "trabalho pendente"
+([`ShutdownConfig.java` L18-23, tag 3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/core/runtime/src/main/java/io/quarkus/runtime/shutdown/ShutdownConfig.java)):
+
+> The timeout to wait for running requests to finish. If this is not set then the
+> application will exit immediately.
+> Setting this timeout will incur a small performance penalty, as it requires active
+> requests to be tracked.
+
+Uma Extração em voo não é uma `HttpServerRequest` — é um item consumido de um canal
+`@Incoming` `@Blocking`, processado numa worker pool que nada aqui rastreia. Logo
+`quarkus.shutdown.timeout` roda, não espera nada (nenhum listener conhece a Extração),
+retorna, e só então `doStop()` chama `Arc.shutdown()`, que cancela a assinatura e fecha o
+canal — **tipicamente em milissegundos após o `SIGTERM`**, porque não há nada no meio do
+caminho que force uma espera. `stop_grace_period` do Docker só adia o `SIGKILL` que mataria o
+processo inteiro; ele não atrasa em nada este instante, porque o instante já passou muito
+antes do prazo do `stop_grace_period` sequer começar a importar.
+
+### Veredito
+
+A premissa do ticket 030 **não se sustenta como escrita**. `stop_grace_period` sozinho — por
+maior que seja, mesmo acima do teto de `timeout-ffmpeg-segundos` — não entrega nada: o canal
+já fechou e a mensagem já foi reenfileirada antes de o ffmpeg ter qualquer chance de
+terminar. O `entrypoint` do `Dockerfile` do `extracao` já roda `java` como PID 1 (forma
+`exec`, sem shell intermediário), então o `SIGTERM` chega direto na JVM — não é um problema
+de sinal perdido ou mascarado, é a ordem de eventos dentro do próprio Quarkus. Para o Vídeo
+chegar a `CONCLUIDO` sem gastar entrega num deploy, é preciso um mecanismo que **atrase o
+início do desligamento gracioso até a Extração em voo terminar e dar ack** — o equivalente a
+um `preStop` do Kubernetes, adaptado a Compose (que não tem hook de ciclo de vida
+equivalente): candidatos incluem um `ShutdownListener` próprio que rastreia a Extração em
+andamento e só libera `preShutdown`/`shutdown` quando ela termina (bounded por
+`quarkus.shutdown.timeout`, que aí sim passaria a ter efeito), ou um processo de entrada que
+intercepta o `SIGTERM` do Docker e só o encaminha à JVM depois de observar o canal livre. Os
+dois mudam a forma do ticket original; nenhum é "configurar `stop_grace_period` e seguir em
+frente". Desenho e medição ficam para um ticket novo, não para este.
+
+---
+
 ## Fontes primárias
 
 **Quarkus 3.31.3 (código e docs na tag)**
@@ -956,6 +1092,11 @@ move a idempotência para onde já existe estado transacional.
 - [`docs/src/main/asciidoc/rabbitmq-dev-services.adoc` @3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/docs/src/main/asciidoc/rabbitmq-dev-services.adoc)
 - [`docs/src/main/asciidoc/kafka.adoc` @3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/docs/src/main/asciidoc/kafka.adoc) (seção "Retrying processing")
 - [`build-parent/pom.xml` @3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/build-parent/pom.xml) (`rabbitmq.image`)
+- [`extensions/arc/runtime/.../ArcRecorder.java` @3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/extensions/arc/runtime/src/main/java/io/quarkus/arc/runtime/ArcRecorder.java) (adendo §8)
+- [`core/runtime/.../Application.java` @3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/core/runtime/src/main/java/io/quarkus/runtime/Application.java) (adendo §8)
+- [`core/runtime/.../shutdown/ShutdownRecorder.java` @3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/core/runtime/src/main/java/io/quarkus/runtime/shutdown/ShutdownRecorder.java) (adendo §8)
+- [`core/runtime/.../shutdown/ShutdownConfig.java` @3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/core/runtime/src/main/java/io/quarkus/runtime/shutdown/ShutdownConfig.java) (adendo §8)
+- [`extensions/vertx-http/runtime/.../GracefulShutdownFilter.java` @3.31.3](https://raw.githubusercontent.com/quarkusio/quarkus/3.31.3/extensions/vertx-http/runtime/src/main/java/io/quarkus/vertx/http/runtime/filters/GracefulShutdownFilter.java) (adendo §8)
 - [Guia Quarkus — SmallRye Fault Tolerance](https://quarkus.io/guides/smallrye-fault-tolerance)
 
 **SmallRye Reactive Messaging 4.32.1 (código e docs na tag)**

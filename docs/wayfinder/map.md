@@ -502,6 +502,15 @@ verificadas por teste, não são sugestão). Projeto original em
   a ausência não gravou nada — estado alterado daria `409`, e a `chavePacote` apagada
   quebraria antes. A chave continua fora do `VideoViewModel`, de propósito.
 
+- [A representação de Vídeo tem uma conversão só](tickets/047-unificar-conversao-da-representacao-de-video.md)
+  — os dois presenters repetiam o mapeamento dos sete campos públicos. A conversão virou
+  `RepresentacaoDeVideo`, classe sem estado na apresentação, e a listagem monta cada item por
+  ela. Um teste unitário com esperas escritas à mão e dois cenários BDD — CONCLUIDO e FALHOU
+  — passaram a cobrar que item de listagem e consulta individual saiam idênticos, com as sete
+  chaves públicas e nenhuma de armazenamento. Achado de lambuja, ainda aberto: o `202` do
+  envio publica `recebidoEm` com nanossegundos e o `GET` publica o mesmo campo truncado em
+  microssegundos pelo Postgres.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

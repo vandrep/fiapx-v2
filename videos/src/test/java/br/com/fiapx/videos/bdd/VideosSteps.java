@@ -1,6 +1,7 @@
 package br.com.fiapx.videos.bdd;
 
 import br.com.fiapx.videos.core.entities.EstadoVideo;
+import br.com.fiapx.videos.core.entities.MotivoFalha;
 import br.com.fiapx.videos.framework.db.entities.VideoEntity;
 import io.cucumber.java.Before;
 import io.cucumber.java.pt.Dado;
@@ -21,6 +22,9 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
@@ -40,6 +44,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * bucket — nao ha como esperar sete dias pela regra de ciclo de vida do MinIO.
  */
 public class VideosSteps {
+
+    /** Os sete campos que o contrato HTTP publica — chave de armazenamento nao esta entre eles. */
+    private static final Set<String> CAMPOS_PUBLICOS =
+            Set.of("id", "nome", "estado", "tamanhoBytes", "recebidoEm", "concluidoEm", "motivo");
 
     private static final byte[] CONTEUDO_DO_UPLOAD = "conteudo de video para teste".getBytes();
 
@@ -126,6 +134,17 @@ public class VideosSteps {
                     entidade.chavePacote = chavePacote;
                     entidade.quantidadeFrames = 1200;
                     entidade.tamanhoPacoteBytes = (long) tamanho;
+                })).await().indefinitely();
+    }
+
+    /** Montagem de cenario: leva o Video a FALHOU, transicao que em producao chega por evento. */
+    @Dado("que a Extração do Vídeo falhou por {string}")
+    public void queAExtracaoFalhouPor(String motivo) {
+        sessionFactory.withTransaction(sessao -> sessao.find(VideoEntity.class, idDoVideo)
+                .invoke(entidade -> {
+                    entidade.estado = EstadoVideo.FALHOU;
+                    entidade.finalizadoEm = Instant.now();
+                    entidade.motivo = MotivoFalha.doCodigo(motivo);
                 })).await().indefinitely();
     }
 
@@ -239,11 +258,41 @@ public class VideosSteps {
         assertEquals(esperados, resposta.jsonPath().getList("conteudo.nome"));
     }
 
+    @E("o corpo da resposta tem só os sete campos públicos")
+    public void oCorpoDaRespostaTemSoOsSeteCamposPublicos() {
+        assertEquals(CAMPOS_PUBLICOS, resposta.jsonPath().getMap("").keySet());
+    }
+
+    @E("o item do Vídeo enviado é igual à consulta individual")
+    public void oItemDoVideoEnviadoEIgualAConsultaIndividual() {
+        assertEquals(consultaIndividual(), itemDaListagem());
+    }
+
+    @E("o item do Vídeo enviado tem só os sete campos públicos")
+    public void oItemDoVideoEnviadoTemSoOsSeteCamposPublicos() {
+        assertEquals(CAMPOS_PUBLICOS, itemDaListagem().keySet());
+    }
+
     @E("o corpo da resposta tem {int} bytes")
     public void oCorpoDaRespostaTemBytes(int tamanho) {
         var corpo = resposta.asByteArray();
         assertEquals(tamanho, corpo.length, () -> "content-type=" + resposta.contentType()
                 + " corpo=" + new String(corpo).substring(0, Math.min(200, corpo.length)));
+    }
+
+    /** O item da listagem que corresponde ao Video enviado no cenario. */
+    private Map<String, Object> itemDaListagem() {
+        List<Map<String, Object>> conteudo = resposta.jsonPath().getList("conteudo");
+        return conteudo.stream()
+                .filter(item -> idDoVideo.toString().equals(item.get("id")))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Video enviado ausente da listagem: " + resposta.asString()));
+    }
+
+    private Map<String, Object> consultaIndividual() {
+        var individual = autenticado().when().get("/videos/" + idDoVideo);
+        assertEquals(200, individual.statusCode(), () -> "corpo: " + individual.asString());
+        return individual.jsonPath().getMap("");
     }
 
     private RequestSpecification autenticado() {

@@ -16,6 +16,7 @@ Funcionalidade: Borda pública do serviço videos
     E o campo "nome" da resposta é "ferias.mp4"
     E o campo "concluidoEm" da resposta é nulo
     E o campo "motivo" da resposta é nulo
+    E o corpo da resposta tem só os sete campos públicos
 
   Cenário: Extensão fora da lista é recusada com 415
     Quando eu envio o arquivo "relatorio.pdf" com content-type "video/mp4"
@@ -89,6 +90,33 @@ Funcionalidade: Borda pública do serviço videos
     E a listagem tem 1 itens e total 3
     E a listagem está na página 1 com tamanho 2
     E a listagem traz os Vídeos "um.mp4" nessa ordem
+
+  Cenário: O item da listagem é a mesma representação da consulta individual
+    O contrato publica uma representação de Vídeo só. O Vídeo CONCLUIDO é onde ela tem mais
+    o que vazar: chave de Pacote, contagem de frames e tamanho do Pacote existem no banco e
+    não estão no contrato.
+
+    Dado que enviei o arquivo "ferias.mp4"
+    E que a Extração do Vídeo concluiu com um Pacote de 2048 bytes
+    Quando eu listo os meus Vídeos
+    Então a resposta tem status 200
+    E o item do Vídeo enviado é igual à consulta individual
+    E o item do Vídeo enviado tem só os sete campos públicos
+
+  Cenário: Um Vídeo FALHOU publica o motivo como código, na consulta e na listagem
+    O `motivo` é o campo mais frágil da representação: ele sai como código, nunca como
+    frase — a frase que o usuário lê é do `notificacao`.
+
+    Dado que enviei o arquivo "quebrado.mkv"
+    E que a Extração do Vídeo falhou por "SEM_FLUXO_DE_VIDEO"
+    Quando eu consulto o Vídeo enviado
+    Então a resposta tem status 200
+    E o campo "estado" da resposta é "FALHOU"
+    E o campo "motivo" da resposta é "SEM_FLUXO_DE_VIDEO"
+    E o corpo da resposta tem só os sete campos públicos
+    Quando eu listo os meus Vídeos
+    Então a resposta tem status 200
+    E o item do Vídeo enviado é igual à consulta individual
 
   Cenário: Baixar o Pacote de um Vídeo que ainda não concluiu é 409, ainda não
     Dado que enviei o arquivo "ferias.mp4"

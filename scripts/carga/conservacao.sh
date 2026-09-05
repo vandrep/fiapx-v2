@@ -18,6 +18,13 @@
 #                   varredura de reconciliacao e as colunas marcadoras do ADR 0003 — aquele
 #                   ADR existe inteiro para fechar a janela entre gravar e publicar, e essa
 #                   janela nunca tinha sido aberta de verdade.
+#   redeploy-extracao  recria o `extracao` com `docker compose up -d --force-recreate` no meio
+#                   da drenagem — SIGTERM, nao SIGKILL. E o unico modo que julga o
+#                   DrenoDaExtracao (ticket 035): mede se a contagem de reentregas da
+#                   `extracao.extrair` ficou parada, ou seja, se o deploy custou zero das
+#                   tres entregas do x-delivery-limit. Mede tambem quanto o `up -d` demorou,
+#                   que e a janela de indisponibilidade cobrada por deploy (ticket 028).
+#
 #   mata-publicacao sobe o `extracao` com o canal `extracao-falhou` apontando para uma
 #                   exchange inexistente (`exchange.declare=false`), envia videos de formato
 #                   invalido e mede se a falha definitiva para no estacionamento em vez de
@@ -26,7 +33,7 @@
 #                   fica preso em PROCESSANDO de proposito, e e essa a garantia sob teste.
 #
 # Uso:
-#   scripts/carga/conservacao.sh [limpo|mata-extracao|mata-videos|mata-publicacao] [envios]
+#   scripts/carga/conservacao.sh [limpo|mata-extracao|redeploy-extracao|mata-videos|mata-publicacao] [envios]
 #
 # Variaveis: FIAPX_VUS (default = envios, rajada instantanea), FIAPX_EXTRACAO_REPLICAS,
 #            FIAPX_FIXTURE, FIAPX_AMOSTRA, FIAPX_LIMITE_ESTACIONAMENTO (so mata-publicacao).
@@ -72,7 +79,12 @@ senha="${FIAPX_SENHA:-demo}"
 # harness: 400 envios drenaram em 98 s com 4 replicas. E o numero que da o "tempo esperado
 # de drenagem" do criterio 2 — e ele precisa ser o medido, nao um chute generoso: um limite
 # folgado demais transforma o criterio 2 em "eventualmente termina", que nada reprova.
-segundos_por_video=1
+# Sobrescrevivel porque o numero e por fixture, nao por sistema: 1 s vale para o
+# controle-3s.mp4 (o default de todos os modos). Rodar o redeploy-extracao com o
+# carga-2min.mp4 — que e o unico jeito de o dreno segurar por segundos em vez de
+# milissegundos — muda o tempo de servico por Video em uma ordem de grandeza, e um limite de
+# drenagem calculado sobre 1 s reprovaria o criterio 2 por aritmetica, nao por defeito.
+segundos_por_video="${FIAPX_SEGUNDOS_POR_VIDEO:-1}"
 
 export FIAPX_EXTRACAO_REPLICAS="$replicas"
 compose=(docker compose -f docker-compose.yml -f docker-compose.carga.yml)
@@ -96,13 +108,24 @@ falha()  { echo "    ${vermelho}FALHOU${normal}  $*" >&2; exit 1; }
 # nao enxerga fila nenhuma). Usado duas vezes — antes de enviar (linha de base) e depois
 # (medida) — porque a fila e persistente entre corridas e nada aqui faz `down -v`: sem a
 # linha de base, mensagens de uma rodada anterior fariam o criterio 3 passar sem medir nada.
+# So redeploy-extracao: reentregas acumuladas da extracao.extrair desde que a fila nasceu. E a
+# unica medida direta de "o deploy gastou uma entrega" — o x-delivery-limit conta entregas, e o
+# broker reenfileira toda entrega nao ackeada quando o canal fecha. Lido antes e depois pelo
+# mesmo motivo do estacionamento: a fila e persistente entre corridas e nada aqui faz `down -v`.
+# `// 0` cobre a fila que ainda nao teve nenhuma reentrega, em que o RabbitMQ omite a chave.
+reentregas_extrair() {
+    curl -sS -u "$rabbitmq_usuario:$rabbitmq_senha" \
+        "$rabbitmq_url/api/queues/%2F/extracao.extrair" \
+        | jq -r '.message_stats.redeliver // 0'
+}
+
 profundidade_estacionamento() {
     curl -sS -u "$rabbitmq_usuario:$rabbitmq_senha" \
         "$rabbitmq_url/api/queues/%2F/extracao.extrair.estacionamento" \
         | jq -r '.messages // 0'
 }
 
-case "$modo" in limpo|mata-extracao|mata-videos|mata-publicacao) ;; *) falha "modo desconhecido: $modo" ;; esac
+case "$modo" in limpo|mata-extracao|redeploy-extracao|mata-videos|mata-publicacao) ;; *) falha "modo desconhecido: $modo" ;; esac
 
 # ---------------------------------------------------------------------------------------
 passo "0. Dependencias e fixtures"
@@ -132,8 +155,11 @@ passo "1. Stack de pe com $replicas replicas do extracao"
 if [[ "$modo" == mata-publicacao ]]; then
     # So aqui: quebra o canal de saida extracao-falhou do extracao (docker-compose.carga.yml),
     # para que toda publicacao de ExtracaoFalhou falhe e force o caminho ate o estacionamento.
-    export FIAPX_EXTRACAO_FALHOU_EXCHANGE="extracao.eventos.inexistente"
-    export FIAPX_EXTRACAO_FALHOU_EXCHANGE_DECLARE="false"
+    # Exportadas com o nome que o container le, e so neste modo: na forma de lista do
+    # docker-compose.carga.yml, variavel ausente aqui e variavel ausente la — que e o que os
+    # outros modos precisam para o `extracao` subir (ticket 035).
+    export MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_EXCHANGE_NAME="extracao.eventos.inexistente"
+    export MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_EXCHANGE_DECLARE="false"
 fi
 
 "${compose[@]}" up -d > "$saida/compose.log" 2>&1 \
@@ -156,6 +182,11 @@ ok "$esperados containers saudaveis ($replicas de extracao, teto de ${FIAPX_EXTR
 if [[ "$modo" == mata-publicacao ]]; then
     profundidade_base="$(profundidade_estacionamento)"
     ok "estacionamento antes do envio: $profundidade_base mensagem(ns) ja presentes"
+fi
+
+if [[ "$modo" == redeploy-extracao ]]; then
+    reentregas_base="$(reentregas_extrair)"
+    ok "reentregas de extracao.extrair antes do envio: $reentregas_base"
 fi
 
 # ---------------------------------------------------------------------------------------
@@ -214,6 +245,17 @@ echo "    4. Amostra de $amostra ids conferida pela API, como dono: 200 e estado
 echo "    5. Zero FALHOU. O fixture e um h264 valido de $fixture — todo FALHOU aqui e um"
 echo "       Video bom declarado ruim ao usuario, e terminal-porem-errado passa batido pelos"
 echo "       criterios 2 e 3, que so olham se houve desfecho."
+if [[ "$modo" == redeploy-extracao ]]; then
+    echo "    6. ZERO reentregas novas em extracao.extrair. E o criterio do ticket 035, e o unico"
+    echo "       que os criterios 2 a 5 nao alcancam: uma Extracao morta pelo SIGTERM e"
+    echo "       reenfileirada e chega a CONCLUIDO na segunda entrega, verde nos outros"
+    echo "       criterios e com uma das tres entregas gasta. Antes do DrenoDaExtracao este"
+    echo "       numero era >= 1 por replica recriada com Extracao em voo (ticket 030)."
+    echo "    7. O 'docker compose up -d' e reportado com o tempo que levou. Nao ha limiar aqui:"
+    echo "       e o custo de janela por deploy que o ticket 028 precisa conhecer, medido e nao"
+    echo "       julgado. O teto teorico e o stop_grace_period de 480s; o esperado e o que"
+    echo "       sobra da Extracao em voo."
+fi
 fi
 
 # ---------------------------------------------------------------------------------------
@@ -253,6 +295,7 @@ else
 # --user: a imagem do k6 roda como um usuario proprio (uid 12345), que nao consegue
 # escrever no diretorio de saida montado do host. Sem isto o `--console-output` morre com
 # "permission denied" e o experimento fica sem denominador.
+#
 # Qual uid depende de o daemon ser rootless (ticket 036, e achado ao rodar no ticket 035):
 # sob rootless, o usuario do host ja entra no user namespace como 0, entao o diretorio de
 # saida — dono 1000 do lado de fora — aparece como dono 0 dentro do container, e `--user 1000`
@@ -331,6 +374,42 @@ elif [[ "$modo" == mata-extracao ]]; then
     aviso "uma replica do extracao morta no meio da drenagem (container ${alvo:0:12})"
     "${compose[@]}" up -d extracao > /dev/null 2>&1
     aviso "replica de volta"
+elif [[ "$modo" == redeploy-extracao ]]; then
+    # Nao um `sleep` fixo: o redeploy tem que cair com Extracao EM VOO, e "5 segundos depois
+    # da rajada" nao garante isso — na primeira rodada deste modo a fila ja tinha drenado
+    # metade nesse prazo e o redeploy pegou as replicas ociosas, medindo zero reentrega sem
+    # ter exercitado dreno nenhum. Espera-se pela condicao, e ela e observavel:
+    # messages_unacknowledged e exatamente "entregue e ainda sem ack", que com
+    # max-outstanding-messages=1 e o mesmo que "Extracao em voo".
+    em_voo_antes=0
+    inicio_espera_voo=$SECONDS
+    while (( SECONDS - inicio_espera_voo < 60 )); do
+        em_voo_antes="$(curl -sS -u "$rabbitmq_usuario:$rabbitmq_senha" \
+            "$rabbitmq_url/api/queues/%2F/extracao.extrair" | jq -r '.messages_unacknowledged // 0')"
+        (( em_voo_antes > 0 )) && break
+        sleep 1
+    done
+    # O log das replicas QUE VAO MORRER, seguido em segundo plano: `--force-recreate` remove o
+    # container velho, e depois dele `docker logs` nao alcanca mais nada. Sem isto, "o dreno
+    # segurou o desligamento" e inferencia a partir da contagem de reentregas; com ele e a
+    # propria linha que o DrenoDaExtracao escreve antes de esperar. E a evidencia direta do
+    # ticket 035, e ela so existe se for capturada antes.
+    : > "$saida/dreno.log"
+    for velho in $("${compose[@]}" ps -q extracao); do
+        docker logs -f --since 1s "$velho" >> "$saida/dreno.log" 2>&1 &
+    done
+
+    # --force-recreate porque um `up -d` sem mudanca nenhuma e no-op: sem imagem nova, e ele
+    # que reproduz o que um deploy faz — para o container com SIGTERM, respeitando o
+    # stop_grace_period, e sobe outro no lugar. Sem ele nao ha SIGTERM e nao ha o que medir.
+    inicio_redeploy=$SECONDS
+    "${compose[@]}" up -d --force-recreate extracao > "$saida/redeploy.log" 2>&1 \
+        || { cat "$saida/redeploy.log" >&2; falha "redeploy do extracao falhou"; }
+    segundos_redeploy=$(( SECONDS - inicio_redeploy ))
+    wait $(jobs -rp) 2>/dev/null || true
+    linhas_dreno="$(grep -c 'segurando o desligamento' "$saida/dreno.log" || true)"
+    aviso "extracao recriado em ${segundos_redeploy}s com $em_voo_antes mensagem(ns) sem ack no inicio"
+    aviso "$linhas_dreno replica(s) registraram o dreno segurando o desligamento (scripts/carga/saida/$rotulo/dreno.log)"
 fi
 
 if [[ "$modo" != mata-publicacao ]]; then
@@ -345,6 +424,10 @@ while :; do
     sleep 5
 done
 drenagem=$(( SECONDS - inicio_drenagem ))
+fi
+
+if [[ "$modo" == redeploy-extracao ]]; then
+    reentregas_novas=$(( $(reentregas_extrair) - reentregas_base ))
 fi
 
 # ---------------------------------------------------------------------------------------
@@ -422,6 +505,23 @@ julga "3. Zero presos" "$([[ $(( recebidos + processando + ausentes )) == 0 ]] &
 julga "4. Amostra pela API" "$amostra_ok" "$amostra ids conferidos como dono"
 julga "5. Zero FALHOU" "$([[ $falhados == 0 ]] && echo true || echo false)" \
       "$falhados Video(s) validos declarados FALHOU"
+if [[ "$modo" == redeploy-extracao ]]; then
+    if (( em_voo_antes == 0 )); then
+        echo "    ${vermelho}INVALIDA${normal}  0. Nenhuma Extracao em voo no momento do redeploy: nao havia o"
+        echo "              que drenar, e o criterio 6 passaria verde sem julgar nada."
+        echo
+        echo "${negrito}${vermelho}Rodada invalida${normal}: aumente FIAPX_ENVIOS (atual $envios) para a fila nao"
+        echo "    drenar antes do redeploy, e repita."
+        echo "    Saida completa: scripts/carga/saida/$rotulo/"
+        exit 2
+    fi
+    ok "0. Rodada valida — $em_voo_antes Extracao(oes) em voo quando o SIGTERM chegou"
+    julga "6. Zero reentregas" "$([[ $reentregas_novas == 0 ]] && echo true || echo false)" \
+          "$reentregas_novas reentrega(s) nova(s) em extracao.extrair (base $reentregas_base), com $em_voo_antes sem ack no momento do redeploy"
+    julga "6b. O dreno realmente rodou" "$([[ $linhas_dreno -gt 0 ]] && echo true || echo false)" \
+          "$linhas_dreno replica(s) logaram o dreno segurando o desligamento; sem essa linha, um criterio 6 verde nao prova o mecanismo, so que ninguem estava trabalhando"
+    ok "7. Janela de deploy — ${segundos_redeploy}s no 'up -d --force-recreate' (teto: stop_grace_period 480s), medido e nao julgado"
+fi
 
 echo
 if (( reprovacoes == 0 )); then

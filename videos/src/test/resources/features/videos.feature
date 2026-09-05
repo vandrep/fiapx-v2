@@ -56,20 +56,39 @@ Funcionalidade: Borda pública do serviço videos
     Quando eu listo os meus Vídeos
     Então a resposta tem status 200
     E a listagem tem 2 itens e total 2
+    E a listagem traz os Vídeos "meu-2.mp4, meu-1.mp4" nessa ordem
 
-  Cenário: A listagem aceita filtro por estado
-    Dado que enviei o arquivo "ferias.mp4"
+  Cenário: O filtro por estado corta o conteúdo e o total juntos
+    Dado que enviei o arquivo "pendente-1.mp4"
+    E que enviei o arquivo "pendente-2.mp4"
+    E que enviei o arquivo "pronto.mp4"
+    E que a Extração do Vídeo concluiu com um Pacote de 2048 bytes
     Quando eu listo os meus Vídeos no estado "CONCLUIDO"
+    Então a resposta tem status 200
+    E a listagem tem 1 itens e total 1
+    E a listagem traz os Vídeos "pronto.mp4" nessa ordem
+    Quando eu listo os meus Vídeos no estado "RECEBIDO" com tamanho 1
+    Então a resposta tem status 200
+    E a listagem tem 1 itens e total 2
+    E a listagem traz os Vídeos "pendente-2.mp4" nessa ordem
+    Quando eu listo os meus Vídeos no estado "FALHOU"
     Então a resposta tem status 200
     E a listagem tem 0 itens e total 0
 
-  Cenário: A listagem pagina
+  Cenário: A listagem pagina, e o total é o da consulta inteira
     Dado que enviei o arquivo "um.mp4"
     E que enviei o arquivo "dois.mp4"
     E que enviei o arquivo "tres.mp4"
     Quando eu listo os meus Vídeos com página 0 e tamanho 2
     Então a resposta tem status 200
     E a listagem tem 2 itens e total 3
+    E a listagem está na página 0 com tamanho 2
+    E a listagem traz os Vídeos "tres.mp4, dois.mp4" nessa ordem
+    Quando eu listo os meus Vídeos com página 1 e tamanho 2
+    Então a resposta tem status 200
+    E a listagem tem 1 itens e total 3
+    E a listagem está na página 1 com tamanho 2
+    E a listagem traz os Vídeos "um.mp4" nessa ordem
 
   Cenário: Baixar o Pacote de um Vídeo que ainda não concluiu é 409, ainda não
     Dado que enviei o arquivo "ferias.mp4"

@@ -20,6 +20,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.nio.ByteBuffer;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
@@ -156,6 +157,14 @@ public class VideosSteps {
         resposta = autenticado().queryParam("estado", estado).when().get("/videos");
     }
 
+    @Quando("eu listo os meus Vídeos no estado {string} com tamanho {int}")
+    public void euListoOsMeusVideosNoEstadoComTamanho(String estado, int tamanho) {
+        resposta = autenticado()
+                .queryParam("estado", estado)
+                .queryParam("tamanho", tamanho)
+                .when().get("/videos");
+    }
+
     @Quando("eu listo os meus Vídeos com página {int} e tamanho {int}")
     public void euListoOsMeusVideosComPaginaETamanho(int pagina, int tamanho) {
         resposta = autenticado()
@@ -215,6 +224,19 @@ public class VideosSteps {
     public void aListagemTemItensETotal(int itens, int total) {
         assertEquals(itens, resposta.jsonPath().getList("conteudo").size());
         assertEquals(total, resposta.jsonPath().getInt("total"));
+    }
+
+    @E("a listagem está na página {int} com tamanho {int}")
+    public void aListagemEstaNaPaginaComTamanho(int pagina, int tamanho) {
+        assertEquals(pagina, resposta.jsonPath().getInt("pagina"));
+        assertEquals(tamanho, resposta.jsonPath().getInt("tamanho"));
+    }
+
+    /** A ordenacao e fixa por recebimento decrescente: o ultimo enviado vem primeiro. */
+    @E("a listagem traz os Vídeos {string} nessa ordem")
+    public void aListagemTrazOsVideosNessaOrdem(String nomes) {
+        var esperados = Arrays.stream(nomes.split(",")).map(String::trim).toList();
+        assertEquals(esperados, resposta.jsonPath().getList("conteudo.nome"));
     }
 
     @E("o corpo da resposta tem {int} bytes")

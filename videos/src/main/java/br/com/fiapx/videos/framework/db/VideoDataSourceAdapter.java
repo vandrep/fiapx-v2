@@ -10,7 +10,6 @@ import br.com.fiapx.videos.framework.db.entities.VideoEntity;
 import io.quarkus.hibernate.reactive.panache.Panache;
 import io.quarkus.panache.common.Parameters;
 import io.quarkus.panache.common.Sort;
-import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Instant;
@@ -75,13 +74,16 @@ public class VideoDataSourceAdapter implements VideoGateway {
                             Sort.by("recebidoEm", Sort.Direction.Descending),
                             Parameters.with("dono", dono.sub())));
 
-            return Uni.combine().all()
-                    .unis(consulta.page(pagina, tamanho).list(), consulta.count())
-                    .with((entidades, total) -> new Pagina<>(
-                            entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList(),
-                            pagina,
-                            tamanho,
-                            total));
+            // Encadeadas, e nao combinadas: as duas rodam na mesma sessao reativa, e sessao
+            // do Hibernate Reactive nao aceita duas operacoes em voo (ticket 045, e a mesma
+            // corrupcao que o ticket 017 viu em outro fluxo). A contagem ignora o page().
+            return consulta.page(pagina, tamanho).list()
+                    .flatMap(entidades -> consulta.count()
+                            .map(total -> new Pagina<>(
+                                    entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList(),
+                                    pagina,
+                                    tamanho,
+                                    total)));
         }).subscribeAsCompletionStage();
     }
 

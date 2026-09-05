@@ -594,6 +594,47 @@ verificadas por teste, não são sugestão). Projeto original em
      — é a única mudança de contrato com defeito medido atrás dela (o 027), mas quebra o ticket 007
      e `docs/contratos/mensagens.md`; fica de fora até o contrato abrir. -->
 
+<!-- A fronteira reabriu de novo em 2026-09-05, e desta vez não por medição: por uma
+     revisão de dois eixos sobre `3a3ec95...b4672ff` — o intervalo inteiro do projeto, do
+     ticket 002 ao 047. O eixo Standards julgou o código contra o `AGENTS.md`, os contratos,
+     os ADRs e o baseline de smells; o eixo Spec julgou-o contra `docs/enunciado.md` e os
+     próprios tickets. Os oito abaixo saem daí, e a ordem entre eles é a ordem do risco: os
+     dois P1 são requisito do enunciado não exercido e ADR desmentido pelo código; os dois P2
+     são janela de reconciliação assimétrica e vocabulário ambíguo atravessando fronteira; os
+     quatro P3 são manutenção e registro. Só o 053 é bloqueado (pelo 052) — os outros sete
+     estão na fronteira. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
+     passaria verde, mas o próprio 045 já registra isso como escolha barata deliberada, e
+     reabrir seria refazer decisão registrada. -->
+
+- **[048](tickets/048-retry-no-acesso-ao-minio-pela-borda.md) — o `videos` não tem `@Retry`.**
+  O ADR 0001 justifica a política de falhas dizendo que o `@Retry` no adapter cobre os blips de
+  I/O; os dois workers cumprem, o `videos` nem declara a extensão. Ou o adapter ganha a
+  proteção, ou o ADR declara a borda síncrona como exceção. P1.
+- **[049](tickets/049-compose-da-demo-processa-em-paralelo.md) — a stack da demo processa um
+  vídeo por vez.** O primeiro requisito funcional do enunciado é processar mais de um ao mesmo
+  tempo; a concorrência só existe no overlay de carga. A arquitetura permite, a entrega não
+  exerce. P1.
+- **[050](tickets/050-folga-contra-crash-nas-falhas-pendentes.md) — a janela do ADR 0003 é
+  assimétrica.** A varredura protege comandos pendentes com folga de tempo e falhas pendentes
+  com nenhuma: cair sobre uma publicação de falha em voo duplica o e-mail. Não quebra o ADR
+  0001, que aceita ao menos uma vez — mas nenhum documento explica a assimetria. P2.
+- **[052](tickets/052-nomear-o-resultado-da-extracao-no-videos.md) — os dados da conclusão
+  viajam soltos.** Quatro campos atravessam cinco assinaturas juntos, e `tamanhoBytes` é o
+  Pacote no consumidor e o vídeo na entidade. O `extracao` já batizou metade do conceito. P2.
+- **[051](tickets/051-ciclo-da-extracao-no-glossario.md) — Ciclo da Extração não está no
+  glossário.** O `AGENTS.md` manda todo termo de domínio passar pelo `CONTEXT.md`, e esse não
+  passou; de lambuja, parte dos métodos da peça só traduz booleano em opcional. P3.
+- **[053](tickets/053-unificar-a-forma-dos-use-cases-de-extracao.md) — os três use cases de
+  evento repetem a mesma forma.** Busca, decide na entidade, curto-circuita, grava. Bloqueado
+  pelo 052: os dois reescrevem as mesmas assinaturas. P3.
+- **[054](tickets/054-nomes-qualificados-inline.md) — nomes qualificados inline.** O recurso
+  HTTP do `videos` e o adapter de espaço de trabalho do `extracao` escrevem tipo e anotação por
+  extenso no meio de arquivos que importam normalmente. Cosmético. P3.
+- **[055](tickets/055-registrar-as-escolhas-fora-do-enunciado.md) — quatro escolhas sem
+  registro.** Monitoramento ausente, skills de agente versionadas, devcontainer e o CSS que
+  esconde um campo do Authorize: nenhuma é defeito, nenhuma tem uma frase que a explique onde a
+  banca olha. P3.
+
 ## Fora de escopo
 
 <!-- ruled beyond the destination; nunca gradua -->

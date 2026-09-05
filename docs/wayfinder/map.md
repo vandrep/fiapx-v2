@@ -454,6 +454,14 @@ verificadas por teste, não são sugestão). Projeto original em
   foi configurado sem essa prova. Achado com código-fonte citado por linha em
   [`docs/pesquisa/rabbitmq-retry-dlq.md` §8](../pesquisa/rabbitmq-retry-dlq.md#8-adendo-ticket-030-o-conector-espera-a-mensagem-em-voo-terminar-no-sigterm)
 
+- [Falha da DLQ chega ao Estacionamento](tickets/037-estacionamento-nao-recebe-falha-da-dlq.md)
+  — exchange inexistente fecha o canal AMQP e deixa o confirm pendente no Vert.x 4.5.24;
+  as retentativas do SmallRye nunca recebem uma falha para tratar. O publicador de
+  `ExtracaoFalhou` ganhou teto total de 30 segundos: ao vencer, propaga falha e o `reject`
+  da DLQ leva o comando original ao Estacionamento. Provado com RabbitMQ real e suíte da
+  raiz passando (392 testes). Timeout não prova recusa: publicação tardia pode coexistir
+  com o comando estacionado; duplicatas continuam tratadas pelo dono do estado.
+
 - [Dev Services provados no devcontainer rootless](tickets/036-dev-services-no-devcontainer-rootless.md)
   — o rebuild confirmou rede do host, loopback anunciado ao Testcontainers e caminho real do
   socket entregue ao Ryuk. Um Nginx publicado pelo daemon respondeu de dentro do container, e
@@ -533,10 +541,6 @@ verificadas por teste, não são sugestão). Projeto original em
   carga de pé. Desbloqueado o suficiente para os outros quatro modos (forma de lista no
   overlay); o `mata-publicacao` continua sem nunca ter rodado contra o Compose.
 
-- **[037](tickets/037-estacionamento-nao-recebe-falha-da-dlq.md) — a falha da DLQ não chega ao
-  Estacionamento.** Com os Dev Services acessíveis, o teste do caminho terminal reprova de forma
-  repetível: o consumidor vê `x-delivery-limit=3`, mas a fila de estacionamento fica vazia por
-  45 segundos. É falha funcional, não de startup do RabbitMQ.
 
 <!-- Recusadas nesta rodada, com o motivo, para a recusa não virar esquecimento: **banco no
      `extracao`** (tentativa como entidade durável) — reverte o `AGENTS.md`, e o Dono lê o estado

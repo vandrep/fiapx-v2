@@ -14,15 +14,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 
 /**
  * Topologia do ticket 029: a {@code extracao.extrair.dlq} deixou de ser terminal e ganhou
  * fundo proprio, a {@code extracao.extrair.estacionamento}. O
  * {@link CanalExtracaoFalhouQuebradoProfile} quebra so o canal de saida {@code
  * extracao-falhou}, entao quando o {@code ExtracaoDlqConsumer} tenta publicar {@code
- * ExtracaoFalhou} para a mensagem publicada aqui, essa publicacao falha de verdade — o
- * mesmo {@code Uni} que falha em producao quando o broker recusa uma publicacao (emenda do
- * ADR 0001). Essa falha nackeia a mensagem original; {@code failure-strategy=reject} a manda
+ * ExtracaoFalhou} para a mensagem publicada aqui, o broker fecha o canal. No Vert.x 4.5.24
+ * isso deixa o confirm pendente: o prazo do sender transforma a ausencia de confirmacao
+ * em falha (ticket 037). Essa falha nackeia a mensagem original; {@code failure-strategy=reject} a manda
  * sem requeue, e o {@code x-dead-letter-exchange} da propria fila leva ao estacionamento.
  *
  * <p>Publicar um payload que nao deserializa em {@code ExtrairVideo} nao serve para este
@@ -63,10 +64,12 @@ class ExtracaoEstacionamentoTest {
             // ExtracaoDlqConsumer usa para consumir extracao.extrair.dlq.
             canal.basicPublish("", "extracao.extrair.dlq", propriedades, corpo.getBytes(StandardCharsets.UTF_8));
 
-            // retry-on-fail-attempts=6 / retry-on-fail-interval=5s no publisher: a publicacao
-            // quebrada leva ~20-25s de backoff para desistir antes do nack chegar aqui.
+            // O prazo do sender cobre inclusive confirm pendente por fechamento do canal;
+            // retry-on-fail so atua quando a publicacao conclui com falha (ticket 037).
             GetResponse resposta = aguardarMensagem(canal, "extracao.extrair.estacionamento", 45_000);
             assertNotNull(resposta, "mensagem deveria ter chegado ao estacionamento");
+            assertArrayEquals(corpo.getBytes(StandardCharsets.UTF_8), resposta.getBody(),
+                    "o Estacionamento deve preservar o comando original para intervencao humana");
         }
     }
 

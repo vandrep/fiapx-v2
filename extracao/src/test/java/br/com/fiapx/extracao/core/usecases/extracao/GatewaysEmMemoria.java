@@ -69,19 +69,27 @@ final class GatewaysEmMemoria {
         }
     }
 
+    /**
+     * Cada {@code prepararNovo} devolve um caminho distinto, como o adapter real faz desde o
+     * ticket 041: e o que permite o teste cobrar que a limpeza receba o espaco <b>daquela</b>
+     * tentativa, e nao um caminho derivado do id do Video.
+     */
     static final class EspacoDeTrabalhoGatewayEmMemoria implements EspacoDeTrabalhoGateway {
         final List<UUID> preparados = new ArrayList<>();
-        final List<UUID> limpos = new ArrayList<>();
+        final List<Path> espacosCriados = new ArrayList<>();
+        final List<Path> limpos = new ArrayList<>();
 
         @Override
         public CompletableFuture<Path> prepararNovo(UUID idVideo) {
             preparados.add(idVideo);
-            return CompletableFuture.completedFuture(Path.of("/scratch/" + idVideo));
+            var espaco = Path.of("/scratch/" + idVideo + "-" + espacosCriados.size());
+            espacosCriados.add(espaco);
+            return CompletableFuture.completedFuture(espaco);
         }
 
         @Override
-        public CompletableFuture<Void> limpar(UUID idVideo) {
-            limpos.add(idVideo);
+        public CompletableFuture<Void> limpar(Path espacoDaTentativa) {
+            limpos.add(espacoDaTentativa);
             return CompletableFuture.completedFuture(null);
         }
     }

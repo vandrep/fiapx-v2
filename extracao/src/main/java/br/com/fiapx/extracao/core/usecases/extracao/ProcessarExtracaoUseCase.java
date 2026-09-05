@@ -27,7 +27,10 @@ import java.util.concurrent.CompletionException;
  *
  * <p>O diretorio de trabalho e sempre limpo, sucesso ou falha (ticket 011): o worker morre
  * no meio por desenho, entao a limpeza mora aqui, nao num {@code finally} do chamador que um
- * crash simplesmente nao executaria.
+ * crash simplesmente nao executaria. O que se limpa e o diretorio <b>desta tentativa</b> — o
+ * que {@code prepararNovo} devolveu, e nao "o diretorio do Video" (ticket 041): duas replicas
+ * podem estar processando o mesmo comando duplicado, e a limpeza de uma nao pode alcancar o
+ * trabalho da outra.
  */
 public class ProcessarExtracaoUseCase {
 
@@ -55,7 +58,7 @@ public class ProcessarExtracaoUseCase {
                 .thenCompose(ignorado -> espacoDeTrabalhoGateway.prepararNovo(idVideo))
                 .thenCompose(diretorio -> extrairEPublicar(command, diretorio)
                         .handle((ignoradoResultado, erro) -> erro)
-                        .thenCompose(erro -> espacoDeTrabalhoGateway.limpar(idVideo)
+                        .thenCompose(erro -> espacoDeTrabalhoGateway.limpar(diretorio)
                                 .thenApply(ignoradoLimpeza -> erro)))
                 .thenCompose(erro -> erro == null
                         ? CompletableFuture.completedFuture((Void) null)

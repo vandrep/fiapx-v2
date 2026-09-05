@@ -13,8 +13,11 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -61,8 +64,13 @@ public class BordaDeMensageria {
 
     private Connection conexao;
     private Channel canal;
-    /** Eventos ja drenados no cenario corrente, por routing key. Zerado a cada cenario. */
-    private final Map<String, JsonObject> eventosDoCenario = new HashMap<>();
+    /**
+     * Eventos ja drenados no cenario corrente, por routing key, na ordem em que chegaram.
+     * Zerado a cada cenario. E lista, e nao um evento so, porque um cenario de comando
+     * duplicado precisa contar: dois {@code extracao.concluida} sao a prova de que as duas
+     * tentativas terminaram, e nao so uma (ticket 041).
+     */
+    private final Map<String, List<JsonObject>> eventosDoCenario = new HashMap<>();
 
     @PostConstruct
     void abrir() {
@@ -162,19 +170,53 @@ public class BordaDeMensageria {
      * cenario pode perguntar pelo segundo antes do primeiro.
      */
     public JsonObject aguardarEvento(String routingKey, UUID idVideo, Duration limite) {
+        return aguardarEventos(routingKey, idVideo, 1, limite);
+    }
+
+    /**
+     * O mesmo, exigindo {@code quantidade} ocorrencias da routing key antes de devolver a
+     * ultima. E o que um cenario de comando duplicado precisa: sem contar, um unico evento
+     * satisfaz a espera e o cenario passa sem nunca ter olhado a segunda tentativa.
+     */
+    public JsonObject aguardarEventos(String routingKey, UUID idVideo, int quantidade, Duration limite) {
+        var encontrados = sondar(routingKey, idVideo, quantidade, limite);
+        if (encontrados.size() < quantidade) {
+            throw new AssertionError("esperava " + quantidade + " de " + routingKey + " em " + limite
+                    + " para o video " + idVideo + "; recebidos ate agora: " + recebidos());
+        }
+        return encontrados.get(encontrados.size() - 1);
+    }
+
+    /**
+     * Procura o evento por uma janela e devolve vazio se ele nao aparecer — a forma de cobrar
+     * <b>ausencia</b>. Vazio aqui nunca e prova definitiva; e prova de que, na janela dada e
+     * depois do desfecho ja observado, nada chegou.
+     */
+    public Optional<JsonObject> procurarEvento(String routingKey, UUID idVideo, Duration janela) {
+        var encontrados = sondar(routingKey, idVideo, 1, janela);
+        return encontrados.isEmpty() ? Optional.empty() : Optional.of(encontrados.get(0));
+    }
+
+    /**
+     * Drena primeiro, decide depois — sempre nesta ordem: uma janela curta que so olhasse o
+     * que ja estava no mapa responderia sem nunca ter perguntado ao broker.
+     */
+    private List<JsonObject> sondar(String routingKey, UUID idVideo, int quantidade, Duration limite) {
         long prazo = System.currentTimeMillis() + limite.toMillis();
         while (true) {
-            var evento = eventosDoCenario.get(routingKey);
-            if (evento != null) {
-                return evento;
-            }
-            if (System.currentTimeMillis() >= prazo) {
-                throw new AssertionError("o evento " + routingKey + " nao chegou em " + limite
-                        + " para o video " + idVideo + "; recebidos ate agora: " + eventosDoCenario.keySet());
-            }
             drenar(idVideo);
+            var encontrados = eventosDoCenario.getOrDefault(routingKey, List.of());
+            if (encontrados.size() >= quantidade || System.currentTimeMillis() >= prazo) {
+                return encontrados;
+            }
             dormir(200);
         }
+    }
+
+    private Map<String, Integer> recebidos() {
+        var contagem = new HashMap<String, Integer>();
+        eventosDoCenario.forEach((routingKey, eventos) -> contagem.put(routingKey, eventos.size()));
+        return contagem;
     }
 
     private void drenar(UUID idVideo) {
@@ -183,7 +225,9 @@ public class BordaDeMensageria {
             while ((resposta = canal.basicGet(FILA_DE_EVENTOS, true)) != null) {
                 var corpo = new JsonObject(new String(resposta.getBody(), StandardCharsets.UTF_8));
                 if (idVideo.toString().equals(corpo.getString("idVideo"))) {
-                    eventosDoCenario.put(resposta.getEnvelope().getRoutingKey(), corpo);
+                    eventosDoCenario
+                            .computeIfAbsent(resposta.getEnvelope().getRoutingKey(), chave -> new ArrayList<>())
+                            .add(corpo);
                 }
             }
         } catch (Exception erro) {

@@ -550,6 +550,19 @@ verificadas por teste, não são sugestão). Projeto original em
   pela suíte unitária.
 
 
+- **[041](tickets/041-isolar-espaco-por-tentativa-de-extracao.md) — o scratch passou a ser por
+  tentativa, não por Vídeo.** `prepararNovo` abre `{idVideo}-{sufixo}` atômico e `limpar`
+  recebe o caminho daquela tentativa, não o id: com o nome derivado só do Vídeo, duas réplicas
+  com o mesmo comando duplicado apagavam os frames uma da outra sobre o volume compartilhado.
+  Medido no Compose com duas réplicas: antes, o h264 válido terminou em `FALHOU`
+  /`ARQUIVO_INVALIDO` com os dois desfechos publicados para o mesmo Vídeo; depois, `CONCLUIDO`
+  e Pacote íntegro pela borda pública, sem sobra no volume. O ensaio virou script
+  (`scripts/carga/duplicata-em-replicas.sh`). A varredura de órfãos do 027 ganhou precisão de
+  graça — passa a julgar tentativa, não Vídeo — e ganhou um gatilho periódico (`@Scheduled`,
+  15 min): sem o apaga-e-recria, o boot sozinho não alcança o órfão da réplica que morreu e
+  voltou, o que foi medido no volume depois do ensaio de conservação.
+
+
 <!-- Recusadas nesta rodada, com o motivo, para a recusa não virar esquecimento: **banco no
      `extracao`** (tentativa como entidade durável) — reverte o `AGENTS.md`, e o Dono lê o estado
      por HTTP no `videos`, então o estado voltaria replicado, trocando um bug de ordenação medido

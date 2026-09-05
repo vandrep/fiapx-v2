@@ -9,7 +9,9 @@ import io.vertx.core.json.JsonObject;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
+import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
@@ -22,6 +24,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
+import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -50,6 +53,12 @@ public class ExtracaoSteps {
      * de 3 segundos com folga larga; abaixo disso o cenario reprovaria por maquina lenta.
      */
     private static final Duration ESPERA = Duration.ofSeconds(60);
+
+    /**
+     * Janela para cobrar ausencia de evento. Curta de proposito: ela so e usada depois de o
+     * desfecho ja ter sido observado, entao nao ha trabalho em voo que ainda pudesse publicar.
+     */
+    private static final Duration JANELA_DE_AUSENCIA = Duration.ofSeconds(3);
 
     @Inject
     BordaDeMensageria borda;
@@ -106,6 +115,12 @@ public class ExtracaoSteps {
         borda.publicarComandoDeExtracao(idVideo, chaveVideo, chaveDestinoPacote);
     }
 
+    @Quando("o comando de extração é publicado duas vezes na fila do extracao")
+    public void oComandoDeExtracaoEPublicadoDuasVezes() {
+        borda.publicarComandoDeExtracao(idVideo, chaveVideo, chaveDestinoPacote);
+        borda.publicarComandoDeExtracao(idVideo, chaveVideo, chaveDestinoPacote);
+    }
+
     @Entao("o evento {string} é publicado para o videos")
     public void oEventoEPublicadoParaOVideos(String routingKey) {
         borda.aguardarEvento(routingKey, idVideo, ESPERA);
@@ -149,6 +164,46 @@ public class ExtracaoSteps {
         Object valor = evento.getValue(nome);
         assertNotNull(valor, () -> "o evento nao trouxe o campo " + nome + ": " + evento.encode());
         return valor;
+    }
+
+    @Entao("o evento {string} é publicado para o videos duas vezes, uma por comando")
+    public void oEventoEPublicadoDuasVezes(String routingKey) {
+        // Espera pelas DUAS: a duplicata e serializada pelo prefetch=1 desta replica, entao a
+        // segunda so comeca depois da primeira terminar, e a janela precisa caber as duas.
+        borda.aguardarEventos(routingKey, idVideo, 2, ESPERA.multipliedBy(2));
+    }
+
+    @E("nenhum evento {string} é publicado para o videos")
+    public void nenhumEventoEPublicado(String routingKey) {
+        var evento = borda.procurarEvento(routingKey, idVideo, JANELA_DE_AUSENCIA);
+        assertTrue(evento.isEmpty(),
+                () -> "nao esperava " + routingKey + ": " + evento.map(JsonObject::encode).orElse(""));
+    }
+
+    /**
+     * Integridade, e nao so presenca: um Pacote montado sobre frames que outra tentativa
+     * apagou no meio chega ao bucket como zip truncado ou vazio, e {@code headObject} nao
+     * enxerga a diferenca. Ler cada entrada ate o fim faz o {@code ZipFile} conferir o CRC.
+     */
+    @E("o Pacote gravado abre como um zip com frames dentro")
+    public void oPacoteAbreComoZipComFramesDentro() throws IOException {
+        // Diretorio novo, e nao createTempFile: o toFile do SDK recusa arquivo ja existente.
+        var baixado = Files.createTempDirectory("pacote-bdd").resolve("pacote.zip");
+        s3.getObject(GetObjectRequest.builder().bucket(bucketPacotes).key(chaveDestinoPacote).build(),
+                AsyncResponseTransformer.toFile(baixado)).join();
+        try (var zip = new ZipFile(baixado.toFile())) {
+            var entradas = zip.stream().toList();
+            assertFalse(entradas.isEmpty(), "o Pacote nao pode chegar vazio ao bucket");
+            for (var entrada : entradas) {
+                try (var conteudo = zip.getInputStream(entrada)) {
+                    assertTrue(conteudo.readAllBytes().length > 0,
+                            () -> "entrada vazia no Pacote: " + entrada.getName());
+                }
+            }
+        } finally {
+            Files.deleteIfExists(baixado);
+            Files.deleteIfExists(baixado.getParent());
+        }
     }
 
     @E("o Pacote é gravado no bucket de pacotes")

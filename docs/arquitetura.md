@@ -522,9 +522,13 @@ O que eu não defendo — apenas aceitei.
   medido. Nada aqui diz o que acontece em máquina de outro porte, com MinIO remoto, ou com
   Vídeos de durações misturadas — todos os Vídeos de uma corrida eram o mesmo arquivo. Números em
   [`docs/pesquisa/carga-escalabilidade.md`](pesquisa/carga-escalabilidade.md). O defeito de as
-  réplicas compartilharem o volume de scratch foi corrigido no
-  [ticket 027](wayfinder/tickets/027-melhorias-medidas.md) — a varredura de boot passou a só
-  apagar o que está ocioso há mais de uma hora, em vez de tudo.
+  réplicas compartilharem o volume de scratch foi corrigido em duas etapas: o
+  [ticket 027](wayfinder/tickets/027-melhorias-medidas.md) fez a varredura de boot só apagar o
+  que está ocioso há mais de uma hora, em vez de tudo, e o
+  [ticket 041](wayfinder/tickets/041-isolar-espaco-por-tentativa-de-extracao.md) deu a cada
+  **tentativa** o seu diretório, em vez de um por Vídeo — com o nome derivado só do Vídeo, duas
+  réplicas com o mesmo comando duplicado apagavam os frames uma da outra, e um h264 válido
+  chegou ao usuário como `ARQUIVO_INVALIDO` (medido no Compose, duas réplicas).
 - **O dreno depende de campos privados do SmallRye 4.32.1.** O cancelamento por canal não
   é API pública do conector. A ponte valida a versão e os campos no boot, rejeitando
   atualização incompatível. Mudar o BOM exige reexaminar o fonte e repetir o ensaio do

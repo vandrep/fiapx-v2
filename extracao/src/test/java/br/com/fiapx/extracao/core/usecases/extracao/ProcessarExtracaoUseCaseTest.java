@@ -63,7 +63,27 @@ class ProcessarExtracaoUseCaseTest {
         assertEquals(1, espacoDeTrabalhoGateway.preparados.size());
         assertEquals(ID_VIDEO, espacoDeTrabalhoGateway.preparados.get(0));
         assertEquals(1, espacoDeTrabalhoGateway.limpos.size());
-        assertEquals(ID_VIDEO, espacoDeTrabalhoGateway.limpos.get(0));
+        // O espaco limpo e o que foi preparado para esta tentativa, e nao um caminho derivado
+        // do id do Video: e o que impede uma replica de apagar o trabalho da outra (041).
+        assertEquals(espacoDeTrabalhoGateway.espacosCriados.get(0), espacoDeTrabalhoGateway.limpos.get(0));
+    }
+
+    /**
+     * Duas execucoes do mesmo comando — o duplicado que o ADR 0003 tolera — nao podem
+     * compartilhar espaco nem limpar o espaco uma da outra.
+     */
+    @Test
+    void duasExecucoesDoMesmoVideoLimpamCadaUmaOSeuEspaco() throws Exception {
+        var comando = new ProcessarExtracaoUseCase.Command(ID_VIDEO, "videos/chave.mp4", "pacotes/chave.zip");
+
+        useCase.executar(comando).get();
+        useCase.executar(comando).get();
+
+        // Que dois `prepararNovo` devolvam caminhos distintos e assunto do adapter, e esta
+        // provado la (EspacoDeTrabalhoAdapterTest); aqui o que se cobra e do use case: cada
+        // execucao limpa o espaco que ela mesma preparou, na ordem em que preparou.
+        assertEquals(2, espacoDeTrabalhoGateway.espacosCriados.size());
+        assertEquals(espacoDeTrabalhoGateway.espacosCriados, espacoDeTrabalhoGateway.limpos);
     }
 
     @Test

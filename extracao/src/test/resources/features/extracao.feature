@@ -22,3 +22,16 @@ Funcionalidade: Pipeline de extração de frames
     Então o evento "extracao.iniciada" é publicado para o videos
     E o evento "extracao.falhou" é publicado para o videos com o motivo "ARQUIVO_INVALIDO"
     E nenhum Pacote é gravado no bucket de pacotes
+
+  # O ADR 0003 tolera comando duplicado, e o volume de scratch e compartilhado entre replicas:
+  # ate o ticket 041 a segunda tentativa do mesmo Video reusava o diretorio da primeira e
+  # apagava os frames dela. Aqui a duplicata chega pela borda de verdade; numa replica so o
+  # prefetch=1 as serializa, entao o que este cenario trava e o desfecho — duplicata continua
+  # terminando em Pacote integro, sem falha por colisao de arquivo.
+  Cenário: Um comando duplicado do mesmo vídeo ainda produz um Pacote íntegro
+    Dado que o vídeo "video-valido.mp4" foi enviado para o MinIO
+    Quando o comando de extração é publicado duas vezes na fila do extracao
+    Então o evento "extracao.concluida" é publicado para o videos duas vezes, uma por comando
+    E o Pacote é gravado no bucket de pacotes
+    E o Pacote gravado abre como um zip com frames dentro
+    E nenhum evento "extracao.falhou" é publicado para o videos

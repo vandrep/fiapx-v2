@@ -18,7 +18,10 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.vertx.RunOnVertxContext;
 import io.quarkus.test.vertx.UniAsserter;
 import io.smallrye.mutiny.Uni;
+import io.vertx.mutiny.sqlclient.Pool;
+import io.vertx.mutiny.sqlclient.Tuple;
 import jakarta.inject.Inject;
+import org.hibernate.reactive.mutiny.Mutiny;
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
@@ -122,6 +125,9 @@ class VideoDataSourceAdapterTest {
     @Inject
     VideoDataSourceAdapter adapter;
 
+    @Inject
+    Pool pool;
+
     @Test
     @RunOnVertxContext
     void concluirDiretoDeRecebidoMudaALinha(UniAsserter asserter) {
@@ -210,6 +216,72 @@ class VideoDataSourceAdapterTest {
                         Path.of("/tmp/visivel.mp4"), DONO)).thenAccept(video -> id[0] = video.id())));
         asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.buscarPorId(id[0])),
                 encontrado -> assertEquals(EstadoVideo.FALHOU, encontrado.orElseThrow().estado()));
+    }
+
+    /**
+     * A semantica de antes do ticket 040, reproduzida de proposito: com o envio inteiro dentro
+     * de uma transacao — que era o efeito do {@code @WithTransaction} na borda —, o consumidor
+     * que confirma o {@code ExtrairVideo} le por outra conexao e nao acha o Video. E a corrida
+     * do ticket, e ela nao depende de sleep nem de sorte: a leitura acontece dentro da
+     * transacao, que so commita depois.
+     */
+    @Test
+    @RunOnVertxContext
+    void envioDentroDeUmaTransacaoConfirmaOComandoSemOVideoEstarVisivel(UniAsserter asserter) {
+        var linhasVistas = new Long[1];
+
+        asserter.execute(() -> Panache.withTransaction(() -> Uni.createFrom().completionStage(
+                () -> envioComConsumidorQueLePorOutraConexao(linhasVistas).executar(envioDe("na-transacao.mp4")))));
+
+        asserter.assertThat(() -> Uni.createFrom().item(linhasVistas[0]), linhas -> assertEquals(0L, linhas,
+                "antes do commit o consumidor confirmaria o comando sem achar o Video"));
+    }
+
+    /**
+     * O mesmo caminho sem transacao ambiente, que e como o {@code VideosResource} chama hoje:
+     * {@link VideoDataSourceAdapter#adicionar} commita, e so entao o comando e publicado.
+     */
+    @Test
+    @RunOnVertxContext
+    void envioSemTransacaoAmbienteConfirmaOComandoComOVideoJaVisivel(UniAsserter asserter) {
+        var linhasVistas = new Long[1];
+
+        asserter.execute(() -> Uni.createFrom().completionStage(
+                () -> envioComConsumidorQueLePorOutraConexao(linhasVistas).executar(envioDe("commitado.mp4"))));
+
+        asserter.assertThat(() -> Uni.createFrom().item(linhasVistas[0]), linhas -> assertEquals(1L, linhas,
+                "o publish do ExtrairVideo acontece com a linha ja visivel de fora"));
+    }
+
+    /**
+     * O {@code ExtracaoSender} faz as vezes do consumidor que confirma o comando: ele le o
+     * Video por uma <b>conexao propria do pool</b>, que e o que outro processo enxergaria.
+     *
+     * <p>O que fica registrado e a contagem de linhas, e nao um boolean: {@code null} denuncia
+     * um consumidor que nunca rodou, que de outro modo passaria por "nao enxergou".
+     */
+    private EnviarVideoUseCase envioComConsumidorQueLePorOutraConexao(Long[] linhasVistas) {
+        var arquivo = new ArquivoGatewayDeTeste();
+        ExtracaoSender consumidor = (id, chaveVideo, chaveDestinoPacote) ->
+                linhasVisiveisPorOutraConexao(id)
+                        .invoke(linhas -> linhasVistas[0] = linhas)
+                        .replaceWithVoid()
+                        .subscribeAsCompletionStage();
+        VideoPresenter presenter = video -> { };
+        return new EnviarVideoUseCase(arquivo, adapter,
+                new PublicarExtrairVideo(arquivo, consumidor, adapter), presenter);
+    }
+
+    private static EnviarVideoUseCase.Command envioDe(String nome) {
+        return new EnviarVideoUseCase.Command(nome, "video/mp4", 1_024L, Path.of("/tmp/" + nome), DONO);
+    }
+
+    /** Conexao propria do pool: e o que um consumidor em outro processo enxergaria. */
+    private Uni<Long> linhasVisiveisPorOutraConexao(UUID id) {
+        return pool.withConnection(conexao -> conexao
+                .preparedQuery("select count(*) from video where id = $1")
+                .execute(Tuple.of(id))
+                .map(linhas -> linhas.iterator().next().getLong(0)));
     }
 
     private static final class ArquivoGatewayDeTeste implements ArquivoGateway {

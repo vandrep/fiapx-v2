@@ -40,6 +40,13 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-smallrye-fault-tolerance</artifactId>
         </dependency>
+
+        <!-- Varredura periodica do scratch abandonado (ticket 041): o boot sozinho nao alcanca
+             o orfao de uma replica que caiu e voltou, porque no boot ele ainda e recente. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-scheduler</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

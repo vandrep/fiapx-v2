@@ -23,7 +23,7 @@ public class ExtracaoEventosConsumer {
     @Incoming("extracao-iniciada")
     public Uni<Void> consumirIniciada(ExtracaoIniciada evento) {
         return Uni.createFrom().completionStage(
-                extracaoEventosController.processarIniciada(evento.idVideo(), evento.iniciadaEm()));
+                extracaoEventosController.processarIniciada(evento.idVideo()));
     }
 
     @Incoming("extracao-concluida")

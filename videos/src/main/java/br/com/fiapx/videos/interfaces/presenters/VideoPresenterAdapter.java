@@ -10,14 +10,7 @@ public class VideoPresenterAdapter implements VideoPresenter {
 
     @Override
     public void present(VideoDTO videoDTO) {
-        this.viewModel = new VideoViewModel(
-                videoDTO.id(),
-                videoDTO.nome(),
-                videoDTO.estado(),
-                videoDTO.tamanhoBytes(),
-                videoDTO.recebidoEm(),
-                videoDTO.finalizadoEm(),
-                videoDTO.motivo());
+        this.viewModel = RepresentacaoDeVideo.de(videoDTO);
     }
 
     public VideoViewModel viewModel() {

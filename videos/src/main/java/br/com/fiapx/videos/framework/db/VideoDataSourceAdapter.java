@@ -10,7 +10,6 @@ import br.com.fiapx.videos.framework.db.entities.VideoEntity;
 import io.quarkus.hibernate.reactive.panache.Panache;
 import io.quarkus.panache.common.Parameters;
 import io.quarkus.panache.common.Sort;
-import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Instant;
@@ -23,15 +22,16 @@ import java.util.concurrent.CompletableFuture;
  * As leituras abrem a sessao <b>aqui</b>, e nao por {@code @WithSession} no Resource, por
  * duas razoes. A anotacao exige retorno {@code Uni}, e o download devolve {@code RestMulti};
  * e ela manteria a sessao aberta enquanto o Pacote inteiro trafega — segurar conexao de banco
- * durante 1,5 GB de streaming e desperdicio. {@code Panache.withSession} e reentrante, entao
- * conviver com o {@code @WithTransaction} do envio e seguro.
+ * durante 1,5 GB de streaming e desperdicio. Cada escrita abre a propria transacao: em
+ * particular, {@link #adicionar(Video)} so confirma depois do commit, antes que o caminho de
+ * envio publique {@code ExtrairVideo} (ticket 040).
  */
 @ApplicationScoped
 public class VideoDataSourceAdapter implements VideoGateway {
 
     @Override
     public CompletableFuture<Void> adicionar(Video video) {
-        return paraEntity(video).persist()
+        return Panache.withTransaction(() -> paraEntity(video).persist())
                 .replaceWithVoid()
                 .subscribeAsCompletionStage();
     }
@@ -51,6 +51,14 @@ public class VideoDataSourceAdapter implements VideoGateway {
     }
 
     @Override
+    public CompletableFuture<Optional<Video>> buscarPorId(UUID id) {
+        return Panache.withSession(() -> VideoEntity.<VideoEntity>findById(id)
+                        .map(entity -> Optional.ofNullable(entity)
+                                .map(VideoDataSourceAdapter::paraDominio)))
+                .subscribeAsCompletionStage();
+    }
+
+    @Override
     public CompletableFuture<Pagina<Video>> listarPorDono(Dono dono,
                                                           Optional<EstadoVideo> estado,
                                                           int pagina,
@@ -66,13 +74,16 @@ public class VideoDataSourceAdapter implements VideoGateway {
                             Sort.by("recebidoEm", Sort.Direction.Descending),
                             Parameters.with("dono", dono.sub())));
 
-            return Uni.combine().all()
-                    .unis(consulta.page(pagina, tamanho).list(), consulta.count())
-                    .with((entidades, total) -> new Pagina<>(
-                            entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList(),
-                            pagina,
-                            tamanho,
-                            total));
+            // Encadeadas, e nao combinadas: as duas rodam na mesma sessao reativa, e sessao
+            // do Hibernate Reactive nao aceita duas operacoes em voo (ticket 045, e a mesma
+            // corrupcao que o ticket 017 viu em outro fluxo). A contagem ignora o page().
+            return consulta.page(pagina, tamanho).list()
+                    .flatMap(entidades -> consulta.count()
+                            .map(total -> new Pagina<>(
+                                    entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList(),
+                                    pagina,
+                                    tamanho,
+                                    total)));
         }).subscribeAsCompletionStage();
     }
 
@@ -83,7 +94,7 @@ public class VideoDataSourceAdapter implements VideoGateway {
      * predecessores desde o ticket 027.
      */
     @Override
-    public CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm) {
+    public CompletableFuture<Boolean> marcarIniciada(UUID id) {
         return Panache.withTransaction(() -> VideoEntity.update(
                         "estado = ?1 where id = ?2 and estado in ?3",
                         EstadoVideo.PROCESSANDO, id, EstadoVideo.PROCESSANDO.predecessores())
@@ -106,20 +117,13 @@ public class VideoDataSourceAdapter implements VideoGateway {
                 .subscribeAsCompletionStage();
     }
 
-    /**
-     * A guarda de unicidade do e-mail (ADR 0001): so quando o {@code UPDATE} muda a linha e
-     * que o Optional volta preenchido, buscado <b>na mesma transacao</b> — dispensa
-     * {@code RETURNING} e garante ver a propria escrita.
-     */
+    /** A guarda de unicidade do e-mail continua sendo o boolean do UPDATE (ADR 0001). */
     @Override
-    public CompletableFuture<Optional<Video>> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
+    public CompletableFuture<Boolean> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
         return Panache.withTransaction(() -> VideoEntity.update(
                         "estado = ?1, finalizadoEm = ?2, motivo = ?3 where id = ?4 and estado in ?5",
                         EstadoVideo.FALHOU, falhouEm, motivo, id, EstadoVideo.FALHOU.predecessores())
-                        .chain(linhasAlteradas -> linhasAlteradas > 0
-                                ? VideoEntity.<VideoEntity>findById(id)
-                                        .map(entity -> Optional.of(paraDominio(entity)))
-                                : Uni.createFrom().item(Optional.<Video>empty())))
+                        .map(linhasAlteradas -> linhasAlteradas > 0))
                 .subscribeAsCompletionStage();
     }
 

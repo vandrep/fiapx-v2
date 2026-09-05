@@ -16,6 +16,7 @@ Funcionalidade: Borda pública do serviço videos
     E o campo "nome" da resposta é "ferias.mp4"
     E o campo "concluidoEm" da resposta é nulo
     E o campo "motivo" da resposta é nulo
+    E o corpo da resposta tem só os sete campos públicos
 
   Cenário: Extensão fora da lista é recusada com 415
     Quando eu envio o arquivo "relatorio.pdf" com content-type "video/mp4"
@@ -56,20 +57,66 @@ Funcionalidade: Borda pública do serviço videos
     Quando eu listo os meus Vídeos
     Então a resposta tem status 200
     E a listagem tem 2 itens e total 2
+    E a listagem traz os Vídeos "meu-2.mp4, meu-1.mp4" nessa ordem
 
-  Cenário: A listagem aceita filtro por estado
-    Dado que enviei o arquivo "ferias.mp4"
+  Cenário: O filtro por estado corta o conteúdo e o total juntos
+    Dado que enviei o arquivo "pendente-1.mp4"
+    E que enviei o arquivo "pendente-2.mp4"
+    E que enviei o arquivo "pronto.mp4"
+    E que a Extração do Vídeo concluiu com um Pacote de 2048 bytes
     Quando eu listo os meus Vídeos no estado "CONCLUIDO"
+    Então a resposta tem status 200
+    E a listagem tem 1 itens e total 1
+    E a listagem traz os Vídeos "pronto.mp4" nessa ordem
+    Quando eu listo os meus Vídeos no estado "RECEBIDO" com tamanho 1
+    Então a resposta tem status 200
+    E a listagem tem 1 itens e total 2
+    E a listagem traz os Vídeos "pendente-2.mp4" nessa ordem
+    Quando eu listo os meus Vídeos no estado "FALHOU"
     Então a resposta tem status 200
     E a listagem tem 0 itens e total 0
 
-  Cenário: A listagem pagina
+  Cenário: A listagem pagina, e o total é o da consulta inteira
     Dado que enviei o arquivo "um.mp4"
     E que enviei o arquivo "dois.mp4"
     E que enviei o arquivo "tres.mp4"
     Quando eu listo os meus Vídeos com página 0 e tamanho 2
     Então a resposta tem status 200
     E a listagem tem 2 itens e total 3
+    E a listagem está na página 0 com tamanho 2
+    E a listagem traz os Vídeos "tres.mp4, dois.mp4" nessa ordem
+    Quando eu listo os meus Vídeos com página 1 e tamanho 2
+    Então a resposta tem status 200
+    E a listagem tem 1 itens e total 3
+    E a listagem está na página 1 com tamanho 2
+    E a listagem traz os Vídeos "um.mp4" nessa ordem
+
+  Cenário: O item da listagem é a mesma representação da consulta individual
+    O contrato publica uma representação de Vídeo só. O Vídeo CONCLUIDO é onde ela tem mais
+    o que vazar: chave de Pacote, contagem de frames e tamanho do Pacote existem no banco e
+    não estão no contrato.
+
+    Dado que enviei o arquivo "ferias.mp4"
+    E que a Extração do Vídeo concluiu com um Pacote de 2048 bytes
+    Quando eu listo os meus Vídeos
+    Então a resposta tem status 200
+    E o item do Vídeo enviado é igual à consulta individual
+    E o item do Vídeo enviado tem só os sete campos públicos
+
+  Cenário: Um Vídeo FALHOU publica o motivo como código, na consulta e na listagem
+    O `motivo` é o campo mais frágil da representação: ele sai como código, nunca como
+    frase — a frase que o usuário lê é do `notificacao`.
+
+    Dado que enviei o arquivo "quebrado.mkv"
+    E que a Extração do Vídeo falhou por "SEM_FLUXO_DE_VIDEO"
+    Quando eu consulto o Vídeo enviado
+    Então a resposta tem status 200
+    E o campo "estado" da resposta é "FALHOU"
+    E o campo "motivo" da resposta é "SEM_FLUXO_DE_VIDEO"
+    E o corpo da resposta tem só os sete campos públicos
+    Quando eu listo os meus Vídeos
+    Então a resposta tem status 200
+    E o item do Vídeo enviado é igual à consulta individual
 
   Cenário: Baixar o Pacote de um Vídeo que ainda não concluiu é 409, ainda não
     Dado que enviei o arquivo "ferias.mp4"
@@ -92,7 +139,11 @@ Funcionalidade: Borda pública do serviço videos
     Quando eu baixo o Pacote do Vídeo
     Então a resposta tem status 410
     E a resposta é um problem+json com título "Pacote expirado"
-    E o Vídeo continua em "CONCLUIDO"
+    Quando eu consulto o Vídeo enviado
+    Então a resposta tem status 200
+    E o campo "estado" da resposta é "CONCLUIDO"
+    Quando eu baixo o Pacote do Vídeo
+    Então a resposta tem status 410
 
   Cenário: Sem token não se entra
     Quando eu listo os meus Vídeos sem autenticação

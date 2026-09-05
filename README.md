@@ -64,8 +64,35 @@ A seção [Usar](#usar) é o mesmo percurso passo a passo, para quem quiser cond
 | MinIO | http://localhost:9001 | `minioadmin` / `minioadmin` |
 | MailHog | http://localhost:8025 | — |
 
-Para derrubar: `docker compose down`, ou `docker compose down -v` para apagar também os
-volumes (banco, buckets e uploads).
+Para derrubar preservando os dados: `docker compose down`. O próximo `docker compose up -d`
+reutiliza os volumes do mesmo projeto Compose: banco, buckets, uploads, mensagens do
+RabbitMQ e dados do Keycloak. O broker usa o volume `fiapx-rabbitmq-data` em
+`/var/lib/rabbitmq` e o hostname fixo `rabbitmq`, mantendo a identidade `rabbit@rabbitmq` ao recriar o container.
+Mantenha também o nome do projeto Compose: outro `-p` seleciona outros volumes.
+O volume `fiapx-keycloak-data` preserva as identidades dos usuários: sem ele, o realm
+reimportado gera outro `sub` para `demo`, que deixa de enxergar os Vídeos enviados antes.
+Com dados existentes, o Keycloak não reimporta o realm; alterações em `realm-export.json`
+precisam ser aplicadas ao realm existente ou testadas em um projeto novo.
+
+`docker compose down -v` exclui deliberadamente os volumes, inclusive as mensagens
+pendentes. É um reset dos dados, não um procedimento de reinício.
+
+Para atualizar uma stack criada antes do ticket 044, deixe as filas drenarem antes de
+recriar o broker. O novo volume não importa o conteúdo do volume anônimo antigo, e mudar
+a identidade do nó não migra esse conteúdo. Confira filas de trabalho, DLQs e
+Estacionamento no management UI antes da atualização.
+A instalação antiga também não migra automaticamente os dados efêmeros do Keycloak;
+preserve ou exporte seu realm com as identidades antes de recriá-lo se precisar manter
+acesso aos Vídeos existentes. A garantia de recriação vale para dados gravados já nos
+volumes nomeados.
+
+O ensaio `./scripts/persistencia-rabbitmq.sh` publica três Vídeos, verifica comandos
+pendentes e marcas no Postgres, executa `down`/`up` sem excluir volumes, compara a
+topologia e acompanha os mesmos Vídeos até `CONCLUIDO` pela API. Ao final roda o smoke.
+Precisa de Docker Compose com suporte a `!override`, `curl`, `jq`, `diff`, `grep` e `unzip`.
+Usa o projeto separado `fiapx-persistencia`, com portas 18080, 18081, 25672, 19001 e 18025;
+deixa seus containers e volumes para inspeção. Para encerrá-lo preservando os dados:
+`docker compose -p fiapx-persistencia down`.
 
 ## Usar
 
@@ -146,6 +173,18 @@ Antes de escrever a primeira classe, leia [`AGENTS.md`](AGENTS.md): as regras de
 são convenção, são verificadas por `ArchitectureConstraintsTest` e reprovam o build.
 
 O CI roda o mesmo `verify` num job só e publica as três imagens no GHCR a partir da `main`.
+
+### Devcontainer com Docker rootless
+
+O devcontainer suporta Docker rootless em host Linux. Antes de reconstruí-lo,
+`XDG_RUNTIME_DIR` precisa apontar para o diretório de runtime do usuário que executa o daemon
+(normalmente `/run/user/$(id -u)`) e o socket precisa existir em
+`$XDG_RUNTIME_DIR/docker.sock`. A configuração usa esse valor tanto no bind mount quanto no
+endereço que o Ryuk enxerga; portanto, não pressupõe UID 1000.
+
+O container usa a rede do host e anuncia `127.0.0.1` ao Testcontainers. Essas duas opções são
+necessárias para que os testes alcancem as portas publicadas pelo daemon rootless. Depois de
+alterar a configuração, use **Rebuild Container** no editor antes de executar `./mvnw test`.
 
 ## Mapa do repositório
 

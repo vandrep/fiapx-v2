@@ -24,3 +24,6 @@ __MACOSX/
 # Fixtures de carga (ticket 025): gerados por scripts/carga/gera-fixtures.sh
 scripts/carga/fixtures/
 scripts/carga/saida/
+
+# Lock de runtime do Claude Code: pid de sessao, nao configuracao
+.claude/scheduled_tasks.lock

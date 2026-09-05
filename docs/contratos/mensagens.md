@@ -53,8 +53,18 @@ Assimétricas de propósito: DLQ dedicada onde há consumidor, compartilhada ond
 | DLQ | Origem | Consumidor |
 |---|---|---|
 | `extracao.extrair.dlq` | `extracao.extrair` | **`extracao`** — publica `ExtracaoFalhou` com `TENTATIVAS_ESGOTADAS` |
+| `extracao.extrair.estacionamento` | `extracao.extrair.dlq` | nenhum — terminal, intervenção humana |
 | `videos.dlq` | as três filas de `videos` | nenhum — terminal, intervenção humana |
 | `notificacao.dlq` | `notificacao.video-falhou` | nenhum — terminal, intervenção humana |
+
+`extracao.extrair.dlq` deixou de ser terminal a partir do ticket
+[029](../wayfinder/tickets/029-terminal-na-dlq-do-extracao.md): o consumidor dela é ele
+próprio um publicador (`ExtracaoFalhou`), e uma publicação recusada pelo broker sem
+`publish-confirms` completava com sucesso mesmo assim — ack, e a falha definitiva sumia em
+silêncio, sem nenhuma varredura capaz de alcançá-la. `extracao.extrair.estacionamento` é o
+fundo dela: sem consumidor, fila quorum (ADR 0001 recusa classic aqui pelo mesmo motivo que
+recusa em toda DLQ da política — dead-lettering *at-most-once*), inspecionada por operação
+no management UI.
 
 Numa DLQ compartilhada, a fila de origem só se descobre pelo header `x-death`. É aceitável
 porque o destino é olho humano no management UI: mensagem ali significa banco ou SMTP fora
@@ -69,6 +79,15 @@ Cada serviço declara pelo conector SmallRye o que publica e o que consome
 
 O motivo é o teste: os Dev Services sobem um broker limpo em `@QuarkusTest` sem o
 `definitions.json`. Se a topologia morasse lá, nada rodaria em teste.
+
+Há um terceiro declarante, e ele só existe em teste: a `BordaDeMensageria` dos cenários BDD
+dos dois workers (ticket 042). Ela redeclara os exchanges com **os mesmos argumentos** do
+conector (`topic`, durável, sem auto-delete) — idempotente de propósito, para o cenário não
+depender de quem subiu primeiro — e o `extracao` acrescenta uma fila observadora própria,
+`bdd.extracao-eventos`, ligada a `fiapx.eventos` na chave `extracao.*`. Ela é exclusiva e
+auto-delete: some com a conexão, e o RabbitMQ 4.x barra fila transiente não exclusiva. Nada
+disso existe fora do classpath de teste, e nenhuma fila de produção é declarada ali
+(AGENTS.md § BDD).
 
 ### Prefetch
 

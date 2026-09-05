@@ -4,18 +4,33 @@ import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
 import br.com.fiapx.videos.core.entities.Video;
+import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
+import br.com.fiapx.videos.core.interfaces.presenter.VideoPresenter;
+import br.com.fiapx.videos.core.interfaces.sender.ExtracaoSender;
+import br.com.fiapx.videos.core.interfaces.sender.NotificacaoSender;
+import br.com.fiapx.videos.core.usecases.video.EnviarVideoUseCase;
+import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoFalhouUseCase;
+import br.com.fiapx.videos.core.usecases.video.PublicarExtrairVideo;
+import br.com.fiapx.videos.core.usecases.video.PublicarVideoFalhou;
 import br.com.fiapx.videos.framework.db.entities.VideoEntity;
 import io.quarkus.hibernate.reactive.panache.Panache;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.vertx.RunOnVertxContext;
 import io.quarkus.test.vertx.UniAsserter;
 import io.smallrye.mutiny.Uni;
+import io.vertx.mutiny.sqlclient.Pool;
+import io.vertx.mutiny.sqlclient.Tuple;
 import jakarta.inject.Inject;
+import org.hibernate.reactive.mutiny.Mutiny;
 import org.junit.jupiter.api.Test;
 
+import java.nio.ByteBuffer;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Flow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -39,8 +54,79 @@ class VideoDataSourceAdapterTest {
 
     private static final Dono DONO = new Dono("sub-adapter", "adapter@exemplo.com");
 
+    @Test
+    @RunOnVertxContext
+    void iniciadaPersisteOsMesmosCamposQueAEntidade(UniAsserter asserter) {
+        var id = new UUID[1];
+        var esperado = new Video[1];
+        gravarRecebido(asserter, id);
+        carregarEsperado(asserter, id, esperado);
+
+        asserter.execute(() -> {
+            esperado[0].marcaComoIniciada();
+            return iniciar(id[0]);
+        });
+        asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
+    }
+
+    @Test
+    @RunOnVertxContext
+    void concluidaPersisteOsMesmosCamposQueAEntidade(UniAsserter asserter) {
+        var id = new UUID[1];
+        var esperado = new Video[1];
+        var concluidaEm = Instant.parse("2026-09-04T12:00:00Z");
+        gravarRecebido(asserter, id);
+        carregarEsperado(asserter, id, esperado);
+
+        asserter.execute(() -> {
+            esperado[0].marcaComoConcluida(concluidaEm, "pacotes/resultado.zip", 900, 2_048L);
+            return Uni.createFrom().completionStage(() -> adapter.marcarConcluida(
+                    id[0], concluidaEm, "pacotes/resultado.zip", 900, 2_048L));
+        });
+        asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
+    }
+
+    @Test
+    @RunOnVertxContext
+    void falhaPersisteOsMesmosCamposQueAEntidade(UniAsserter asserter) {
+        var id = new UUID[1];
+        var esperado = new Video[1];
+        var falhouEm = Instant.parse("2026-09-04T12:00:00Z");
+        gravarRecebido(asserter, id);
+        carregarEsperado(asserter, id, esperado);
+
+        asserter.execute(() -> {
+            esperado[0].marcaComoFalha(falhouEm, MotivoFalha.ARQUIVO_INVALIDO);
+            return Uni.createFrom().completionStage(
+                    () -> adapter.marcarFalha(id[0], falhouEm, MotivoFalha.ARQUIVO_INVALIDO));
+        });
+        asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
+    }
+
+    private void carregarEsperado(UniAsserter asserter, UUID[] id, Video[] esperado) {
+        asserter.execute(() -> videoDe(id[0]).invoke(video -> esperado[0] = video));
+    }
+
+    private static void assertVideoIgual(Video esperado, Video atual) {
+        assertEquals(esperado.id(), atual.id());
+        assertEquals(esperado.nome(), atual.nome());
+        assertEquals(esperado.tamanhoBytes(), atual.tamanhoBytes());
+        assertEquals(esperado.dono(), atual.dono());
+        assertEquals(esperado.chaveVideo(), atual.chaveVideo());
+        assertEquals(esperado.estado(), atual.estado());
+        assertEquals(esperado.recebidoEm(), atual.recebidoEm());
+        assertEquals(esperado.finalizadoEm(), atual.finalizadoEm());
+        assertEquals(esperado.chavePacote(), atual.chavePacote());
+        assertEquals(esperado.quantidadeFrames(), atual.quantidadeFrames());
+        assertEquals(esperado.tamanhoPacoteBytes(), atual.tamanhoPacoteBytes());
+        assertEquals(esperado.motivo(), atual.motivo());
+    }
+
     @Inject
     VideoDataSourceAdapter adapter;
+
+    @Inject
+    Pool pool;
 
     @Test
     @RunOnVertxContext
@@ -95,28 +181,137 @@ class VideoDataSourceAdapterTest {
         var id = new UUID[1];
         gravarRecebido(asserter, id);
 
-        asserter.assertThat(() -> falhar(id[0]), primeira -> assertTrue(primeira.isPresent()));
-        asserter.assertThat(() -> falhar(id[0]), segunda -> assertTrue(segunda.isEmpty()));
+        asserter.assertThat(() -> falhar(id[0]), primeira -> assertTrue(primeira));
+        asserter.assertThat(() -> falhar(id[0]), segunda -> assertFalse(segunda));
         asserter.assertThat(() -> estadoDe(id[0]),
                 estado -> assertEquals(EstadoVideo.FALHOU, estado));
     }
 
     /**
-     * {@code adicionar} e o unico metodo do gateway sem {@code Panache.with*} proprio: no
-     * caminho de producao ele corre dentro da transacao que o envio ja abriu. Aqui a
-     * transacao entra por fora, entao.
+     * A confirmacao simulada de {@code ExtrairVideo} so completa depois de uma nova leitura
+     * encontrar o Video e de a falha permanente rapida ser processada. Assim, o encadeamento
+     * controlado pelo {@link UniAsserter} reproduz o consumidor que confirma o evento antes
+     * de o caminho de envio encerrar, sem sleeps nem sorte (ticket 040).
      */
+    @Test
+    @RunOnVertxContext
+    void confirmacaoDeEventoRapidoEnxergaOVideoEProduzFalha(UniAsserter asserter) {
+        var arquivo = new ArquivoGatewayDeTeste();
+        NotificacaoSender notificacao = (id, dono, nome, motivo, ocorridoEm) -> CompletableFuture.completedFuture(null);
+        var processarFalha = new ProcessarExtracaoFalhouUseCase(adapter, new PublicarVideoFalhou(notificacao, adapter));
+        ExtracaoSender extracao = (id, chaveVideo, chaveDestinoPacote) -> adapter.buscarPorId(id)
+                .thenCompose(encontrado -> {
+                    assertTrue(encontrado.isPresent(),
+                            "o consumidor do comando deve enxergar o Video ao confirma-lo");
+                    return processarFalha.executar(new ProcessarExtracaoFalhouUseCase.Command(
+                            id, MotivoFalha.ARQUIVO_INVALIDO, Instant.parse("2026-09-05T16:00:00Z")));
+                });
+        VideoPresenter presenter = video -> { };
+        var envio = new EnviarVideoUseCase(arquivo, adapter,
+                new PublicarExtrairVideo(arquivo, extracao, adapter), presenter);
+        var id = new UUID[1];
+
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> envio.executar(
+                new EnviarVideoUseCase.Command("visivel.mp4", "video/mp4", 1_024L,
+                        Path.of("/tmp/visivel.mp4"), DONO)).thenAccept(video -> id[0] = video.id())));
+        asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.buscarPorId(id[0])),
+                encontrado -> assertEquals(EstadoVideo.FALHOU, encontrado.orElseThrow().estado()));
+    }
+
+    /**
+     * A semantica de antes do ticket 040, reproduzida de proposito: com o envio inteiro dentro
+     * de uma transacao — que era o efeito do {@code @WithTransaction} na borda —, o consumidor
+     * que confirma o {@code ExtrairVideo} le por outra conexao e nao acha o Video. E a corrida
+     * do ticket, e ela nao depende de sleep nem de sorte: a leitura acontece dentro da
+     * transacao, que so commita depois.
+     */
+    @Test
+    @RunOnVertxContext
+    void envioDentroDeUmaTransacaoConfirmaOComandoSemOVideoEstarVisivel(UniAsserter asserter) {
+        var linhasVistas = new Long[1];
+
+        asserter.execute(() -> Panache.withTransaction(() -> Uni.createFrom().completionStage(
+                () -> envioComConsumidorQueLePorOutraConexao(linhasVistas).executar(envioDe("na-transacao.mp4")))));
+
+        asserter.assertThat(() -> Uni.createFrom().item(linhasVistas[0]), linhas -> assertEquals(0L, linhas,
+                "antes do commit o consumidor confirmaria o comando sem achar o Video"));
+    }
+
+    /**
+     * O mesmo caminho sem transacao ambiente, que e como o {@code VideosResource} chama hoje:
+     * {@link VideoDataSourceAdapter#adicionar} commita, e so entao o comando e publicado.
+     */
+    @Test
+    @RunOnVertxContext
+    void envioSemTransacaoAmbienteConfirmaOComandoComOVideoJaVisivel(UniAsserter asserter) {
+        var linhasVistas = new Long[1];
+
+        asserter.execute(() -> Uni.createFrom().completionStage(
+                () -> envioComConsumidorQueLePorOutraConexao(linhasVistas).executar(envioDe("commitado.mp4"))));
+
+        asserter.assertThat(() -> Uni.createFrom().item(linhasVistas[0]), linhas -> assertEquals(1L, linhas,
+                "o publish do ExtrairVideo acontece com a linha ja visivel de fora"));
+    }
+
+    /**
+     * O {@code ExtracaoSender} faz as vezes do consumidor que confirma o comando: ele le o
+     * Video por uma <b>conexao propria do pool</b>, que e o que outro processo enxergaria.
+     *
+     * <p>O que fica registrado e a contagem de linhas, e nao um boolean: {@code null} denuncia
+     * um consumidor que nunca rodou, que de outro modo passaria por "nao enxergou".
+     */
+    private EnviarVideoUseCase envioComConsumidorQueLePorOutraConexao(Long[] linhasVistas) {
+        var arquivo = new ArquivoGatewayDeTeste();
+        ExtracaoSender consumidor = (id, chaveVideo, chaveDestinoPacote) ->
+                linhasVisiveisPorOutraConexao(id)
+                        .invoke(linhas -> linhasVistas[0] = linhas)
+                        .replaceWithVoid()
+                        .subscribeAsCompletionStage();
+        VideoPresenter presenter = video -> { };
+        return new EnviarVideoUseCase(arquivo, adapter,
+                new PublicarExtrairVideo(arquivo, consumidor, adapter), presenter);
+    }
+
+    private static EnviarVideoUseCase.Command envioDe(String nome) {
+        return new EnviarVideoUseCase.Command(nome, "video/mp4", 1_024L, Path.of("/tmp/" + nome), DONO);
+    }
+
+    /** Conexao propria do pool: e o que um consumidor em outro processo enxergaria. */
+    private Uni<Long> linhasVisiveisPorOutraConexao(UUID id) {
+        return pool.withConnection(conexao -> conexao
+                .preparedQuery("select count(*) from video where id = $1")
+                .execute(Tuple.of(id))
+                .map(linhas -> linhas.iterator().next().getLong(0)));
+    }
+
+    private static final class ArquivoGatewayDeTeste implements ArquivoGateway {
+
+        @Override
+        public CompletableFuture<String> gravarVideo(UUID idVideo, String nome, Path arquivo) {
+            return CompletableFuture.completedFuture(idVideo + "/original.mp4");
+        }
+
+        @Override
+        public String chaveDoPacote(UUID idVideo) {
+            return idVideo + ".zip";
+        }
+
+        @Override
+        public CompletableFuture<Optional<Flow.Publisher<ByteBuffer>>> abrirPacote(String chavePacote) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+    }
+
     private void gravarRecebido(UniAsserter asserter, UUID[] id) {
         asserter.execute(() -> {
             var video = Video.novo("adapter.mp4", 1_024L, DONO).armazenadoEm("chave/original.mp4");
             id[0] = video.id();
-            return Panache.withTransaction(
-                    () -> Uni.createFrom().completionStage(() -> adapter.adicionar(video)));
+            return Uni.createFrom().completionStage(() -> adapter.adicionar(video));
         });
     }
 
     private Uni<Boolean> iniciar(UUID id) {
-        return Uni.createFrom().completionStage(() -> adapter.marcarIniciada(id, Instant.now()));
+        return Uni.createFrom().completionStage(() -> adapter.marcarIniciada(id));
     }
 
     private Uni<Boolean> concluir(UUID id) {
@@ -124,9 +319,14 @@ class VideoDataSourceAdapterTest {
                 () -> adapter.marcarConcluida(id, Instant.now(), id + ".zip", 900, 2_048L));
     }
 
-    private Uni<Optional<Video>> falhar(UUID id) {
+    private Uni<Boolean> falhar(UUID id) {
         return Uni.createFrom().completionStage(
                 () -> adapter.marcarFalha(id, Instant.now(), MotivoFalha.ARQUIVO_INVALIDO));
+    }
+
+    private Uni<Video> videoDe(UUID id) {
+        return Uni.createFrom().completionStage(() -> adapter.buscarPorId(id))
+                .map(video -> video.orElseThrow());
     }
 
     private Uni<EstadoVideo> estadoDe(UUID id) {

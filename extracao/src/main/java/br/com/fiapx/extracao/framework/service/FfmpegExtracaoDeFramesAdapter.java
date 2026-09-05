@@ -1,5 +1,6 @@
 package br.com.fiapx.extracao.framework.service;
 
+import br.com.fiapx.extracao.core.entities.CicloDaExtracao;
 import br.com.fiapx.extracao.core.entities.MotivoFalha;
 import br.com.fiapx.extracao.core.entities.ResultadoExtracao;
 import br.com.fiapx.extracao.core.exceptions.FalhaPermanenteDeExtracaoException;
@@ -58,10 +59,9 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
     private ResultadoExtracao processarBloqueante(Path video, Path diretorioDeTrabalho, Path destinoZip,
                                                    Duration tetoDuracao) {
         var duracao = medirDuracaoEValidarStreamDeVideo(video);
-        if (duracao.compareTo(tetoDuracao) > 0) {
-            throw new FalhaPermanenteDeExtracaoException(MotivoFalha.DURACAO_EXCEDIDA,
-                    "duracao " + duracao.getSeconds() + "s acima do teto de " + tetoDuracao.getSeconds() + "s");
-        }
+        CicloDaExtracao.motivoAoValidarDuracao(duracao, tetoDuracao)
+                .ifPresent(motivo -> lancarFalhaPermanente(motivo,
+                        "duracao " + duracao.toMillis() + "ms; teto " + tetoDuracao.toMillis() + "ms"));
 
         extrairFrames(video, diretorioDeTrabalho);
         var frames = listarFramesOrdenados(diretorioDeTrabalho);
@@ -71,13 +71,16 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         return new ResultadoExtracao(frames.size(), tamanhoBytes);
     }
 
-    /** ARQUIVO_INVALIDO se o ffprobe nao roda (ticket 006). */
     private Duration medirDuracaoEValidarStreamDeVideo(Path video) {
         var duracaoBruta = executarCapturandoStdout(timeoutFfprobeSegundos,
                 "ffprobe", "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 video.toString());
+
+        CicloDaExtracao.motivoSeSondagemFalhou(duracaoBruta.exitCode())
+                .ifPresent(motivo -> lancarFalhaPermanente(motivo,
+                        "ffprobe saiu com " + duracaoBruta.exitCode() + ": " + resumo(duracaoBruta.stderr())));
 
         double segundos;
         try {
@@ -86,10 +89,7 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
             throw new FalhaPermanenteDeExtracaoException(MotivoFalha.ARQUIVO_INVALIDO,
                     "ffprobe nao devolveu duracao valida: " + duracaoBruta.stdout());
         }
-        if (duracaoBruta.exitCode() != 0) {
-            throw new FalhaPermanenteDeExtracaoException(MotivoFalha.ARQUIVO_INVALIDO,
-                    "ffprobe saiu com " + duracaoBruta.exitCode() + ": " + duracaoBruta.stderr());
-        }
+        var duracao = Duration.ofMillis((long) (segundos * 1000));
 
         var streamDeVideo = executarCapturandoStdout(timeoutFfprobeSegundos,
                 "ffprobe", "-v", "error",
@@ -97,12 +97,13 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
                 "-show_entries", "stream=codec_type",
                 "-of", "csv=p=0",
                 video.toString());
-        if (streamDeVideo.stdout() == null || streamDeVideo.stdout().isBlank()) {
-            throw new FalhaPermanenteDeExtracaoException(MotivoFalha.SEM_FLUXO_DE_VIDEO,
-                    "ffprobe nao encontrou stream de video");
-        }
+        CicloDaExtracao.motivoSeSondagemFalhou(streamDeVideo.exitCode())
+                .or(() -> CicloDaExtracao.motivoAoValidarFluxoDeVideo(
+                        streamDeVideo.stdout() != null && !streamDeVideo.stdout().isBlank()))
+                .ifPresent(motivo -> lancarFalhaPermanente(motivo,
+                        "ffprobe de stream saiu com " + streamDeVideo.exitCode() + ": " + resumo(streamDeVideo.stderr())));
 
-        return Duration.ofMillis((long) (segundos * 1000));
+        return duracao;
     }
 
     private void extrairFrames(Path video, Path diretorioDeTrabalho) {
@@ -118,7 +119,7 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         if (resultado.exitCode() == 0) {
             return;
         }
-        throw classificarFalhaDoFfmpeg(resultado.exitCode(), resultado.stderr());
+        throw criarFalhaDoFfmpeg(resultado.exitCode(), resultado.stderr());
     }
 
     /**
@@ -143,20 +144,14 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
      * docs/pesquisa/ffmpeg-extracao.md. Falha fechada e conservadora: qualquer exit nao
      * reconhecido como permanente e transitorio (ticket 006).
      */
-    private RuntimeException classificarFalhaDoFfmpeg(int exitCode, String stderr) {
+    private RuntimeException criarFalhaDoFfmpeg(int exitCode, String stderr) {
         LOG.warnf("ffmpeg saiu com exit %d: %s", exitCode, stderr);
-        return switch (exitCode) {
-            case 183 -> new FalhaPermanenteDeExtracaoException(MotivoFalha.ARQUIVO_INVALIDO,
-                    "exit 183 (INVALIDDATA): " + resumo(stderr));
-            // Exit 8 colide entre decoder/demuxer/encoder/protocol nao encontrado — todas as
-            // causas sao "ffmpeg nao sabe lidar com este conteudo", nao I/O transitorio.
-            case 8 -> new FalhaPermanenteDeExtracaoException(MotivoFalha.FORMATO_NAO_SUPORTADO,
-                    "exit 8: " + resumo(stderr));
-            case 234 -> new FalhaPermanenteDeExtracaoException(MotivoFalha.SEM_FLUXO_DE_VIDEO,
-                    "exit 234: " + resumo(stderr));
-            default -> new FalhaTransitoriaDeExtracaoException(
-                    "ffmpeg saiu com exit " + exitCode + ": " + resumo(stderr));
-        };
+        var decisao = CicloDaExtracao.classificarFalhaDoFfmpeg(
+                new CicloDaExtracao.SinaisDoFfmpeg(exitCode, stderr));
+        var detalhe = "ffmpeg saiu com exit " + exitCode + ": " + resumo(stderr);
+        return decisao.motivoPermanente()
+                .<RuntimeException>map(motivo -> new FalhaPermanenteDeExtracaoException(motivo, detalhe))
+                .orElseGet(() -> new FalhaTransitoriaDeExtracaoException(detalhe));
     }
 
     private static String resumo(String stderr) {
@@ -183,11 +178,15 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
      * absorve arredondamento do filtro {@code fps=1} nas bordas do video.
      */
     private void validarContagemDeFrames(int quantidadeFrames, Duration duracao) {
-        var esperado = Math.max(1, Math.round(duracao.toMillis() / 1000.0));
-        if (quantidadeFrames < esperado * 0.9) {
-            throw new FalhaPermanenteDeExtracaoException(MotivoFalha.ARQUIVO_INVALIDO,
-                    "esperava ~" + esperado + " frames pela duracao, extraiu " + quantidadeFrames);
-        }
+        CicloDaExtracao.motivoAoValidarContagemDeFrames(quantidadeFrames, duracao)
+                .ifPresent(motivo -> {
+                    lancarFalhaPermanente(motivo,
+                            "duracao " + duracao.toMillis() + "ms, extraiu " + quantidadeFrames + " frames");
+                });
+    }
+
+    private static void lancarFalhaPermanente(MotivoFalha motivo, String detalheTecnico) {
+        throw new FalhaPermanenteDeExtracaoException(motivo, detalheTecnico);
     }
 
     /** ZIP STORED: deflate nao comprime PNG (medido, ticket 006). */

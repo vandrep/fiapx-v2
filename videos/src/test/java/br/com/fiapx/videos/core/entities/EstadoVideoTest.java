@@ -60,11 +60,9 @@ class EstadoVideoTest {
     }
 
     @Test
-    void deUmTerminalParaOOutroEBugENaoReentrega() {
-        assertThrows(IllegalStateException.class,
-                () -> EstadoVideo.FALHOU.transitaPara(EstadoVideo.CONCLUIDO));
-        assertThrows(IllegalStateException.class,
-                () -> EstadoVideo.CONCLUIDO.transitaPara(EstadoVideo.FALHOU));
+    void primeiroTerminalVenceSemExcecao() {
+        assertFalse(EstadoVideo.FALHOU.transitaPara(EstadoVideo.CONCLUIDO));
+        assertFalse(EstadoVideo.CONCLUIDO.transitaPara(EstadoVideo.FALHOU));
     }
 
     @Test

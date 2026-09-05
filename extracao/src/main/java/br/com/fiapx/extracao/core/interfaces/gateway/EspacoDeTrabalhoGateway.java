@@ -12,11 +12,18 @@ import java.util.concurrent.CompletableFuture;
  */
 public interface EspacoDeTrabalhoGateway {
 
-    /** Apaga-e-recria o diretorio de trabalho do Video: a tentativa nova nao herda frames
-     * meio-escritos de uma tentativa anterior (`failure-strategy=requeue` reentrega a mesma
-     * mensagem). */
+    /**
+     * Abre um diretorio de trabalho <b>exclusivo desta tentativa</b> e devolve o caminho dele.
+     * Duas tentativas do mesmo Video — a reentrega de {@code failure-strategy=requeue}, ou o
+     * comando duplicado que o ADR 0003 tolera e que duas replicas podem pegar ao mesmo tempo —
+     * recebem diretorios distintos, entao nenhuma herda frames meio-escritos da outra nem
+     * apaga os dela (ticket 041).
+     */
     CompletableFuture<Path> prepararNovo(UUID idVideo);
 
-    /** Apaga o diretorio de trabalho. Chamado sempre, sucesso ou falha. */
-    CompletableFuture<Void> limpar(UUID idVideo);
+    /**
+     * Apaga o diretorio <b>daquela tentativa</b>, e so ele. Chamado sempre, sucesso ou falha,
+     * com o caminho que {@link #prepararNovo} devolveu.
+     */
+    CompletableFuture<Void> limpar(Path espacoDaTentativa);
 }

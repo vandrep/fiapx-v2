@@ -6,6 +6,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import org.eclipse.microprofile.reactive.messaging.Incoming;
+import org.jboss.logging.Logger;
 
 /**
  * Consumidor da propria DLQ {@code extracao.extrair.dlq} (docs/contratos/mensagens.md §
@@ -16,11 +17,18 @@ import org.eclipse.microprofile.reactive.messaging.Incoming;
 @ApplicationScoped
 public class ExtracaoDlqConsumer {
 
+    private static final Logger LOG = Logger.getLogger(ExtracaoDlqConsumer.class);
+
     @Inject
     ExtracaoController extracaoController;
 
     @Incoming("extrair-video-dlq")
     public Uni<Void> consumir(ExtrairVideo comandoEsgotado) {
+        // O log do conector (log.nackedIgnoreMessage) diz que um nack aconteceu no canal; o
+        // que operacao precisa para agir e qual Video ficou preso (ticket 029) — esse numero
+        // so esta na mensagem, nao no log do conector.
+        LOG.warnf("x-delivery-limit=3 esgotado para extracao.extrair, idVideo=%s",
+                comandoEsgotado.idVideo());
         return Uni.createFrom().completionStage(extracaoController.processarTentativasEsgotadas(
                 comandoEsgotado.idVideo(), "x-delivery-limit=3 esgotado para extracao.extrair"));
     }

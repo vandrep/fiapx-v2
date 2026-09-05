@@ -49,6 +49,17 @@ worker morre no meio de uma Extração, aquela tentativa foi gasta, ainda que na
 errado com o Vídeo. Isso é deliberado: um Vídeo que derruba o worker repetidamente esgota
 suas tentativas e falha definitivamente.
 
+## Estacionamento
+
+Uma fila terminal: destino de uma mensagem que esgotou o próprio fundo — inclusive o fundo
+de uma DLQ — e cujo desfecho só um humano produz, olhando o management UI. Não é a mesma
+coisa que um Vídeo preso: aquele é estado do domínio (`PROCESSANDO` para sempre), este é
+estado de mensageria. As duas coisas às vezes coincidem — uma mensagem que estaciona pode
+deixar um Vídeo preso —, mas nem toda fila terminal tem um Vídeo do outro lado, e "terminal"
+sem qualificação hoje já nomeia dois conceitos diferentes: o estado final de um Vídeo
+(`CONCLUIDO`, `FALHOU`) e o fim de linha de uma fila. Este glossário reserva Estacionamento
+para o segundo.
+
 ## Pacote
 
 O arquivo `.zip` contendo os frames produzidos por uma Extração bem-sucedida. É o que o

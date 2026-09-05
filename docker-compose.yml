@@ -23,7 +23,10 @@ services:
 
   rabbitmq:
     image: rabbitmq:4.3.5-management-alpine
+    # O nome do no faz parte da identidade dos dados persistidos (ticket 044).
+    hostname: rabbitmq
     volumes:
+      - fiapx-rabbitmq-data:/var/lib/rabbitmq
       - ./docker/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
       - ./docker/rabbitmq/conf.d/10-definitions.conf:/etc/rabbitmq/conf.d/10-definitions.conf:ro
     ports:
@@ -79,6 +82,9 @@ services:
       # rejeitaria como emissor desconhecido.
       KC_HOSTNAME: http://keycloak:8080
     volumes:
+      # Preserva usuarios e seus `sub`: Videos continuam pertencendo ao mesmo dono
+      # depois de down/up (ticket 044).
+      - fiapx-keycloak-data:/opt/keycloak/data
       - ./docker/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
     ports:
       - "8081:8080"
@@ -143,6 +149,17 @@ services:
       MINIO_SECRET_KEY: minioadmin
     volumes:
       - fiapx-extracao-scratch:/var/fiapx/extracao
+    # O terceiro dos tres numeros do ticket 035, e o unico que mora fora do JVM. O
+    # DrenoDaExtracao segura o desligamento por ate `fiapx.extracao.dreno-timeout-segundos`
+    # (420s) esperando a Extracao em voo terminar e dar ack, para o deploy nao gastar uma das
+    # tres entregas de `extracao.extrair`. O default do Docker aqui e 10s — SIGKILL bem no
+    # meio do dreno, que e o pior dos dois mundos: nao poupa entrega e ainda atrasa o deploy.
+    # 480 > 420 de proposito, para o JVM sempre ganhar essa corrida.
+    #
+    # Nao e o custo tipico de um deploy: o dreno libera no ack, entao o que se paga e o que
+    # sobra da Extracao em voo (segundos, no fixture de controle). 480 e so o teto — medido em
+    # scripts/carga/conservacao.sh, modo `redeploy-extracao`.
+    stop_grace_period: 480s
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -172,6 +189,8 @@ services:
 
 volumes:
   fiapx-postgres-data:
+  fiapx-rabbitmq-data:
+  fiapx-keycloak-data:
   fiapx-minio-data:
   fiapx-uploads:
   fiapx-extracao-scratch:

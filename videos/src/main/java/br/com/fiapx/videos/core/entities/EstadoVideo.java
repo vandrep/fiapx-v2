@@ -12,6 +12,8 @@ public enum EstadoVideo {
     CONCLUIDO,
     FALHOU;
 
+    private static final System.Logger LOG = System.getLogger(EstadoVideo.class.getName());
+
     /**
      * Estados que a transicao para este aceita como predecessor. E o conjunto que o use case
      * entrega ao gateway para virar o {@code IN} do UPDATE condicional — o grafo fica
@@ -40,17 +42,17 @@ public enum EstadoVideo {
 
     /**
      * Falso para reentrega fora de ordem, que e caminho esperado — inclusive quando a
-     * reentrega repete o proprio terminal ja alcancado (duas entregas do mesmo
-     * {@code ExtracaoFalhou} apos o Vídeo ja estar FALHOU, por exemplo). Transicao que o
-     * grafo nao preve de jeito nenhum (de um terminal para o <b>outro</b>) e bug, e levanta
-     * excecao.
+     * reentrega chega depois de um estado terminal. Entre terminais, o primeiro vence e a
+     * corrida e registrada para diagnostico operacional (ticket 031, ADR 0002).
      */
     public boolean transitaPara(EstadoVideo destino) {
         if (this == destino) {
             return false;
         }
         if (terminal() && destino.terminal()) {
-            throw new IllegalStateException("Transição inexistente no grafo: " + this + " → " + destino);
+            LOG.log(System.Logger.Level.WARNING,
+                    "Transição concorrente entre terminais ignorada: {0} → {1}", this, destino);
+            return false;
         }
         return destino != RECEBIDO && destino.predecessores().contains(this);
     }

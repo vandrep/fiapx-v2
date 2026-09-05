@@ -11,6 +11,7 @@ import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * A guarda de unicidade do e-mail (ADR 0001): tres entregas do mesmo {@code ExtracaoFalhou}
@@ -77,6 +78,21 @@ class ProcessarExtracaoFalhouUseCaseTest {
         useCase.executar(comando).join();
 
         assertNotNull(videos.falhaPublicadaEm.get(video.id()));
+    }
+
+    @Test
+    void compareAndSwapQuePerdeACorridaNaoPublicaVideoFalhou() {
+        // Outra entrega do mesmo evento moveu a linha para FALHOU entre o SELECT e o UPDATE
+        // desta: o Video que este fluxo leu ainda diz PROCESSANDO, a transicao no dominio
+        // passa, e quem reprova e o UPDATE condicional. O e-mail e da entrega que venceu.
+        videos.outraEntregaVenceACorridaPara(video.id(), EstadoVideo.FALHOU);
+        var comando = new ProcessarExtracaoFalhouUseCase.Command(
+                video.id(), MotivoFalha.ARQUIVO_INVALIDO, Instant.now());
+
+        useCase.executar(comando).join();
+
+        assertEquals(0, notificacao.idsEnviados.size());
+        assertNull(videos.falhaPublicadaEm.get(video.id()));
     }
 
     @Test

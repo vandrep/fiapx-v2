@@ -1,6 +1,7 @@
 package br.com.fiapx.videos.bdd;
 
 import br.com.fiapx.videos.core.entities.EstadoVideo;
+import br.com.fiapx.videos.core.entities.MotivoFalha;
 import br.com.fiapx.videos.framework.db.entities.VideoEntity;
 import io.cucumber.java.Before;
 import io.cucumber.java.pt.Dado;
@@ -20,6 +21,10 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.nio.ByteBuffer;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
@@ -39,6 +44,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * bucket — nao ha como esperar sete dias pela regra de ciclo de vida do MinIO.
  */
 public class VideosSteps {
+
+    /** Os sete campos que o contrato HTTP publica — chave de armazenamento nao esta entre eles. */
+    private static final Set<String> CAMPOS_PUBLICOS =
+            Set.of("id", "nome", "estado", "tamanhoBytes", "recebidoEm", "concluidoEm", "motivo");
 
     private static final byte[] CONTEUDO_DO_UPLOAD = "conteudo de video para teste".getBytes();
 
@@ -128,6 +137,17 @@ public class VideosSteps {
                 })).await().indefinitely();
     }
 
+    /** Montagem de cenario: leva o Video a FALHOU, transicao que em producao chega por evento. */
+    @Dado("que a Extração do Vídeo falhou por {string}")
+    public void queAExtracaoFalhouPor(String motivo) {
+        sessionFactory.withTransaction(sessao -> sessao.find(VideoEntity.class, idDoVideo)
+                .invoke(entidade -> {
+                    entidade.estado = EstadoVideo.FALHOU;
+                    entidade.finalizadoEm = Instant.now();
+                    entidade.motivo = MotivoFalha.doCodigo(motivo);
+                })).await().indefinitely();
+    }
+
     @Dado("que o Pacote sumiu do armazenamento")
     public void queOPacoteSumiuDoArmazenamento() {
         s3.deleteObject(DeleteObjectRequest.builder()
@@ -154,6 +174,14 @@ public class VideosSteps {
     @Quando("eu listo os meus Vídeos no estado {string}")
     public void euListoOsMeusVideosNoEstado(String estado) {
         resposta = autenticado().queryParam("estado", estado).when().get("/videos");
+    }
+
+    @Quando("eu listo os meus Vídeos no estado {string} com tamanho {int}")
+    public void euListoOsMeusVideosNoEstadoComTamanho(String estado, int tamanho) {
+        resposta = autenticado()
+                .queryParam("estado", estado)
+                .queryParam("tamanho", tamanho)
+                .when().get("/videos");
     }
 
     @Quando("eu listo os meus Vídeos com página {int} e tamanho {int}")
@@ -217,6 +245,34 @@ public class VideosSteps {
         assertEquals(total, resposta.jsonPath().getInt("total"));
     }
 
+    @E("a listagem está na página {int} com tamanho {int}")
+    public void aListagemEstaNaPaginaComTamanho(int pagina, int tamanho) {
+        assertEquals(pagina, resposta.jsonPath().getInt("pagina"));
+        assertEquals(tamanho, resposta.jsonPath().getInt("tamanho"));
+    }
+
+    /** A ordenacao e fixa por recebimento decrescente: o ultimo enviado vem primeiro. */
+    @E("a listagem traz os Vídeos {string} nessa ordem")
+    public void aListagemTrazOsVideosNessaOrdem(String nomes) {
+        var esperados = Arrays.stream(nomes.split(",")).map(String::trim).toList();
+        assertEquals(esperados, resposta.jsonPath().getList("conteudo.nome"));
+    }
+
+    @E("o corpo da resposta tem só os sete campos públicos")
+    public void oCorpoDaRespostaTemSoOsSeteCamposPublicos() {
+        assertEquals(CAMPOS_PUBLICOS, resposta.jsonPath().getMap("").keySet());
+    }
+
+    @E("o item do Vídeo enviado é igual à consulta individual")
+    public void oItemDoVideoEnviadoEIgualAConsultaIndividual() {
+        assertEquals(consultaIndividual(), itemDaListagem());
+    }
+
+    @E("o item do Vídeo enviado tem só os sete campos públicos")
+    public void oItemDoVideoEnviadoTemSoOsSeteCamposPublicos() {
+        assertEquals(CAMPOS_PUBLICOS, itemDaListagem().keySet());
+    }
+
     @E("o corpo da resposta tem {int} bytes")
     public void oCorpoDaRespostaTemBytes(int tamanho) {
         var corpo = resposta.asByteArray();
@@ -224,15 +280,19 @@ public class VideosSteps {
                 + " corpo=" + new String(corpo).substring(0, Math.min(200, corpo.length)));
     }
 
-    @Entao("o Vídeo continua em {string}")
-    public void oVideoContinuaEm(String estado) {
-        // O GET que descobre a ausencia nao grava nada: a tabela e o registro do que
-        // aconteceu, nao um espelho do bucket.
-        var persistido = sessionFactory
-                .withSession(sessao -> sessao.find(VideoEntity.class, idDoVideo))
-                .await().indefinitely();
-        assertEquals(EstadoVideo.valueOf(estado), persistido.estado);
-        assertNotNull(persistido.chavePacote);
+    /** O item da listagem que corresponde ao Video enviado no cenario. */
+    private Map<String, Object> itemDaListagem() {
+        List<Map<String, Object>> conteudo = resposta.jsonPath().getList("conteudo");
+        return conteudo.stream()
+                .filter(item -> idDoVideo.toString().equals(item.get("id")))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Video enviado ausente da listagem: " + resposta.asString()));
+    }
+
+    private Map<String, Object> consultaIndividual() {
+        var individual = autenticado().when().get("/videos/" + idDoVideo);
+        assertEquals(200, individual.statusCode(), () -> "corpo: " + individual.asString());
+        return individual.jsonPath().getMap("");
     }
 
     private RequestSpecification autenticado() {

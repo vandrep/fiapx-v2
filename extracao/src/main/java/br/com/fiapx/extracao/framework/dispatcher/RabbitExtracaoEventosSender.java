@@ -5,7 +5,9 @@ import br.com.fiapx.extracao.core.interfaces.sender.ExtracaoEventosSender;
 import io.smallrye.reactive.messaging.MutinyEmitter;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.reactive.messaging.Channel;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -17,6 +19,9 @@ import java.util.concurrent.CompletableFuture;
  */
 @ApplicationScoped
 public class RabbitExtracaoEventosSender implements ExtracaoEventosSender {
+
+    @ConfigProperty(name = "fiapx.extracao.timeout-publicacao-falha-segundos")
+    long timeoutPublicacaoFalhaSegundos;
 
     @Channel("extracao-iniciada")
     MutinyEmitter<ExtracaoIniciada> emitterIniciada;
@@ -43,6 +48,9 @@ public class RabbitExtracaoEventosSender implements ExtracaoEventosSender {
     public CompletableFuture<Void> enviarFalhou(UUID idVideo, MotivoFalha motivo, String detalheTecnico,
                                                 Instant ocorridoEm) {
         return emitterFalhou.send(new ExtracaoFalhou(idVideo, motivo.name(), detalheTecnico, ocorridoEm))
+                // O fechamento do canal por exchange ausente pode deixar o confirm pendente
+                // no cliente Vert.x. Sem teto, a entrada nunca recebe nack (ticket 037).
+                .ifNoItem().after(Duration.ofSeconds(timeoutPublicacaoFalhaSegundos)).fail()
                 .subscribeAsCompletionStage();
     }
 }

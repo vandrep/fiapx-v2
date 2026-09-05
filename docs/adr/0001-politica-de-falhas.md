@@ -11,6 +11,14 @@ de segundos nos *adapters* de I/O para absorver indisponibilidade transitória, 
 **unicidade da notificação ancorada na transição de estado do Vídeo em `videos`**, não em
 estado próprio do `notificacao`.
 
+Emendado no [ticket 029](../wayfinder/tickets/029-terminal-na-dlq-do-extracao.md): o
+consumidor da DLQ do `extracao` é ele próprio um publicador, e um publicador sem
+`publish-confirms` pode achar que publicou quando o broker recusou — nesse caso ele dá
+**ack** e a falha definitiva some em silêncio, sem passar pela DLQ e sem que nenhuma
+varredura a alcance. Por isso aquela DLQ deixa de ser terminal e ganha fundo próprio, a
+`extracao.extrair.estacionamento` — ver *A DLQ do `extracao` tem consumidor* nas
+Consequences, abaixo, e o ticket 029 para o desenho completo.
+
 ## Considered Options
 
 **Backoff durável via TTL + dead-letter-exchange manual** foi rejeitado. É o único caminho
@@ -52,9 +60,14 @@ sem transactional outbox está no
   roda `at-most-once`; a diferença só se manifesta em failover, que o `@QuarkusTest` não
   exercita. Com broker de nó único, o que de fato carrega peso na escolha de quorum é o
   `x-delivery-limit`, não o `at-least-once`.
-- **A DLQ do `extracao` tem consumidor; a do `videos` e a do `notificacao` não.** O
-  `extracao` consome a própria DLQ e publica a falha definitiva — sem isso, nada reage à DLQ
-  e o Vídeo trava em `PROCESSANDO`. As outras duas são terminais: mensagem ali significa
-  banco ou SMTP fora por minutos, que é intervenção humana pelo management UI.
+- **A DLQ do `extracao` tem consumidor; a do `videos` e a do `notificacao` não — e por
+  isso ela própria deixou de ser terminal (ticket 029).** O `extracao` consome a própria DLQ
+  e publica a falha definitiva — sem isso, nada reage à DLQ e o Vídeo trava em
+  `PROCESSANDO`. Mas esse consumidor é ele mesmo um publicador, sujeito ao mesmo risco de
+  perda silenciosa de qualquer publicação sem `publish-confirms`: sem confirmação, o broker
+  pode recusar a publicação e o consumidor dá ack do mesmo jeito. A `extracao.extrair.dlq`
+  ganhou fundo próprio, a `extracao.extrair.estacionamento`, para esse caso — ela é terminal
+  no lugar da DLQ. `videos.dlq` e `notificacao.dlq` continuam terminais como antes: mensagem
+  ali significa banco ou SMTP fora por minutos, que é intervenção humana pelo management UI.
 - **`failure-strategy=fail` está fora** em todos os serviços: derruba o health check e
   quebra o `depends_on: service_healthy` do Compose.

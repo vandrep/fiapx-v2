@@ -7,6 +7,7 @@ RUN apt-get update \
         jq \
         ripgrep \
         fd-find \
+        ffmpeg \
         fzf \
         shellcheck \
     && rm -rf /var/lib/apt/lists/*

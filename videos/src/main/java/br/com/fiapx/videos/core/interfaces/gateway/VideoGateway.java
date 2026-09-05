@@ -13,9 +13,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * A guarda de propriedade e <b>estrutural</b>: nao existe {@code buscarPorId(UUID)} aqui, so
- * {@code buscarPorIdEDono}. A regra nao e "verifique o dono", e "nao ha como pedir um Video
- * sem dizer de quem" — impossivel de furar por esquecimento (ticket 009).
+ * A borda HTTP sempre usa {@link #buscarPorIdEDono}; o caminho de mensageria, que nao recebe
+ * Dono, usa {@link #buscarPorId}. O teste arquitetural proibe Resource e controller HTTP de
+ * usarem a busca sem posse (ticket 031).
  *
  * <p>So {@code dono.sub()} participa dos predicados; o e-mail e carga, viaja junto porque o
  * evento VideoFalhou precisa dele.
@@ -25,6 +25,9 @@ public interface VideoGateway {
     CompletableFuture<Void> adicionar(Video video);
 
     CompletableFuture<Optional<Video>> buscarPorIdEDono(UUID id, Dono dono);
+
+    /** Busca interna exclusiva do caminho de mensageria, que nao carrega o Dono. */
+    CompletableFuture<Optional<Video>> buscarPorId(UUID id);
 
     /**
      * Ordenacao fixa por {@code recebidoEm} decrescente — o contrato HTTP nao tem parametro
@@ -44,7 +47,7 @@ public interface VideoGateway {
      * {@link EstadoVideo#predecessores()}, nao de literais aqui: o grafo continua declarado
      * uma vez so.
      */
-    CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm);
+    CompletableFuture<Boolean> marcarIniciada(UUID id);
 
     /**
      * Mesma guarda de {@link #marcarIniciada}, agora para CONCLUIDO — e saindo de RECEBIDO
@@ -58,12 +61,10 @@ public interface VideoGateway {
                                                long tamanhoPacoteBytes);
 
     /**
-     * A guarda de unicidade do e-mail: so quando o {@code UPDATE} de fato mudou a linha o
-     * Optional volta preenchido, com os dados que {@code VideoFalhou} precisa (dono, e-mail,
-     * nome do arquivo). Vazio significa "reentrega, nao publique de novo" — nao ha por que o
-     * chamador buscar o Video de novo so para descobrir isso (ADR 0001, ADR 0002).
+     * A guarda de unicidade do e-mail: {@code true} somente quando o {@code UPDATE} mudou a
+     * linha. O Video ja foi carregado e validado pela entidade no use case (ADR 0001 e 0002).
      */
-    CompletableFuture<Optional<Video>> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo);
+    CompletableFuture<Boolean> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo);
 
     /** A tabela `video` e o outbox (ADR 0003): grava a marca depois do publish ter saido. */
     CompletableFuture<Void> marcarComandoPublicado(UUID id, Instant publicadoEm);

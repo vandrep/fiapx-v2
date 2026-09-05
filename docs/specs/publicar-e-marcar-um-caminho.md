@@ -1,8 +1,10 @@
 # Publicar-e-marcar, um caminho só
 
 - id: 001
-- label: ready-for-agent
-- status: aberto
+- label: spec
+- status: resolvido em 9481324 (extracao e rewire) e 6128f33 (publicadores como bean CDI)
+- tickets: os dois tickets desta spec viveram em `.scratch/publicar-e-marcar/issues/`,
+  removidos apos a implementacao; estao preservados em 9481324
 
 ## Problem Statement
 

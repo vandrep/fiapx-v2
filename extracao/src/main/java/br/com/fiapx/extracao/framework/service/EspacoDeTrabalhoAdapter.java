@@ -3,6 +3,7 @@ package br.com.fiapx.extracao.framework.service;
 import br.com.fiapx.extracao.core.exceptions.FalhaTransitoriaDeExtracaoException;
 import br.com.fiapx.extracao.core.interfaces.gateway.EspacoDeTrabalhoGateway;
 import io.quarkus.runtime.StartupEvent;
+import io.quarkus.scheduler.Scheduled;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.infrastructure.Infrastructure;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -22,10 +23,16 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
 /**
- * O scratch em disco do worker (ticket 011): {@code /var/fiapx/extracao/{idVideo}} sobre o
- * volume nomeado {@code fiapx-extracao-scratch}, orcado em 4 GB. Duas camadas de limpeza —
- * {@link #limpar} por mensagem, e a varredura no boot ({@link #limparOrfaosNoBoot}) para o
- * orfao de crash, que aqui e rotina, nao excecao: o worker morre no meio por desenho.
+ * O scratch em disco do worker (ticket 011): {@code /var/fiapx/extracao/{idVideo}-{tentativa}}
+ * sobre o volume nomeado {@code fiapx-extracao-scratch}, orcado em 4 GB. Duas camadas de
+ * limpeza — {@link #limpar} por mensagem, e a varredura no boot ({@link #limparOrfaosNoBoot})
+ * para o orfao de crash, que aqui e rotina, nao excecao: o worker morre no meio por desenho.
+ *
+ * <p>O sufixo de tentativa e do ticket 041, e nao e enfeite. O nome era so o id do Video, e o
+ * volume e o mesmo para todas as replicas: duas tentativas do mesmo Video — comando duplicado
+ * tolerado pelo ADR 0003, ou reentrega do {@code failure-strategy=requeue} — cairiam no mesmo
+ * diretorio, e preparar uma apagava os frames da outra, enquanto limpar uma apagava os frames
+ * da que continuava rodando. Cada tentativa agora tem espaco proprio e limpa <b>so</b> o seu.
  */
 @ApplicationScoped
 public class EspacoDeTrabalhoAdapter implements EspacoDeTrabalhoGateway {
@@ -38,30 +45,57 @@ public class EspacoDeTrabalhoAdapter implements EspacoDeTrabalhoGateway {
     @ConfigProperty(name = "fiapx.extracao.idade-minima-do-orfao-minutos", defaultValue = "60")
     long idadeMinimaDoOrfaoMinutos;
 
+    /**
+     * {@code createTempDirectory} e nao um {@code UUID.randomUUID()} concatenado a mao: a
+     * criacao e atomica, entao duas replicas que preparem a mesma tentativa no mesmo
+     * milissegundo nao tem como receber o mesmo caminho. O id do Video fica no prefixo do
+     * nome porque quem le o diretorio a mao — no volume, depois de um crash — precisa saber
+     * de qual Video e aquele scratch.
+     */
     @Override
     public CompletableFuture<Path> prepararNovo(UUID idVideo) {
         return executarBloqueante(() -> {
-            var diretorio = diretorioDoVideo(idVideo);
-            apagarRecursivamente(diretorio);
             try {
-                Files.createDirectories(diretorio);
+                var raizPath = Path.of(raiz);
+                Files.createDirectories(raizPath);
+                return Files.createTempDirectory(raizPath, idVideo + "-");
             } catch (IOException erro) {
                 throw new UncheckedIOException(erro);
             }
-            return diretorio;
         });
     }
 
+    /**
+     * Recusa o que nao nasceu de {@link #prepararNovo}: sem essa guarda, um caminho errado
+     * levaria o {@code Files.walk} recursivo a apagar arquivos de outro dono. Filho direto da
+     * raiz e exatamente a forma que este adapter cria.
+     *
+     * <p>A guarda roda <b>fora</b> do {@link #executarBloqueante}, e de proposito: ali dentro
+     * toda falha vira {@link FalhaTransitoriaDeExtracaoException}, e erro de programacao
+     * classificado como transitorio volta para a fila e vira mais uma duplicata. Caminho
+     * errado nao e coisa que reentregar conserte.
+     */
     @Override
-    public CompletableFuture<Void> limpar(UUID idVideo) {
+    public CompletableFuture<Void> limpar(Path espacoDaTentativa) {
+        var caminho = espacoDaTentativa.toAbsolutePath().normalize();
+        // Raiz do lado esquerdo: um caminho sem pai devolve null, e `raiz.equals(null)` e
+        // false, enquanto `null.equals(raiz)` seria um NPE no lugar da mensagem.
+        if (!Path.of(raiz).toAbsolutePath().normalize().equals(caminho.getParent())) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException(
+                    "espaco de tentativa fora da raiz do scratch: " + espacoDaTentativa));
+        }
         return executarBloqueante(() -> {
-            apagarRecursivamente(diretorioDoVideo(idVideo));
+            apagarRecursivamente(caminho);
             return null;
         });
     }
 
     /**
      * O orfao de crash, e <b>so</b> ele: a varredura pula o que foi tocado recentemente.
+     *
+     * <p>Com o espaco por tentativa (ticket 041), cada filho da raiz e uma tentativa, e nao um
+     * Video: a varredura julga cada uma pela sua propria idade, que e a granularidade certa —
+     * uma tentativa abandonada por crash some sem levar junto a tentativa viva do mesmo Video.
      *
      * <p>O gate por idade nao e zelo, e correcao. O volume nomeado {@code fiapx-extracao-scratch}
      * e compartilhado por todas as replicas, entao "tudo que esta na raiz" inclui o scratch de
@@ -75,6 +109,27 @@ public class EspacoDeTrabalhoAdapter implements EspacoDeTrabalhoGateway {
      * a cada frame gravado. Uma hora e folga larga sobre os dois.
      */
     void limparOrfaosNoBoot(@Observes StartupEvent evento) {
+        varrerOrfaos();
+    }
+
+    /**
+     * A mesma varredura, de tempos em tempos (ticket 041). O boot sozinho nao basta desde que
+     * cada tentativa tem diretorio proprio: antes, a reentrega do mesmo Video reciclava o
+     * scratch da tentativa morta com o apaga-e-recria — o que era justamente o defeito, porque
+     * "tentativa anterior" e "tentativa viva na outra replica" eram indistinguiveis. Sem esse
+     * reaproveitamento, quem recupera o abandonado e so a varredura; e a replica que morre e
+     * volta acorda com o proprio orfao ainda recente, entao a varredura do boot dela o preserva
+     * — medido, um scratch de replica morta no ensaio de conservacao sobreviveu ao restart.
+     * Rodando periodicamente, o mesmo gate por idade acaba alcancando-o sem nunca tocar em
+     * trabalho vivo.
+     */
+    @Scheduled(every = "{fiapx.extracao.intervalo-da-varredura}",
+            concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void limparOrfaosPeriodicamente() {
+        varrerOrfaos();
+    }
+
+    private void varrerOrfaos() {
         var raizPath = Path.of(raiz);
         try {
             Files.createDirectories(raizPath);
@@ -119,10 +174,6 @@ public class EspacoDeTrabalhoAdapter implements EspacoDeTrabalhoGateway {
         } catch (IOException erro) {
             return Instant.MAX;
         }
-    }
-
-    private Path diretorioDoVideo(UUID idVideo) {
-        return Path.of(raiz, idVideo.toString());
     }
 
     private void apagarRecursivamente(Path diretorio) {

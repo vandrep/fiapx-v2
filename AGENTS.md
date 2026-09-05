@@ -122,9 +122,35 @@ junto do arquivo que os declara; o defeito que este teste persegue é o canal es
 ## BDD
 
 Cenários de aceite em Gherkin **em português** (`# language: pt` na primeira linha), em
-`<servico>/src/test/resources/features/`. Os steps exercitam a borda pelo RestAssured e
-nunca chamam use case ou gateway direto: o que o BDD valida é comportamento observável de
+`<servico>/src/test/resources/features/`. Os steps entram pela **borda** e nunca chamam
+controller, use case ou gateway direto: o que o BDD valida é comportamento observável de
 fora. Cada fluxo principal ganha ao menos um `.feature` antes de ser considerado pronto.
+
+Borda não é sinônimo de HTTP. Cada serviço tem a sua, e é por ela que o step entra:
+
+| Serviço | Borda de entrada | Como o step entra | O que ele observa |
+|---|---|---|---|
+| `videos` | HTTP sob OIDC | RestAssured | status, corpo e cabeçalho da resposta |
+| `extracao` | `fiapx.comandos`/`extracao.extrair` | AMQP puro (`com.rabbitmq.client`) | eventos em `fiapx.eventos` e o Pacote no MinIO |
+| `notificacao` | `fiapx.eventos`/`video.falhou` | AMQP puro (`com.rabbitmq.client`) | o e-mail, pelo `MockMailbox` |
+
+Nos dois workers isso é o cliente AMQP do teste no papel que o RestAssured cumpre no
+`videos`: publica na routing key **real** do contrato e deixa o roteamento, a
+desserialização e o consumidor de verdade rodarem. É o que o ticket 042 corrigiu — os
+cenários chamavam o controller, então passavam com a entrada de mensageria quebrada.
+**Não crie endpoint só para teste**: a mensagem já é a borda, e um `Resource` de teste
+inventaria uma segunda, que produção não tem.
+
+A única peça que existe só para o teste é a fila observadora do `extracao`
+(`bdd.extracao-eventos`, exclusiva e auto-delete, ligada a `fiapx.eventos`): ela é o
+análogo do cliente HTTP no lado da saída — em produção quem escuta essas routing keys é o
+`videos`. Ela é exclusiva de propósito: o RabbitMQ 4.x barra fila transiente não exclusiva
+(`transient_nonexcl_queues` está deprecado).
+
+Isto continua sendo teste integrado no surefire, com infraestrutura real: `@QuarkusTest`
+sobe o RabbitMQ dos Dev Services, e nada é dublado. Antes de publicar, o step espera a fila
+do worker existir — um exchange `topic` sem binding descarta a mensagem em silêncio, e sem
+essa espera o cenário reprovaria por corrida de boot em vez de por defeito.
 
 ## Rodar
 

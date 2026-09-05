@@ -80,6 +80,15 @@ Cada serviço declara pelo conector SmallRye o que publica e o que consome
 O motivo é o teste: os Dev Services sobem um broker limpo em `@QuarkusTest` sem o
 `definitions.json`. Se a topologia morasse lá, nada rodaria em teste.
 
+Há um terceiro declarante, e ele só existe em teste: a `BordaDeMensageria` dos cenários BDD
+dos dois workers (ticket 042). Ela redeclara os exchanges com **os mesmos argumentos** do
+conector (`topic`, durável, sem auto-delete) — idempotente de propósito, para o cenário não
+depender de quem subiu primeiro — e o `extracao` acrescenta uma fila observadora própria,
+`bdd.extracao-eventos`, ligada a `fiapx.eventos` na chave `extracao.*`. Ela é exclusiva e
+auto-delete: some com a conexão, e o RabbitMQ 4.x barra fila transiente não exclusiva. Nada
+disso existe fora do classpath de teste, e nenhuma fila de produção é declarada ali
+(AGENTS.md § BDD).
+
 ### Prefetch
 
 `max-outstanding-messages` é **obrigatório e explícito em todo canal de entrada**. Sem ele

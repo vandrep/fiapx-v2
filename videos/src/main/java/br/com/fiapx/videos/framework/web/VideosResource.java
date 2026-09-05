@@ -79,6 +79,7 @@ public class VideosResource {
     @APIResponse(responseCode = "400", description = "Campo arquivo ausente ou vazio")
     @APIResponse(responseCode = "413", description = "Corpo acima de 200 MB (resposta do servidor HTTP, não problem+json)")
     @APIResponse(responseCode = "415", description = "Content-type ou extensão fora da lista aceita")
+    @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
     public Uni<Response> enviar(@RestForm("arquivo") FileUpload arquivo) {
         if (arquivo == null || arquivo.size() <= 0) {
             throw new ArquivoAusenteException("O campo 'arquivo' é obrigatório e não pode estar vazio");
@@ -101,6 +102,7 @@ public class VideosResource {
     @Operation(summary = "Lista os Vídeos do usuário",
             description = "Ordenação fixa por recebidoEm decrescente; não há parâmetro de ordenação.")
     @APIResponse(responseCode = "200", description = "Página de Vídeos do usuário")
+    @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
     public Uni<VideosPaginadosViewModel> listar(@QueryParam("estado") EstadoVideo estado,
                                                 @QueryParam("pagina") @jakarta.ws.rs.DefaultValue("0") int pagina,
                                                 @QueryParam("tamanho") @jakarta.ws.rs.DefaultValue("20") int tamanho) {
@@ -115,6 +117,7 @@ public class VideosResource {
     @Operation(summary = "Consulta um Vídeo do usuário")
     @APIResponse(responseCode = "200", description = "O Vídeo")
     @APIResponse(responseCode = "404", description = "O Vídeo não existe, ou não é seu")
+    @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
     public Uni<VideoViewModel> consultar(@PathParam("id") UUID id) {
         return doController(() -> videosController.consultar(id, sub(), email()))
                 .replaceWith(videoPresenter::viewModel);
@@ -134,6 +137,7 @@ public class VideosResource {
     @APIResponse(responseCode = "404", description = "O Vídeo não existe, ou não é seu")
     @APIResponse(responseCode = "409", description = "Ainda não: o Vídeo não está CONCLUIDO")
     @APIResponse(responseCode = "410", description = "Não mais: o Pacote expirou (7 dias)")
+    @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
     public RestMulti<byte[]> baixarPacote(@PathParam("id") UUID id) {
         return RestMulti.fromUniResponse(
                 doController(() -> videosController.baixarPacote(id, sub(), email())),

@@ -111,7 +111,11 @@ Funcionalidade: Borda pública do serviço videos
     Quando eu baixo o Pacote do Vídeo
     Então a resposta tem status 410
     E a resposta é um problem+json com título "Pacote expirado"
-    E o Vídeo continua em "CONCLUIDO"
+    Quando eu consulto o Vídeo enviado
+    Então a resposta tem status 200
+    E o campo "estado" da resposta é "CONCLUIDO"
+    Quando eu baixo o Pacote do Vídeo
+    Então a resposta tem status 410
 
   Cenário: Sem token não se entra
     Quando eu listo os meus Vídeos sem autenticação

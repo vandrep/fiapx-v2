@@ -246,17 +246,6 @@ public class VideosSteps {
                 + " corpo=" + new String(corpo).substring(0, Math.min(200, corpo.length)));
     }
 
-    @Entao("o Vídeo continua em {string}")
-    public void oVideoContinuaEm(String estado) {
-        // O GET que descobre a ausencia nao grava nada: a tabela e o registro do que
-        // aconteceu, nao um espelho do bucket.
-        var persistido = sessionFactory
-                .withSession(sessao -> sessao.find(VideoEntity.class, idDoVideo))
-                .await().indefinitely();
-        assertEquals(EstadoVideo.valueOf(estado), persistido.estado);
-        assertNotNull(persistido.chavePacote);
-    }
-
     private RequestSpecification autenticado() {
         return token == null ? given() : given().auth().oauth2(token);
     }

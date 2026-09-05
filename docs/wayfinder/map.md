@@ -495,6 +495,13 @@ verificadas por teste, não são sugestão). Projeto original em
   comandos confirmados e marcas no Postgres antes do `down`, preservação da topologia
   sem os serviços ligados e conclusão dos mesmos Vídeos pela API após o `up`.
 
+- [O estado após a expiração é verificado pela borda](tickets/046-verificar-estado-apos-expiracao-pela-borda.md)
+  — o cenário do Pacote expirado parou de ler a `VideoEntity` para afirmar que o Vídeo
+  continua em `CONCLUIDO`: agora consulta o mesmo Vídeo pela API e baixa o Pacote de novo,
+  exigindo `410` outra vez. O segundo `410` é a prova indireta de que o `GET` que descobre
+  a ausência não gravou nada — estado alterado daria `409`, e a `chavePacote` apagada
+  quebraria antes. A chave continua fora do `VideoViewModel`, de propósito.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

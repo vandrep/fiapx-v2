@@ -4,6 +4,7 @@ import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.BeforeDestroyed;
 import jakarta.enterprise.event.Observes;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -32,11 +33,12 @@ import java.time.Duration;
  * consumindo — janela de sobra para o broker entregar a proxima mensagem, que morreria no
  * fechamento gastando exatamente a entrega que este codigo existe para poupar.
  *
- * <p>Este observer roda no lugar mais apertado que existe: mesmo evento CDI que o conector
- * observa ({@code @BeforeDestroyed(ApplicationScoped.class)}), com prioridade <b>menor</b> que
- * a dele. {@code RabbitMQConnector.terminate()} declara {@code @Priority(50)}; observador com
- * prioridade menor roda antes, pela ordenacao que a propria especificacao CDI garante. Entre
- * o fim do dreno e o {@code cancel()} do conector sobra a distancia de uma chamada de metodo.
+ * <p>Este observer usa o mesmo evento CDI que o conector observa
+ * ({@code @BeforeDestroyed(ApplicationScoped.class)}), com prioridade 10 contra 50.
+ * Primeiro cancela a assinatura de extrair-video, mantendo o canal e os publicadores
+ * abertos; depois espera o ack. Sem cancelar antes, o ack devolveria credito ao broker
+ * para entregar outra mensagem que morreria no fechamento (medido no ticket 035).
+ * {@link CancelamentoDoConsumo} isola o acesso aos campos privados do SmallRye.
  *
  * <h2>O teto e nosso, porque nenhum teto do Quarkus alcanca esta fase</h2>
  *
@@ -51,13 +53,9 @@ import java.time.Duration;
  *
  * <h2>O que ele nao promete</h2>
  *
- * O portao fechado impede uma Extracao <b>nova</b> de comecar, nao impede o broker de
- * <b>entregar</b>. Uma mensagem que chegue depois do ack da ultima Extracao e antes do
- * {@code terminate()} do conector fica sem ack e e reenfileirada — uma entrega gasta, num
- * Video que sequer comecou. A janela e de uma chamada de metodo em vez dos minutos de uma
- * Extracao, mas nao e zero, e fecha-la exigiria um {@code basic.cancel} que o conector 4.32.1
- * nao expoe por canal. {@code SIGKILL}, OOM e queda de no seguem fora do alcance
- * (ticket 030).
+ * SIGKILL, OOM, queda de no ou de rede e trabalho que excede o teto continuam
+ * gastando entrega. A ponte de cancelamento e especifica do SmallRye 4.32.1:
+ * uma atualizacao exige repetir o ensaio de redeploy antes de mudar a guarda de versao.
  */
 @ApplicationScoped
 public class DrenoDaExtracao {
@@ -78,6 +76,9 @@ public class DrenoDaExtracao {
      */
     @ConfigProperty(name = "fiapx.extracao.dreno-timeout-segundos")
     long tetoSegundos;
+
+    @Inject
+    CancelamentoDoConsumo cancelamento;
 
     /**
      * Portao e contagem sao um estado so, sob uma trava so. Separa-los em {@code volatile} +
@@ -156,15 +157,19 @@ public class DrenoDaExtracao {
                     pendentes, teto.toSeconds());
         }
 
-        // drenar() SEMPRE, mesmo com a replica ociosa: quem fecha o portao e ele, e sair daqui
-        // cedo por nao haver nada em voo deixaria o portao aberto por todo o resto do
-        // desligamento. Uma mensagem entregue entre este ponto e o terminate() do conector
-        // passaria por entrar(), comecaria uma Extracao inteira e morreria no fechamento do
-        // canal — exatamente o caso que este bean existe para impedir.
+        // Cancela antes de fechar o portao: o trabalho ja entregue continua podendo
+        // entrar enquanto o broker confirma o cancelamento. O ack em voo permanece
+        // na cadeia do consumidor, porque so cancelamos a assinatura a montante.
+        // Cancelamento e espera dividem o mesmo teto, inclusive na replica ociosa.
         long inicio = System.nanoTime();
-        boolean drenou = drenar(teto);
+        boolean cancelou = cancelamento.cancelar(teto);
+        Duration restante = teto.minusNanos(System.nanoTime() - inicio);
+        boolean drenou = drenar(restante.isNegative() ? Duration.ZERO : restante);
         long decorridoSegundos = (System.nanoTime() - inicio) / 1_000_000_000L;
 
+        if (!cancelou) {
+            LOG.error("cancelamento nao retornou normalmente no teto: nao ha garantia de poupar entrega");
+        }
         if (!drenou) {
             LOG.errorf("teto de dreno de %ds estourado com %d Extracao(oes) ainda em voo apos %ds:"
                     + " a mensagem vai ser reenfileirada e a entrega, gasta", teto.toSeconds(), emVoo(),

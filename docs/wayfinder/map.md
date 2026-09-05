@@ -518,15 +518,12 @@ verificadas por teste, não são sugestão). Projeto original em
      do conector e do `quarkus-arc` desmentiu a premissa de que `stop_grace_period` bastasse. -->
 
 - **[035](tickets/035-drenar-extracao-antes-do-sigterm.md) — drenar a Extração em voo antes
-  do `SIGTERM`.** Mecanismo decidido, construído e medido; **critério de aceite ainda
-  vermelho**, e por isso continua aberto. Os dois caminhos que o ticket esboçou caíram: um
-  `ShutdownListener` de aplicação é impossível (é build item de *augmentation*, não bean CDI),
-  e o wrapper de `entrypoint` era desnecessário. O que entrou foi um observador do mesmo evento
-  CDI que o conector observa, com `@Priority(10)` contra o `@Priority(50)` dele, e ack manual
-  para o dreno esperar o ack e não só o ffmpeg. Resultado medido: a Extração em voo deixa de ser
-  destruída, mas a contagem de entregas sobe igual — uma por réplica —, porque o ack que libera
-  o dreno é o mesmo que devolve o crédito do canal. Fechar depende de `basic.cancel` por canal,
-  que o conector 4.32.1 tem e não expõe.
+  do `SIGTERM`.** Concluído: o observador CDI cancela a assinatura `extrair-video` antes de
+  esperar o ack, mantendo o canal e os publicadores abertos. A ponte usa campos privados do
+  SmallRye e rejeita no boot versões diferentes da 4.32.1; atualizar exige repetir o ensaio.
+  Duas réplicas, 12 Vídeos de dois minutos: 12 concluídos, zero reentregas novas, redeploy em
+  4s; antes da correção, a mesma carga gastou uma reentrega. Cancelamento e espera dividem
+  os 420s do dreno, abaixo dos 480s do Docker. SIGKILL e falhas de rede continuam fora.
 
 - **[038](tickets/038-override-de-canal-por-variavel-quebra-o-boot.md) — override de canal por
   variável de ambiente derruba o boot do `extracao`.** A presença de

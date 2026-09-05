@@ -2,7 +2,7 @@
 
 - id: 035
 - label: wayfinder:research
-- status: aberto
+- status: fechado
 - assignee: agente de implementacao (sessao de 2026-09-04)
 - bloqueado-por: 030
 
@@ -61,6 +61,84 @@ de janela de indisponibilidade da réplica, mesmo com N réplicas — relevante 
 Mesma fronteira do 030: `SIGKILL` por OOM, morte do nó ou queda de rede continuam gastando
 entrega, e zerar isso exigiria tentativa durável no `extracao`, porta fechada pelo
 `AGENTS.md`.
+
+## Resolução final (2026-09-05)
+
+A sequência agora é **cancelar a assinatura de `extrair-video`, esperar a Extração e seu
+ack, fechar a conexão**. `CancelamentoDoConsumo` acessa `RabbitMQConnector.incomings` e
+`IncomingRabbitMQChannel.config` por reflexão para selecionar somente aquele canal e
+chamar `terminate()`. Não cancela a DLQ nem os publicadores. A assinatura cancelada é a
+montante do consumidor: o processamento já iniciado e seu ack manual continuam vivos.
+Isso foi exercitado com o ffmpeg real, não inferido de um teste com dublês.
+
+A ponte fica em `framework.shutdown`, sem extensão Quarkus ou wrapper de PID 1. O boot
+confere a versão **4.32.1**, a presença dos campos e a existência do canal; uma atualização
+incompatível falha no boot, em vez de retirar a drenagem silenciosamente. Ao atualizar o
+BOM, é obrigatório reexaminar o fonte e repetir este ensaio antes de mudar a guarda.
+
+O cancelamento pode fazer RPC bloqueante com o broker. Ele roda numa thread virtual e
+compartilha com a espera do ack o teto existente de **420s**; o observador não espera
+indefinidamente por essa RPC. `stop_grace_period=480s` continua igual. Timeout, interrupção
+ou exceção propagada pelo cancelamento são registrados sem prometer que a entrega foi poupada.
+O retorno normal de `terminate()` não é confirmação AMQP: uma `IOException` do
+`basicCancel` pode virar falha assíncrona reportada pelo Mutiny como *dropped exception*,
+sem chegar ao `FutureTask`. Falha de rede continua fora da garantia.
+
+Ensaio antes/depois, mesma máquina, duas réplicas, 12 envios de `carga-2min.mp4`:
+
+| Medida | Antes | Depois |
+|---|---|---|
+| Extrações em voo no SIGTERM | 2 | 2 |
+| Réplicas que registraram o dreno | 2 | 2 |
+| Vídeos `CONCLUIDO` | 12/12 | 12/12 |
+| Vídeos `FALHOU` | 0 | 0 |
+| Reentregas novas | **1 (reprova)** | **0 (passa)** |
+| Tempo do `up -d --force-recreate` | 6s | 4s |
+| Drenagem após o redeploy | 26s | 26s |
+
+Comando reproduzível (trocar o rótulo para preservar cada rodada):
+
+```bash
+FIAPX_EXTRACAO_REPLICAS=2 FIAPX_FIXTURE=carga-2min.mp4 \
+FIAPX_SEGUNDOS_POR_VIDEO=15 FIAPX_ROTULO=035-depois \
+scripts/carga/conservacao.sh redeploy-extracao 12
+```
+
+Os artefatos locais estão em `scripts/carga/saida/035-antes/` e `035-depois/`.
+O critério 6 ficou verde numa rodada válida, com as duas réplicas segurando o desligamento
+por cerca de dois segundos. O teto de 420s e falhas de rede durante o cancelamento não foram
+exercitados por essa carga. SIGKILL/OOM/morte do nó continuam fora da garantia.
+
+A versão final, incluindo o teto do cancelamento, repetiu o resultado em
+`scripts/carga/saida/035-final/`: 12/12 concluídos, zero reentregas, duas réplicas com
+Extração em voo e redeploy de 4s. A drenagem posterior levou 42s; havia testes Maven
+concorrentes nessa rodada, portanto esse tempo não serve para comparar vazão.
+
+**Limite adicional da ponte:** cancelar a assinatura também limpa o buffer reativo a
+montante. Uma mensagem entregue pelo broker, mas ainda não admitida pelo consumidor,
+pode ser reenfileirada ao fechar a conexão. A rodada válida demonstra a proteção da
+Extração já em processamento, com backlog na fila; não prova zero reentregas em toda
+corrida possível de uma réplica ociosa ou de ack concorrente ao início do cancelamento.
+
+### Validação e revisão
+
+- `./mvnw package -DskipTests`: compilação e empacotamento dos três serviços passaram.
+- Testes focados de dreno, consumidor e arquitetura: 220 execuções, zero falhas.
+- `./mvnw test -Dquarkus.http.test-port=0`, da raiz no devcontainer: `videos` passou
+  (105 testes); `extracao` executou 263 testes e teve somente a falha já aberta no
+  [037](037-estacionamento-nao-recebe-falha-da-dlq.md), mensagem ausente no Estacionamento.
+  `./mvnw -pl notificacao -am test -Dquarkus.http.test-port=0` completou o módulo que o
+  agregador não alcançou: 24 testes, zero falhas. A porta dinâmica evita a 8081 ocupada
+  pelo Keycloak do Compose. Uma tentativa intermediária sofreu colisão de porta efêmera
+  no Docker rootless; a repetição chegou aos testes, sem mudar código por esse erro.
+- `scripts/smoke.sh`: passou, incluindo Pacote, falha de arquivo inválido, e-mail e
+  isolamento entre donos. Antes foi necessário parar o proxy do overlay de carga, que
+  ocupava a porta 8080, e recriar o `videos` após a tentativa de boot sem rede válida.
+- Revisão independente de padrões e especificação contra `be13287`: zero achados
+  impeditivos em cada eixo. As duas ressalvas de semântica do cancelamento estão
+  registradas acima. Não se atribui ao ensaio verde uma garantia universal de entrega.
+
+O relato abaixo preserva a investigação anterior e o resultado parcial que motivou a ponte.
 
 ## Resolução parcial
 
@@ -135,7 +213,7 @@ Extração em voo e passou a recair sobre uma mensagem que não começou trabalh
 viés sistemático contra Vídeos longos — que eram os expostos a um deploy, e portanto os
 candidatos a colecionar três entregas e cair na DLQ. É uma troca boa; não é a promessa do 030.
 
-## O que falta, e por que este ticket continua aberto
+## Pendência da resolução parcial (superada em 2026-09-05)
 
 O critério de aceite é o número, e o número não veio. O que fecharia a janela é a sequência
 clássica de drenagem — **`basic.cancel` primeiro, ack depois, fechamento por último**. Com a

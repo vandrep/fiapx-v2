@@ -1260,6 +1260,40 @@ OOM, morte do nó e queda de rede seguem exatamente como o ticket 030 os deixou.
 
 ---
 
+## 10. Fechamento do ticket 035: cancelar antes de esperar (2026-09-05)
+
+O resultado parcial da seção 9 foi superado no ensaio de aceite. A implementação agora
+seleciona `extrair-video` em `RabbitMQConnector.incomings` e chama
+`IncomingRabbitMQChannel.terminate()` antes de esperar o ack manual. `config`, também
+privado, identifica o canal; a DLQ e os publicadores não são cancelados pela ponte.
+`ClientProxy.unwrap()` é necessário: os campos do proxy CDI não são os da instância
+contextual. A versão do artefato e os campos são verificados no boot; atualizar SmallRye
+4.32.1 exige reexaminar esta sequência e repetir a carga.
+
+Leitura dos `*-sources.jar` das versões efetivamente usadas:
+
+- SmallRye Reactive Messaging 4.32.1, `IncomingRabbitMQChannel.java`: `terminate()` faz
+  `subscription.getAndSet(null)` e `sub.cancel()`; `getStreamOfMessages()` liga
+  `.onTermination().call(receiver::cancel)` antes do `emitOn`. Não fecha o cliente de ack.
+- Vert.x RabbitMQ Client 4.5.24, `RabbitMQConsumerImpl.java`: `cancel()` chama
+  `consumerHandler.getChannel().basicCancel(consumerTag())` sincronamente, e termina o
+  stream depois. A espera de RPC também precisa ter teto; o observador espera uma
+  `FutureTask` em thread virtual, descontando esse tempo dos 420s da drenagem.
+- Mutiny, `MultiOnTerminationCall.cancel()`: falha da operação assíncrona segue para
+  `Infrastructure.handleDroppedException`. Portanto o retorno normal de `terminate()`
+  não deve ser descrito como confirmação inequívoca do broker.
+- O cancelamento upstream não cancela o `Uni` de processamento downstream já iniciado.
+  Entretanto, o buffer do `MultiEmitOnOp` é limpo no cancelamento: mensagens entregues,
+  mas ainda não admitidas, continuam sendo uma janela possível de reentrega.
+
+O ensaio executou o ffmpeg real com duas réplicas e 12 Vídeos de dois minutos. Antes da
+ponte: 12 concluídos, uma reentrega, redeploy de 6s. Depois: 12 concluídos, zero reentregas,
+redeploy de 4s. A versão final com teto para o cancelamento repetiu zero reentregas e 4s,
+com as duas réplicas registrando Extração em voo e espera de aproximadamente dois segundos.
+Isso comprova a condição de aceite medida, não elimina toda corrida possível de entrada
+nem cobre queda de rede, SIGKILL ou esgotamento do teto. Comandos, parâmetros e resultados
+estão na resolução final do [ticket 035](../wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md).
+
 ## Fontes primárias
 
 **Quarkus 3.31.3 (código e docs na tag)**

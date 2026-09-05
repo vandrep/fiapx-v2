@@ -489,6 +489,12 @@ verificadas por teste, não são sugestão). Projeto original em
   módulos. Não vinha da rodada de arquitetura dos 029–033: saiu da revisão de código da
   implementação do 029, na mesma sessão.
 
+- [Mensagens e identidades sobrevivem à recriação da stack](tickets/044-preservar-mensagens-ao-recriar-rabbitmq.md)
+  — RabbitMQ ganhou volume nomeado e hostname estável; Keycloak ganhou volume para manter
+  o `sub` do dono dos Vídeos. O ensaio isolado `scripts/persistencia-rabbitmq.sh` exige
+  comandos confirmados e marcas no Postgres antes do `down`, preservação da topologia
+  sem os serviços ligados e conclusão dos mesmos Vídeos pela API após o `up`.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

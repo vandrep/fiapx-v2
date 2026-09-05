@@ -23,7 +23,10 @@ services:
 
   rabbitmq:
     image: rabbitmq:4.3.5-management-alpine
+    # O nome do no faz parte da identidade dos dados persistidos (ticket 044).
+    hostname: rabbitmq
     volumes:
+      - fiapx-rabbitmq-data:/var/lib/rabbitmq
       - ./docker/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
       - ./docker/rabbitmq/conf.d/10-definitions.conf:/etc/rabbitmq/conf.d/10-definitions.conf:ro
     ports:
@@ -79,6 +82,9 @@ services:
       # rejeitaria como emissor desconhecido.
       KC_HOSTNAME: http://keycloak:8080
     volumes:
+      # Preserva usuarios e seus `sub`: Videos continuam pertencendo ao mesmo dono
+      # depois de down/up (ticket 044).
+      - fiapx-keycloak-data:/opt/keycloak/data
       - ./docker/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
     ports:
       - "8081:8080"
@@ -183,6 +189,8 @@ services:
 
 volumes:
   fiapx-postgres-data:
+  fiapx-rabbitmq-data:
+  fiapx-keycloak-data:
   fiapx-minio-data:
   fiapx-uploads:
   fiapx-extracao-scratch:

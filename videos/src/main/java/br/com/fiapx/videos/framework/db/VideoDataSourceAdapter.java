@@ -51,6 +51,14 @@ public class VideoDataSourceAdapter implements VideoGateway {
     }
 
     @Override
+    public CompletableFuture<Optional<Video>> buscarPorId(UUID id) {
+        return Panache.withSession(() -> VideoEntity.<VideoEntity>findById(id)
+                        .map(entity -> Optional.ofNullable(entity)
+                                .map(VideoDataSourceAdapter::paraDominio)))
+                .subscribeAsCompletionStage();
+    }
+
+    @Override
     public CompletableFuture<Pagina<Video>> listarPorDono(Dono dono,
                                                           Optional<EstadoVideo> estado,
                                                           int pagina,
@@ -83,7 +91,7 @@ public class VideoDataSourceAdapter implements VideoGateway {
      * predecessores desde o ticket 027.
      */
     @Override
-    public CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm) {
+    public CompletableFuture<Boolean> marcarIniciada(UUID id) {
         return Panache.withTransaction(() -> VideoEntity.update(
                         "estado = ?1 where id = ?2 and estado in ?3",
                         EstadoVideo.PROCESSANDO, id, EstadoVideo.PROCESSANDO.predecessores())
@@ -106,20 +114,13 @@ public class VideoDataSourceAdapter implements VideoGateway {
                 .subscribeAsCompletionStage();
     }
 
-    /**
-     * A guarda de unicidade do e-mail (ADR 0001): so quando o {@code UPDATE} muda a linha e
-     * que o Optional volta preenchido, buscado <b>na mesma transacao</b> — dispensa
-     * {@code RETURNING} e garante ver a propria escrita.
-     */
+    /** A guarda de unicidade do e-mail continua sendo o boolean do UPDATE (ADR 0001). */
     @Override
-    public CompletableFuture<Optional<Video>> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
+    public CompletableFuture<Boolean> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
         return Panache.withTransaction(() -> VideoEntity.update(
                         "estado = ?1, finalizadoEm = ?2, motivo = ?3 where id = ?4 and estado in ?5",
                         EstadoVideo.FALHOU, falhouEm, motivo, id, EstadoVideo.FALHOU.predecessores())
-                        .chain(linhasAlteradas -> linhasAlteradas > 0
-                                ? VideoEntity.<VideoEntity>findById(id)
-                                        .map(entity -> Optional.of(paraDominio(entity)))
-                                : Uni.createFrom().item(Optional.<Video>empty())))
+                        .map(linhasAlteradas -> linhasAlteradas > 0))
                 .subscribeAsCompletionStage();
     }
 

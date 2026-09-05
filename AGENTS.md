@@ -3,6 +3,12 @@
 FIAP X: três serviços Quarkus em Clean Architecture, um repositório, um build Maven.
 `videos` é a borda pública e dona do estado; `extracao` e `notificacao` são workers.
 
+## Idioma
+
+Responda sempre em português — no chat, em PR, em issue, em comentário de review. Vale
+para qualquer agente que trabalhe neste repositório. Commits seguem a convenção própria,
+na seção Commits abaixo.
+
 ## Onde a verdade mora
 
 As regras de camada **não estão escritas aqui** — estão em
@@ -89,6 +95,29 @@ Uma quarta regra chegou no ticket 017, endurecendo em vez de relaxar: `@Incoming
 infraestrutura, igual a `@ApplicationScoped` ou `@Path`). O template não trazia essa regra
 porque não cobria mensageria nem scheduler — ver
 [`docs/contratos/mensagens.md` § Camadas](docs/contratos/mensagens.md).
+
+Uma quinta chegou no ticket 034, e é a primeira que não julga código Java: todo canal
+`mp.messaging.outgoing.*` do `application.properties` do próprio serviço precisa declarar
+`publish-confirms=true` no mesmo prefixo, a não ser que declare um `connector` que não seja
+`smallrye-rabbitmq`. A obrigação recai também sobre o canal **sem** `connector` explícito, de
+propósito: com um conector só no classpath — o caso dos três serviços — o Quarkus liga o canal
+mudo ao RabbitMQ do mesmo jeito.
+Sem confirms o `send` completa quando o byte sai no socket, não quando o broker aceita — a
+recusa vira ack e a mensagem some em silêncio, e a varredura do
+[ADR 0003](docs/adr/0003-reconciliacao-por-varredura.md) não alcança o Vídeo perdido
+([ADR 0001](docs/adr/0001-politica-de-falhas.md),
+[`docs/contratos/mensagens.md`](docs/contratos/mensagens.md)). O default do conector é `false`,
+e o mesmo buraco já nasceu duas vezes, em dois serviços (027, 029), achado nas duas por medição
+ou revisão manual. Como cada cópia do teste roda com o CWD no seu módulo, a regra cobre os três
+`application.properties` sem que o teste precise enxergar o diretório do vizinho — e vale para
+`notificacao`, que hoje não publica: ela protege o serviço, não o canal que existe.
+
+O limite conhecido dela: a regra lê `application.properties`, então canal ou override que
+chegue por variável de ambiente (`MP_MESSAGING_OUTGOING_*`) passa por fora. O overlay de
+carga usa variáveis próprias `FIAPX_*`, referenciadas no `.properties`, para evitar a ambiguidade dos nomes
+de canal com traço (ticket 038). Overrides de Compose são deliberados e revisados
+junto do arquivo que os declara; o defeito que este teste persegue é o canal esquecido no
+`.properties`.
 
 ## BDD
 

@@ -18,6 +18,16 @@
 # ali `deploy.replicas` nunca aparece (nasce implicitamente em 1).
 services:
   extracao:
+    environment:
+      # Ticket 029, modo `mata-publicacao`: sobrescreve o canal de saida `extracao-falhou`
+      # para apontar a uma exchange inexistente sem declara-la, forcando a falha de
+      # publicacao que aquele modo mede.
+      #
+      # Variaveis proprias, resolvidas pelo application.properties (ticket 038):
+      # MP_MESSAGING_* transforma extracao-falhou em extracao.falhou na enumeracao
+      # e inventa um canal extracao sem connector, derrubando o boot.
+      - FIAPX_EXTRACAO_FALHOU_EXCHANGE_NAME
+      - FIAPX_EXTRACAO_FALHOU_EXCHANGE_DECLARE
     deploy:
       replicas: ${FIAPX_EXTRACAO_REPLICAS:-4}
       resources:

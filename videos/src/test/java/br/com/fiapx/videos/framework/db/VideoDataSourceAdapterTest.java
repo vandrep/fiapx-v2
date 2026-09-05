@@ -39,6 +39,74 @@ class VideoDataSourceAdapterTest {
 
     private static final Dono DONO = new Dono("sub-adapter", "adapter@exemplo.com");
 
+    @Test
+    @RunOnVertxContext
+    void iniciadaPersisteOsMesmosCamposQueAEntidade(UniAsserter asserter) {
+        var id = new UUID[1];
+        var esperado = new Video[1];
+        gravarRecebido(asserter, id);
+        carregarEsperado(asserter, id, esperado);
+
+        asserter.execute(() -> {
+            esperado[0].marcaComoIniciada();
+            return iniciar(id[0]);
+        });
+        asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
+    }
+
+    @Test
+    @RunOnVertxContext
+    void concluidaPersisteOsMesmosCamposQueAEntidade(UniAsserter asserter) {
+        var id = new UUID[1];
+        var esperado = new Video[1];
+        var concluidaEm = Instant.parse("2026-09-04T12:00:00Z");
+        gravarRecebido(asserter, id);
+        carregarEsperado(asserter, id, esperado);
+
+        asserter.execute(() -> {
+            esperado[0].marcaComoConcluida(concluidaEm, "pacotes/resultado.zip", 900, 2_048L);
+            return Uni.createFrom().completionStage(() -> adapter.marcarConcluida(
+                    id[0], concluidaEm, "pacotes/resultado.zip", 900, 2_048L));
+        });
+        asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
+    }
+
+    @Test
+    @RunOnVertxContext
+    void falhaPersisteOsMesmosCamposQueAEntidade(UniAsserter asserter) {
+        var id = new UUID[1];
+        var esperado = new Video[1];
+        var falhouEm = Instant.parse("2026-09-04T12:00:00Z");
+        gravarRecebido(asserter, id);
+        carregarEsperado(asserter, id, esperado);
+
+        asserter.execute(() -> {
+            esperado[0].marcaComoFalha(falhouEm, MotivoFalha.ARQUIVO_INVALIDO);
+            return Uni.createFrom().completionStage(
+                    () -> adapter.marcarFalha(id[0], falhouEm, MotivoFalha.ARQUIVO_INVALIDO));
+        });
+        asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
+    }
+
+    private void carregarEsperado(UniAsserter asserter, UUID[] id, Video[] esperado) {
+        asserter.execute(() -> videoDe(id[0]).invoke(video -> esperado[0] = video));
+    }
+
+    private static void assertVideoIgual(Video esperado, Video atual) {
+        assertEquals(esperado.id(), atual.id());
+        assertEquals(esperado.nome(), atual.nome());
+        assertEquals(esperado.tamanhoBytes(), atual.tamanhoBytes());
+        assertEquals(esperado.dono(), atual.dono());
+        assertEquals(esperado.chaveVideo(), atual.chaveVideo());
+        assertEquals(esperado.estado(), atual.estado());
+        assertEquals(esperado.recebidoEm(), atual.recebidoEm());
+        assertEquals(esperado.finalizadoEm(), atual.finalizadoEm());
+        assertEquals(esperado.chavePacote(), atual.chavePacote());
+        assertEquals(esperado.quantidadeFrames(), atual.quantidadeFrames());
+        assertEquals(esperado.tamanhoPacoteBytes(), atual.tamanhoPacoteBytes());
+        assertEquals(esperado.motivo(), atual.motivo());
+    }
+
     @Inject
     VideoDataSourceAdapter adapter;
 
@@ -95,8 +163,8 @@ class VideoDataSourceAdapterTest {
         var id = new UUID[1];
         gravarRecebido(asserter, id);
 
-        asserter.assertThat(() -> falhar(id[0]), primeira -> assertTrue(primeira.isPresent()));
-        asserter.assertThat(() -> falhar(id[0]), segunda -> assertTrue(segunda.isEmpty()));
+        asserter.assertThat(() -> falhar(id[0]), primeira -> assertTrue(primeira));
+        asserter.assertThat(() -> falhar(id[0]), segunda -> assertFalse(segunda));
         asserter.assertThat(() -> estadoDe(id[0]),
                 estado -> assertEquals(EstadoVideo.FALHOU, estado));
     }
@@ -116,7 +184,7 @@ class VideoDataSourceAdapterTest {
     }
 
     private Uni<Boolean> iniciar(UUID id) {
-        return Uni.createFrom().completionStage(() -> adapter.marcarIniciada(id, Instant.now()));
+        return Uni.createFrom().completionStage(() -> adapter.marcarIniciada(id));
     }
 
     private Uni<Boolean> concluir(UUID id) {
@@ -124,9 +192,14 @@ class VideoDataSourceAdapterTest {
                 () -> adapter.marcarConcluida(id, Instant.now(), id + ".zip", 900, 2_048L));
     }
 
-    private Uni<Optional<Video>> falhar(UUID id) {
+    private Uni<Boolean> falhar(UUID id) {
         return Uni.createFrom().completionStage(
                 () -> adapter.marcarFalha(id, Instant.now(), MotivoFalha.ARQUIVO_INVALIDO));
+    }
+
+    private Uni<Video> videoDe(UUID id) {
+        return Uni.createFrom().completionStage(() -> adapter.buscarPorId(id))
+                .map(video -> video.orElseThrow());
     }
 
     private Uni<EstadoVideo> estadoDe(UUID id) {

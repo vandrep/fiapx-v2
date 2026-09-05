@@ -415,6 +415,80 @@ verificadas por teste, não são sugestão). Projeto original em
   vazão não comparáveis entre sessões, só as comparações internas valem. Números completos em
   [`docs/pesquisa/carga-escala-borda.md`](../pesquisa/carga-escala-borda.md)
 
+- [A falha definitiva do `extracao` tem confirmação e tem fundo](tickets/029-terminal-na-dlq-do-extracao.md)
+  — **a leitura do conector desmentiu a primeira redação**: não é reenfileiramento infinito,
+  é perda silenciosa — `publish-confirms=false` (default) nos três canais de saída do
+  `extracao` fazia uma publicação recusada pelo broker completar como sucesso, o consumidor
+  da própria DLQ dar ack, e a falha definitiva sumir sem circular e sem reentrega. Ligar
+  confirms sozinho criaria o loop que faltava limitar; as duas metades andaram juntas:
+  `publish-confirms=true` nos três canais de saída, `failure-strategy=reject` (não mais
+  `requeue`) na `extracao.extrair.dlq`, que ganhou DLX próprio (quorum, sem
+  `x-delivery-limit` — um salto é o desenho) para a `extracao.extrair.estacionamento`, nova
+  fila terminal sem consumidor. `ExtracaoDlqConsumer` ganhou um `WARN` com o `idVideo`. Achado
+  na revisão de código da própria implementação: o `@QuarkusTest` de topologia inicial
+  publicava payload inválido para forçar nack, mas a conversão de payload roda fora do `Uni`
+  por mensagem que o `failure-strategy` trata — uma exceção ali pode derrubar a subscription
+  do canal inteiro em vez de nackear só aquela entrega. Trocado para um `ExtrairVideo` válido
+  contra um canal de saída quebrado de propósito (`@TestProfile`), o mesmo mecanismo do modo
+  `mata-publicacao` novo em `scripts/carga/conservacao.sh`. Não medido nesta sessão: o
+  `@QuarkusTest` novo e o `mata-publicacao` contra o Compose de verdade — o sandbox usado
+  não roteia porta publicada de container (docker-outside-of-docker), então só compilação e
+  os testes sem Docker rodaram; falta confirmar os dois no ambiente normal. Migração
+  documentada e não testada: `extracao.extrair.dlq` clássica existente quebra o boot com 406
+  `PRECONDITION_FAILED` — a fila precisa ser apagada antes do deploy. O Vídeo continua preso
+  em `PROCESSANDO` sem e-mail ao Dono nesse caminho — visibilidade, não o desfecho, é o que
+  este ticket compra. Achado no processo, não no código: o defeito de `publish-confirms` já
+  tinha acontecido um serviço abaixo (027, no `videos`) e se repetiu aqui sem guarda nenhuma
+  — motivo do [034](tickets/034-publish-confirms-sem-guarda.md), aberto na mesma revisão.
+
+- [Deploy não gasta tentativa da Extração](tickets/030-deploy-nao-gasta-tentativa.md) — a
+  pergunta central tem resposta e é **não**: o conector cancela a assinatura e fecha o canal
+  de forma síncrona e incondicional em `@BeforeDestroyed(ApplicationScoped.class)`, sem
+  esperar mensagem em voo, e isso dispara em `Arc.shutdown()` — **depois** da fase graciosa
+  nova do Quarkus, não protegido por ela. `quarkus.shutdown.timeout` só espera
+  `HttpServerRequest` (`GracefulShutdownFilter`); Reactive Messaging não tem equivalente.
+  `stop_grace_period`, por maior que seja, não muda quando isso acontece — acontece em
+  milissegundos após o `SIGTERM`, sempre. A premissa não se sustenta como escrita, e como o
+  003 virou o 010, este vira o [035](tickets/035-drenar-extracao-antes-do-sigterm.md): falta
+  um mecanismo que atrase o desligamento gracioso até a Extração terminar e dar ack, e nada
+  foi configurado sem essa prova. Achado com código-fonte citado por linha em
+  [`docs/pesquisa/rabbitmq-retry-dlq.md` §8](../pesquisa/rabbitmq-retry-dlq.md#8-adendo-ticket-030-o-conector-espera-a-mensagem-em-voo-terminar-no-sigterm)
+
+- [Falha da DLQ chega ao Estacionamento](tickets/037-estacionamento-nao-recebe-falha-da-dlq.md)
+  — exchange inexistente fecha o canal AMQP e deixa o confirm pendente no Vert.x 4.5.24;
+  as retentativas do SmallRye nunca recebem uma falha para tratar. O publicador de
+  `ExtracaoFalhou` ganhou teto total de 30 segundos: ao vencer, propaga falha e o `reject`
+  da DLQ leva o comando original ao Estacionamento. Provado com RabbitMQ real e suíte da
+  raiz passando (392 testes). Timeout não prova recusa: publicação tardia pode coexistir
+  com o comando estacionado; duplicatas continuam tratadas pelo dono do estado.
+
+- [Dev Services provados no devcontainer rootless](tickets/036-dev-services-no-devcontainer-rootless.md)
+  — o rebuild confirmou rede do host, loopback anunciado ao Testcontainers e caminho real do
+  socket entregue ao Ryuk. Um Nginx publicado pelo daemon respondeu de dentro do container, e
+  `VideoDataSourceAdapterTest` passou com Ryuk, Postgres, RabbitMQ, LocalStack e Keycloak reais.
+  O socket deixou de pressupor UID 1000: deriva de `XDG_RUNTIME_DIR`; o suporte documentado é
+  Linux com Docker rootless. A suíte da raiz chegou ao código e revelou uma falha funcional no
+  Estacionamento, separada no [037](tickets/037-estacionamento-nao-recebe-falha-da-dlq.md).
+
+- [Nada impede um canal de saída novo de nascer sem publish-confirms](tickets/034-publish-confirms-sem-guarda.md)
+  — o buraco que o 029 fechou no `extracao` e o 027 já tinha fechado no `videos` virou regra de
+  build: quinta regra do `ArchitectureConstraintsTest`, a primeira que não julga código Java.
+  Ela lê o `application.properties` do próprio módulo e cobra `publish-confirms=true` em todo
+  canal `mp.messaging.outgoing.*` que publique em RabbitMQ, nomeando serviço, arquivo e canal
+  na falha. Não precisou de cópia divergente nem de módulo compartilhado: cada cópia do teste
+  roda com o CWD no seu basedir, o mesmo pressuposto de `MAIN_SOURCES`, então o arquivo idêntico
+  nos três cobre os três serviços. A revisão da própria implementação alargou a regra: cobra
+  também o canal **sem** `connector` declarado, porque com um conector só no classpath o Quarkus
+  o liga ao RabbitMQ do mesmo jeito — cobrar só a linha `connector=` deixaria passar justamente o
+  canal novo do título. Junto foram fechados separador `:`, nome de canal com ponto e
+  `publish-confirms=false` num perfil sobre um `true` sem perfil. Limite declarado: canal que
+  chegue por `MP_MESSAGING_OUTGOING_*` (o overlay de carga usa) passa por fora. Vale para o `notificacao`, que hoje não publica — a regra
+  protege o serviço, não o canal que existe. Validação em boot foi descartada: avisa mais tarde
+  e custa mais para testar. Provado nos dois sentidos: apagar o `publish-confirms` de
+  `extracao-falhou` reprova com a mensagem esperada; restaurado, 11 testes verdes nos três
+  módulos. Não vinha da rodada de arquitetura dos 029–033: saiu da revisão de código da
+  implementação do 029, na mesma sessão.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -424,7 +498,66 @@ verificadas por teste, não são sugestão). Projeto original em
      metade da linearidade, e o número confirmou; o 027 corrigiu o que o 025 condenou e remediu;
      o 028 converteu a última metade, a da borda, e o número quase confirmou. As quatro células
      da tabela § *O que escala, e como* estão medidas agora — nenhuma pergunta sharp restante
-     desta rodada de escolha. Vazio de propósito: não é fog, é a fronteira fechada. -->
+     daquela rodada de escolha.
+
+     A fronteira reabriu de novo, em 2026-09-01, por uma revisão de arquitetura sobre
+     `develop @ 6128f33` que perguntou onde mora a máquina de estados do Vídeo. O que ela
+     achou não foi vazão: foi o ADR 0002 descrevendo um desenho de duas perguntas das quais
+     só uma rodava, e dois pontos sem fundo no caminho de recuperação quando o `extracao`
+     cai. Os cinco tickets desta rodada saem daí, e a ordem entre eles é a ordem do risco:
+     decidir e medir a recuperação primeiro, mexer no código do `videos` depois. O 029 e o 030
+     já fecharam (ver Decisões até aqui); dos três que continuam abaixo, um ainda é decisão
+     (033), um é código testado sem chamador em produção (031) e um é código sem teste (032).
+     O 030 virou o 035, que continua a pergunta contra fonte primária: o que a sessão fechou
+     foi que a premissa original do 030 estava errada, não que o buraco fechou. -->
+
+- **[031](tickets/031-decisao-de-transicao-em-java.md) — a decisão de transição roda em Java.**
+  `transitaPara` e os `marcaComo*` têm zero chamadores em `src/main`: a suíte de use case inteira
+  valida uma implementação que não embarca. Emenda o ADR 0002 em duas frentes — a entidade entra
+  no caminho de produção, e terminal→terminal deixa de ser bug para ser corrida de rede.
+- **[032](tickets/032-ciclo-da-extracao-no-extracao.md) — o ciclo da Extração mora no
+  `extracao`.** A regra permanente contra transitória está dentro de um adapter de 280 linhas
+  sem teste. São duas máquinas de estado e só uma está modelada.
+- **[033](tickets/033-iniciada-em-morto.md) — o `iniciadaEm` descartado.** Atravessa três
+  camadas sem destino, e é exatamente a coluna que faltaria para varrer `PROCESSANDO` preso.
+  Espera o 029 para saber se o cenário sobrevive à configuração.
+
+<!-- 035 nasceu do 030, na mesma sessão de 2026-09-04 que o fechou: a leitura do código-fonte
+     do conector e do `quarkus-arc` desmentiu a premissa de que `stop_grace_period` bastasse. -->
+
+- **[035](tickets/035-drenar-extracao-antes-do-sigterm.md) — drenar a Extração em voo antes
+  do `SIGTERM`.** Concluído: o observador CDI cancela a assinatura `extrair-video` antes de
+  esperar o ack, mantendo o canal e os publicadores abertos. A ponte usa campos privados do
+  SmallRye e rejeita no boot versões diferentes da 4.32.1; atualizar exige repetir o ensaio.
+  Duas réplicas, 12 Vídeos de dois minutos: 12 concluídos, zero reentregas novas, redeploy em
+  4s; antes da correção, a mesma carga gastou uma reentrega. Cancelamento e espera dividem
+  os 420s do dreno, abaixo dos 480s do Docker. SIGKILL e falhas de rede continuam fora.
+
+- **[038](tickets/038-override-de-canal-por-variavel-quebra-o-boot.md) — boot corrigido e
+  `mata-publicacao` medido.** Overrides por variáveis próprias `FIAPX_*`, resolvidas no
+  `.properties`, preservam `extracao-falhou` sem inventar canal na enumeração do SmallRye.
+  Quatro réplicas subiram; três envios aceitos e três Vídeos em `PROCESSANDO`: critérios
+  1 e 2 aprovados. Critério 3 reprovado: zero mensagens novas no estacionamento em 241s
+  (limite 240s). A garantia do 029 permanece pendente de diagnóstico; o 038 resolve o boot
+  e permite ao harness julgar os três critérios de verdade.
+
+- **[039](tickets/039-dubles-de-transicao-nao-guardam.md) — o dublê de `VideoGateway` volta a
+  guardar.** As três guardas em memória aplicam a transição do domínio à linha armazenada, e
+  `buscarPorId` devolve cópia: sem ela o use case movia o próprio objeto do mapa e a guarda
+  chegava sem nada para julgar. O flag `proximaTransicaoMudaLinha` saiu; a corrida perdida se
+  arma por id, no instante da leitura. As três transições ganharam teste de corrida — antes só
+  `falha` tinha, e nenhum reprovava. A unicidade do e-mail do ADR 0001 volta a ser provada
+  pela suíte unitária.
+
+
+<!-- Recusadas nesta rodada, com o motivo, para a recusa não virar esquecimento: **banco no
+     `extracao`** (tentativa como entidade durável) — reverte o `AGENTS.md`, e o Dono lê o estado
+     por HTTP no `videos`, então o estado voltaria replicado, trocando um bug de ordenação medido
+     por um de replicação não medido. **`extracao` notificando o Dono direto** — sem banco não há
+     token de idempotência, e a reentrega é garantida por contrato: moveria a garantia do ADR 0001
+     para o único serviço estruturalmente incapaz de fornecê-la. **Um terminal só em vez de três**
+     — é a única mudança de contrato com defeito medido atrás dela (o 027), mas quebra o ticket 007
+     e `docs/contratos/mensagens.md`; fica de fora até o contrato abrir. -->
 
 ## Fora de escopo
 

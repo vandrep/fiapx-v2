@@ -147,6 +147,18 @@ são convenção, são verificadas por `ArchitectureConstraintsTest` e reprovam 
 
 O CI roda o mesmo `verify` num job só e publica as três imagens no GHCR a partir da `main`.
 
+### Devcontainer com Docker rootless
+
+O devcontainer suporta Docker rootless em host Linux. Antes de reconstruí-lo,
+`XDG_RUNTIME_DIR` precisa apontar para o diretório de runtime do usuário que executa o daemon
+(normalmente `/run/user/$(id -u)`) e o socket precisa existir em
+`$XDG_RUNTIME_DIR/docker.sock`. A configuração usa esse valor tanto no bind mount quanto no
+endereço que o Ryuk enxerga; portanto, não pressupõe UID 1000.
+
+O container usa a rede do host e anuncia `127.0.0.1` ao Testcontainers. Essas duas opções são
+necessárias para que os testes alcancem as portas publicadas pelo daemon rootless. Depois de
+alterar a configuração, use **Rebuild Container** no editor antes de executar `./mvnw test`.
+
 ## Mapa do repositório
 
 | O que | Onde |

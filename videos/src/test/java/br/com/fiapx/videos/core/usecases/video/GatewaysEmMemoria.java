@@ -39,6 +39,17 @@ final class GatewaysEmMemoria {
         final Map<UUID, Video> armazenados = new LinkedHashMap<>();
         final Map<UUID, Instant> comandoPublicadoEm = new LinkedHashMap<>();
         final Map<UUID, Instant> falhaPublicadaEm = new LinkedHashMap<>();
+        private final Map<UUID, EstadoVideo> corridasArmadas = new LinkedHashMap<>();
+
+        /**
+         * Arma a corrida perdida deste Video: assim que a leitura dele acontecer, outra
+         * entrega move a linha para {@code destino} — uma vez so, e so para este id. O fluxo
+         * segue com o Video que leu, tenta o UPDATE condicional e a guarda o reprova sozinha,
+         * pela mesma regra de predecessores do WHERE real.
+         */
+        void outraEntregaVenceACorridaPara(UUID id, EstadoVideo destino) {
+            corridasArmadas.put(id, destino);
+        }
 
         @Override
         public CompletableFuture<Void> adicionar(Video video) {
@@ -50,6 +61,24 @@ final class GatewaysEmMemoria {
         public CompletableFuture<Optional<Video>> buscarPorIdEDono(UUID id, Dono dono) {
             return CompletableFuture.completedFuture(Optional.ofNullable(armazenados.get(id))
                     .filter(video -> video.dono().sub().equals(dono.sub())));
+        }
+
+        /**
+         * Devolve uma <b>copia</b> da linha, como o SELECT devolve uma leitura: transicionar o
+         * Video lido nao move a linha, e por isso a guarda do UPDATE ainda tem o que julgar.
+         *
+         * <p>E tambem o ponto onde dispara a entrega concorrente armada por
+         * {@link #outraEntregaVenceACorridaPara} — ler e o instante depois do qual a corrida
+         * pode ser perdida.
+         */
+        @Override
+        public CompletableFuture<Optional<Video>> buscarPorId(UUID id) {
+            var lido = Optional.ofNullable(armazenados.get(id)).map(Videos::copia);
+            var destinoDaCorrida = corridasArmadas.remove(id);
+            if (destinoDaCorrida != null) {
+                armazenados.computeIfPresent(id, (chave, linha) -> copiaEm(linha, destinoDaCorrida));
+            }
+            return CompletableFuture.completedFuture(lido);
         }
 
         @Override
@@ -69,12 +98,9 @@ final class GatewaysEmMemoria {
                     new Pagina<>(List.copyOf(fatia), pagina, tamanho, doDono.size()));
         }
 
-        /** A "guarda do WHERE" aqui e a propria entidade: {@code marcaComoIniciada} devolve
-         * false para reentrega fora de ordem, exatamente como o UPDATE condicional real. */
         @Override
-        public CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm) {
-            var video = armazenados.get(id);
-            return CompletableFuture.completedFuture(video != null && video.marcaComoIniciada());
+        public CompletableFuture<Boolean> marcarIniciada(UUID id) {
+            return transicionar(id, Video::marcaComoIniciada);
         }
 
         @Override
@@ -83,16 +109,24 @@ final class GatewaysEmMemoria {
                                                           String chavePacote,
                                                           int quantidadeFrames,
                                                           long tamanhoPacoteBytes) {
-            var video = armazenados.get(id);
-            return CompletableFuture.completedFuture(video != null
-                    && video.marcaComoConcluida(concluidaEm, chavePacote, quantidadeFrames, tamanhoPacoteBytes));
+            return transicionar(id, linha -> linha.marcaComoConcluida(
+                    concluidaEm, chavePacote, quantidadeFrames, tamanhoPacoteBytes));
         }
 
         @Override
-        public CompletableFuture<Optional<Video>> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
-            var video = armazenados.get(id);
-            var mudou = video != null && video.marcaComoFalha(falhouEm, motivo);
-            return CompletableFuture.completedFuture(mudou ? Optional.of(video) : Optional.empty());
+        public CompletableFuture<Boolean> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
+            return transicionar(id, linha -> linha.marcaComoFalha(falhouEm, motivo));
+        }
+
+        /**
+         * O UPDATE condicional do adapter, em memoria: a guarda do WHERE aqui e a propria
+         * entidade, aplicada a <b>linha armazenada</b> — nunca ao Video que o use case ja
+         * transicionou. Quem chegou depois de outra entrega ver a linha em um estado que nao
+         * e predecessor do destino sai com {@code false}, como o UPDATE que altera zero linhas.
+         */
+        private CompletableFuture<Boolean> transicionar(UUID id, Transicao transicao) {
+            var linha = armazenados.get(id);
+            return CompletableFuture.completedFuture(linha != null && transicao.aplicarA(linha));
         }
 
         @Override
@@ -128,6 +162,25 @@ final class GatewaysEmMemoria {
                     .limit(tamanhoDoLote)
                     .toList();
             return CompletableFuture.completedFuture(pendentes);
+        }
+
+        /** A transicao do dominio aplicada a linha: muda a linha, e diz se mudou. */
+        @FunctionalInterface
+        private interface Transicao {
+            boolean aplicarA(Video linha);
+        }
+
+        /** A leitura do banco reconstitui um objeto novo a cada SELECT; aqui tambem. */
+        private static Video copia(Video video) {
+            return copiaEm(video, video.estado());
+        }
+
+        /** A mesma linha, no estado em que outra entrega a deixou. */
+        private static Video copiaEm(Video video, EstadoVideo estado) {
+            return Video.reconstituir(video.id(), video.nome(), video.tamanhoBytes(), video.dono(),
+                    video.chaveVideo(), estado, video.recebidoEm(), video.finalizadoEm(),
+                    video.chavePacote(), video.quantidadeFrames(), video.tamanhoPacoteBytes(),
+                    video.motivo());
         }
     }
 

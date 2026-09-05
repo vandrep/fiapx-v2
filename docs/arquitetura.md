@@ -266,8 +266,37 @@ inviabilizaria o serviço na máquina de quem avalia.
 | Pico de envios | o `202` responde antes do trabalho; a fila absorve o excedente em disco, não em conexões HTTP abertas |
 | Broker reinicia | filas **quorum**, replicadas e duráveis — mensagem confirmada sobrevive |
 | Worker morre no meio | ack **manual**, depois do trabalho; a mensagem volta para a fila |
+| **Deploy** no meio de uma Extração | o dreno cancela a assinatura de `extrair-video`, espera a Extração em voo terminar **e dar ack**, e só então deixa o conector fechar o canal. Zero reentregas no ensaio válido do [ticket 035](wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md) |
 | Mensagem envenenada | `x-delivery-limit=3` e DLQ — a mensagem sai do caminho, mas não some: o `extracao` consome a própria DLQ e transforma o esgotamento em `ExtracaoFalhou`, que vira e-mail |
 | Falha entre gravar no banco e publicar na fila | duas colunas marcadoras (`comando_publicado_em`, `falha_publicada_em`) e uma varredura a cada 30s republicam o que ficou para trás ([ADR 0003](adr/0003-reconciliacao-por-varredura.md)). **A republicação nunca foi observada acontecendo**: a rodada que existia para exercitá-la não produziu evidência de uma única republicação ([§ O que a medição mostrou](#o-que-a-medição-mostrou)) |
+
+A linha do deploy exigiu cancelar o consumo antes de drenar. O [ticket 030](wayfinder/tickets/030-deploy-nao-gasta-tentativa.md) começou
+propondo `stop_grace_period` e provou, contra o código do conector, que aquilo não entregaria
+nada; o [035](wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md) construiu o que
+entrega — um observador do mesmo evento CDI que o conector observa, com prioridade menor que a
+dele —, com cancelamento da assinatura antes da espera, e mediu. O raciocínio inteiro, com código-fonte citado por linha, está em
+[`docs/pesquisa/rabbitmq-retry-dlq.md` §9](pesquisa/rabbitmq-retry-dlq.md).
+
+O que precisa estar aqui, porque é operação e não raciocínio, são **três números que só servem
+em conjunto**, cada um estritamente maior que o anterior:
+
+| Número | Onde | Valor |
+|---|---|---|
+| teto de relógio de uma Extração | `timeout-ffprobe-segundos` + `timeout-ffmpeg-segundos` | 30 + 300 = 330s de processo externo, mais download e upload sem teto |
+| teto do dreno | `fiapx.extracao.dreno-timeout-segundos` | **420s** |
+| grace period do Docker | `stop_grace_period` do serviço `extracao` | **480s** |
+
+Mexer num sem mexer nos outros quebra o mecanismo em silêncio: um `stop_grace_period` menor que
+o dreno faz o Docker mandar `SIGKILL` no meio da espera, que é o pior dos dois mundos. E
+**420s não é o custo de um deploy** — o dreno libera no ack, então o que se paga é o que sobra
+da Extração em voo.
+
+O ensaio antes/depois do ticket 035 usou duas réplicas e 12 Vídeos de dois minutos.
+Antes, todos concluíram mas houve uma reentrega; depois, todos concluíram com **zero
+reentregas novas**. As duas réplicas registraram Extração em voo e seguraram o desligamento
+por cerca de dois segundos; o `up -d --force-recreate` levou **4s**, contra 6s antes.
+Cancelar a assinatura não interrompeu o ffmpeg nem o ack manual. O teto de 420s não foi
+exercitado nessa medição.
 
 Essa última linha é a menos óbvia e a que mais importa. Gravar no Postgres e publicar no
 RabbitMQ não é uma operação atômica: um crash entre as duas deixaria um Vídeo eternamente em
@@ -496,6 +525,14 @@ O que eu não defendo — apenas aceitei.
   réplicas compartilharem o volume de scratch foi corrigido no
   [ticket 027](wayfinder/tickets/027-melhorias-medidas.md) — a varredura de boot passou a só
   apagar o que está ocioso há mais de uma hora, em vez de tudo.
+- **O dreno depende de campos privados do SmallRye 4.32.1.** O cancelamento por canal não
+  é API pública do conector. A ponte valida a versão e os campos no boot, rejeitando
+  atualização incompatível. Mudar o BOM exige reexaminar o fonte e repetir o ensaio do
+  [ticket 035](wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md). O cancelamento e
+  a espera dividem o teto de 420s. Mensagens já entregues, mas ainda no buffer reativo
+  antes de entrar no consumidor, também podem ser reenfileiradas quando a assinatura é
+  cancelada; o ensaio não prova zero reentregas em toda corrida de entrega. Trabalho que exceda esse teto, SIGKILL, OOM e queda de
+  rede continuam podendo gastar entrega. A medição verde cobre redeploy com broker saudável.
 - **Não há observabilidade além de health check.** Sem métrica, sem tracing distribuído. Num
   sistema assíncrono com DLQ, a primeira coisa que eu acrescentaria com mais tempo seria
   visibilidade sobre profundidade de fila e taxa de dead-letter.

@@ -28,9 +28,9 @@ public class ExtracaoEventosController {
         this.processarExtracaoFalhouUseCase = processarExtracaoFalhouUseCase;
     }
 
-    public CompletableFuture<Void> processarIniciada(UUID idVideo, Instant iniciadaEm) {
+    public CompletableFuture<Void> processarIniciada(UUID idVideo) {
         return processarExtracaoIniciadaUseCase.executar(
-                new ProcessarExtracaoIniciadaUseCase.Command(idVideo, iniciadaEm));
+                new ProcessarExtracaoIniciadaUseCase.Command(idVideo));
     }
 
     public CompletableFuture<Void> processarConcluida(UUID idVideo,

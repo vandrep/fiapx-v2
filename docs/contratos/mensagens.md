@@ -53,8 +53,18 @@ Assimétricas de propósito: DLQ dedicada onde há consumidor, compartilhada ond
 | DLQ | Origem | Consumidor |
 |---|---|---|
 | `extracao.extrair.dlq` | `extracao.extrair` | **`extracao`** — publica `ExtracaoFalhou` com `TENTATIVAS_ESGOTADAS` |
+| `extracao.extrair.estacionamento` | `extracao.extrair.dlq` | nenhum — terminal, intervenção humana |
 | `videos.dlq` | as três filas de `videos` | nenhum — terminal, intervenção humana |
 | `notificacao.dlq` | `notificacao.video-falhou` | nenhum — terminal, intervenção humana |
+
+`extracao.extrair.dlq` deixou de ser terminal a partir do ticket
+[029](../wayfinder/tickets/029-terminal-na-dlq-do-extracao.md): o consumidor dela é ele
+próprio um publicador (`ExtracaoFalhou`), e uma publicação recusada pelo broker sem
+`publish-confirms` completava com sucesso mesmo assim — ack, e a falha definitiva sumia em
+silêncio, sem nenhuma varredura capaz de alcançá-la. `extracao.extrair.estacionamento` é o
+fundo dela: sem consumidor, fila quorum (ADR 0001 recusa classic aqui pelo mesmo motivo que
+recusa em toda DLQ da política — dead-lettering *at-most-once*), inspecionada por operação
+no management UI.
 
 Numa DLQ compartilhada, a fila de origem só se descobre pelo header `x-death`. É aceitável
 porque o destino é olho humano no management UI: mensagem ali significa banco ou SMTP fora

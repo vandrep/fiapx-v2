@@ -3,6 +3,12 @@
 FIAP X: três serviços Quarkus em Clean Architecture, um repositório, um build Maven.
 `videos` é a borda pública e dona do estado; `extracao` e `notificacao` são workers.
 
+## Idioma
+
+Responda sempre em português — no chat, em PR, em issue, em comentário de review. Vale
+para qualquer agente que trabalhe neste repositório. Commits seguem a convenção própria,
+na seção Commits abaixo.
+
 ## Onde a verdade mora
 
 As regras de camada **não estão escritas aqui** — estão em

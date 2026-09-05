@@ -266,8 +266,42 @@ inviabilizaria o serviço na máquina de quem avalia.
 | Pico de envios | o `202` responde antes do trabalho; a fila absorve o excedente em disco, não em conexões HTTP abertas |
 | Broker reinicia | filas **quorum**, replicadas e duráveis — mensagem confirmada sobrevive |
 | Worker morre no meio | ack **manual**, depois do trabalho; a mensagem volta para a fila |
+| **Deploy** no meio de uma Extração | um dreno próprio segura o desligamento até a Extração em voo terminar **e dar ack**, e só então deixa o conector fechar o canal ([ticket 035](wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md)). Fecha a perda de **trabalho**; **não** zera a contagem de entregas — ver abaixo, e [Limitações conhecidas](#limitações-conhecidas) |
 | Mensagem envenenada | `x-delivery-limit=3` e DLQ — a mensagem sai do caminho, mas não some: o `extracao` consome a própria DLQ e transforma o esgotamento em `ExtracaoFalhou`, que vira e-mail |
 | Falha entre gravar no banco e publicar na fila | duas colunas marcadoras (`comando_publicado_em`, `falha_publicada_em`) e uma varredura a cada 30s republicam o que ficou para trás ([ADR 0003](adr/0003-reconciliacao-por-varredura.md)). **A republicação nunca foi observada acontecendo**: a rodada que existia para exercitá-la não produziu evidência de uma única republicação ([§ O que a medição mostrou](#o-que-a-medição-mostrou)) |
+
+A linha do deploy é a que mais custou para chegar a esta tabela, e é a única com um
+resultado parcial. O [ticket 030](wayfinder/tickets/030-deploy-nao-gasta-tentativa.md) começou
+propondo `stop_grace_period` e provou, contra o código do conector, que aquilo não entregaria
+nada; o [035](wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md) construiu o que
+entrega — um observador do mesmo evento CDI que o conector observa, com prioridade menor que a
+dele —, e mediu. O raciocínio inteiro, com código-fonte citado por linha, está em
+[`docs/pesquisa/rabbitmq-retry-dlq.md` §9](pesquisa/rabbitmq-retry-dlq.md).
+
+O que precisa estar aqui, porque é operação e não raciocínio, são **três números que só servem
+em conjunto**, cada um estritamente maior que o anterior:
+
+| Número | Onde | Valor |
+|---|---|---|
+| teto de relógio de uma Extração | `timeout-ffprobe-segundos` + `timeout-ffmpeg-segundos` | 30 + 300 = 330s de processo externo, mais download e upload sem teto |
+| teto do dreno | `fiapx.extracao.dreno-timeout-segundos` | **420s** |
+| grace period do Docker | `stop_grace_period` do serviço `extracao` | **480s** |
+
+Mexer num sem mexer nos outros quebra o mecanismo em silêncio: um `stop_grace_period` menor que
+o dreno faz o Docker mandar `SIGKILL` no meio da espera, que é o pior dos dois mundos. E
+**420s não é o custo de um deploy** — o dreno libera no ack, então o que se paga é o que sobra
+da Extração em voo.
+
+**O critério que o ticket fixou antes de rodar reprovou, e vale dizer com precisão o que o
+mecanismo entrega.** Ele impede que o `SIGTERM` destrua uma Extração em andamento — medido: numa rodada
+com Vídeos de 2 min, as duas réplicas seguraram o desligamento por ~2,5 s cada, o tempo que
+faltava, e liberaram no ack. Mas a contagem de entregas continua subindo, **até uma por
+réplica** (2 numa rodada medida, 1 na outra), porque o ack que libera o dreno é o mesmo que devolve o crédito do canal: o broker entrega a
+mensagem seguinte na janela entre uma coisa e a outra. **A entrega gasta deixou de recair sobre
+a Extração em voo e passou a recair sobre uma mensagem que ainda não começou nada** — some o
+viés sistemático contra Vídeos longos, que eram os expostos a um deploy e portanto os candidatos
+a colecionar três entregas e cair na DLQ. É uma troca boa; não é a promessa do 030. Detalhe em
+[Limitações conhecidas](#limitações-conhecidas).
 
 Essa última linha é a menos óbvia e a que mais importa. Gravar no Postgres e publicar no
 RabbitMQ não é uma operação atômica: um crash entre as duas deixaria um Vídeo eternamente em
@@ -496,6 +530,17 @@ O que eu não defendo — apenas aceitei.
   réplicas compartilharem o volume de scratch foi corrigido no
   [ticket 027](wayfinder/tickets/027-melhorias-medidas.md) — a varredura de boot passou a só
   apagar o que está ocioso há mais de uma hora, em vez de tudo.
+- **Um deploy ainda gasta uma entrega por réplica, e isso foi medido.** O dreno do
+  [ticket 035](wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md) impede que o
+  `SIGTERM` destrua uma Extração em andamento — provado, com as réplicas registrando a espera e
+  o `up -d` custando 3s. Mas o critério que o ticket fixou antes de rodar era *zero reentregas*,
+  e a medição deu **2 numa rodada e 1 noutra — até uma por réplica**: o ack que libera o dreno é o mesmo que libera o
+  crédito do canal, então o broker entrega a mensagem seguinte na janela entre uma coisa e
+  outra, e ela volta para a fila sem ter começado. Fechar isso depende de um `basic.cancel` por
+  canal que o `smallrye-reactive-messaging-rabbitmq` 4.32.1 não oferece — por isso o
+  [ticket 035](wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md) continua **aberto**.
+  O que mudou é onde a
+  entrega é gasta, não quantas — e é uma troca boa, não uma vitória.
 - **Não há observabilidade além de health check.** Sem métrica, sem tracing distribuído. Num
   sistema assíncrono com DLQ, a primeira coisa que eu acrescentaria com mais tempo seria
   visibilidade sobre profundidade de fila e taxa de dead-letter.

@@ -518,12 +518,23 @@ verificadas por teste, não são sugestão). Projeto original em
      do conector e do `quarkus-arc` desmentiu a premissa de que `stop_grace_period` bastasse. -->
 
 - **[035](tickets/035-drenar-extracao-antes-do-sigterm.md) — drenar a Extração em voo antes
-  do `SIGTERM`.** O 030 provou que `stop_grace_period` sozinho não entrega nada: o conector
-  cancela a assinatura e fecha o canal em milissegundos após o sinal, sem esperar mensagem em
-  voo, e `quarkus.shutdown.timeout` não cobre Reactive Messaging. Falta decidir entre um
-  `ShutdownListener` próprio que segura o desligamento até a Extração terminar, ou um processo
-  de entrada que intercepta o `SIGTERM` — e medir o escolhido contra o mesmo critério que o
-  030 não chegou a rodar.
+  do `SIGTERM`.** Mecanismo decidido, construído e medido; **critério de aceite ainda
+  vermelho**, e por isso continua aberto. Os dois caminhos que o ticket esboçou caíram: um
+  `ShutdownListener` de aplicação é impossível (é build item de *augmentation*, não bean CDI),
+  e o wrapper de `entrypoint` era desnecessário. O que entrou foi um observador do mesmo evento
+  CDI que o conector observa, com `@Priority(10)` contra o `@Priority(50)` dele, e ack manual
+  para o dreno esperar o ack e não só o ffmpeg. Resultado medido: a Extração em voo deixa de ser
+  destruída, mas a contagem de entregas sobe igual — uma por réplica —, porque o ack que libera
+  o dreno é o mesmo que devolve o crédito do canal. Fechar depende de `basic.cancel` por canal,
+  que o conector 4.32.1 tem e não expõe.
+
+- **[038](tickets/038-override-de-canal-por-variavel-quebra-o-boot.md) — override de canal por
+  variável de ambiente derruba o boot do `extracao`.** A presença de
+  `MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_*`, com os valores default inclusive, mata o serviço
+  em `SRMSG00071`: o traço de `extracao-falhou` não sobrevive à conversão, e o SmallRye deduz
+  da enumeração um canal `extracao` sem `connector`. Achado no 035, que precisava do harness de
+  carga de pé. Desbloqueado o suficiente para os outros quatro modos (forma de lista no
+  overlay); o `mata-publicacao` continua sem nunca ter rodado contra o Compose.
 
 - **[037](tickets/037-estacionamento-nao-recebe-falha-da-dlq.md) — a falha da DLQ não chega ao
   Estacionamento.** Com os Dev Services acessíveis, o teste do caminho terminal reprova de forma

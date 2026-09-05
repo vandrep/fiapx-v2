@@ -1081,6 +1081,183 @@ intercepta o `SIGTERM` do Docker e só o encaminha à JVM depois de observar o c
 dois mudam a forma do ticket original; nenhum é "configurar `stop_grace_period` e seguir em
 frente". Desenho e medição ficam para um ticket novo, não para este.
 
+
+## 9. Adendo (ticket 035): onde cabe um dreno, e por que não no `ShutdownListener`
+
+A §8 fechou a pergunta do [ticket 030](../wayfinder/tickets/030-deploy-nao-gasta-tentativa.md)
+com um "não" e deixou dois candidatos ao
+[ticket 035](../wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md): um
+`ShutdownListener` próprio, ou um processo de entrada que segure o `SIGTERM`. Esta seção mede
+os dois contra o código, e o resultado é que **nenhum dos dois é o mecanismo escolhido** — o
+primeiro porque aplicação não consegue registrar um, o segundo porque o primeiro problema
+resolvido corretamente torna o `entrypoint` desnecessário.
+
+Fonte desta seção: os **jars de fonte do próprio classpath** (`~/.m2`), não o GitHub —
+`quarkus-core-3.31.3-sources.jar`, `quarkus-arc-3.31.3.jar`,
+`quarkus-arc-deployment-3.31.3.jar` e `smallrye-reactive-messaging-rabbitmq-4.32.1-sources.jar`.
+É a versão exata que roda, sem intermediação de tag.
+
+### 9.1 `preShutdown` não tem teto, e `shutdown` tem — confirmado
+
+O ticket 035 pediu para confirmar isso lendo o `ShutdownRecorder` de novo. Confirmado, e as
+duas fases são assimétricas de propósito
+(`io/quarkus/runtime/shutdown/ShutdownRecorder.java`, 3.31.3):
+
+```java
+private static void executePreShutdown() throws InterruptedException {
+    CountDownLatch preShutdown = new CountDownLatch(shutdownListeners.size());
+    for (ShutdownListener i : shutdownListeners) {
+        i.preShutdown(new LatchShutdownNotification(preShutdown));
+    }
+    preShutdown.await();                                    // <- sem timeout, incondicional
+}
+
+private static void executeShutdown() throws InterruptedException {
+    CountDownLatch shutdown = new CountDownLatch(shutdownListeners.size());
+    for (ShutdownListener i : shutdownListeners) {
+        i.shutdown(new LatchShutdownNotification(shutdown));
+    }
+    if (shutdownConfig.getValue().isTimeoutEnabled()
+            && !shutdown.await(shutdownConfig.getValue().timeout().get().toMillis(), TimeUnit.MILLISECONDS)) {
+        log.error("Timed out waiting for graceful shutdown, shutting down anyway.");
+    }
+}
+```
+
+Um detalhe a mais, que muda como um teste deve ser lido: `isTimeoutEnabled()` devolve `false`
+em modo de desenvolvimento, sempre, independente do valor configurado
+(`ShutdownConfig.java`) — `timeout().isPresent() && ... && LaunchMode.current() != LaunchMode.DEVELOPMENT`.
+
+### 9.2 Aplicação não registra `ShutdownListener` — é build item, não bean
+
+Esta é a descoberta que descarta o candidato 1 como escrito no ticket. A lista de listeners
+vem de `ShutdownRecorder.setListeners(...)`, e quem a alimenta é o build item
+`io.quarkus.deployment.builditem.ShutdownListenerBuildItem` — que embrulha uma **instância**
+de `ShutdownListener` criada durante a *augmentation*:
+
+```java
+public final class ShutdownListenerBuildItem extends MultiBuildItem {
+  final ShutdownListener shutdownListener;
+  public ShutdownListenerBuildItem(ShutdownListener);
+}
+```
+
+Produzir um build item exige um `@BuildStep`, ou seja, uma extensão Quarkus com módulo de
+deployment. Não existe caminho por bean CDI: um `@ApplicationScoped implements ShutdownListener`
+no código da aplicação é ignorado, sem aviso. Varrendo os jars de deployment do classpath, os
+únicos que produzem esse build item são `quarkus-core-deployment`, `quarkus-vertx-http-deployment`
+(o `GracefulShutdownFilter` da §8), `quarkus-smallrye-health-deployment` e
+`quarkus-arc-deployment`.
+
+O do `quarkus-arc` é o único que abre alguma porta para a aplicação, e ela é estreita
+(`ArcProcessor.registerPreShutdownListener`, lido do bytecode): ele só produz o listener
+**se `quarkus.shutdown.delay-enabled` for `true`**, e o listener é o `ArcShutdownListener`,
+que dispara um evento CDI e nada mais:
+
+```java
+public void preShutdown(ShutdownNotification notification) {
+    Arc.requireContainer().beanManager().getEvent()
+       .select(ShutdownDelayInitiatedEvent.class)
+       .fire(new ShutdownDelayInitiatedEvent());
+    notification.done();
+}
+```
+
+Como `fire` é síncrono e `notification.done()` vem depois dele, um observador de
+`ShutdownDelayInitiatedEvent` que bloqueie **bloqueia a fase `preShutdown` inteira** — a que a
+§9.1 mostrou não ter teto. Existe, portanto, um hook de aplicação na fase graciosa. Ele só não
+é o melhor lugar para este dreno.
+
+### 9.3 O lugar certo é o mesmo evento que o conector observa
+
+Entre o fim de `preShutdown` e o `cancel()` do conector cabe a fase `shutdown()` inteira, com
+o conector ainda consumindo — `ShutdownRecorder.runShutdown()` roda por completo antes de
+`doStop()`, e é `doStop()` que chama `Arc.shutdown()` (§8). Drenar em `preShutdown` deixaria
+essa janela aberta: o canal fica livre, o broker entrega a próxima mensagem, e ela morre no
+fechamento gastando a entrega que o dreno existia para poupar.
+
+O conector observa `@BeforeDestroyed(ApplicationScoped.class)` com `@Priority(50)` (§8). A
+ordenação de observadores por `@Priority` ascendente é garantia da própria especificação CDI,
+e o ArC a implementa. Logo um observador do **mesmo evento** com prioridade menor roda
+imediatamente antes de o canal fechar, e a distância entre o fim do dreno e o `cancel()` passa
+a ser uma chamada de método. É o que o `DrenoDaExtracao` faz, com `@Priority(10)`.
+
+O preço é assumido e é um só: **`quarkus.shutdown.timeout` não alcança essa fase**. O teto
+passa a ser da aplicação (`fiapx.extracao.dreno-timeout-segundos`), e por isso o
+`application.properties` do `extracao` deliberadamente **não** declara
+`quarkus.shutdown.timeout` — declará-lo sugeriria um efeito sobre a Extração que ele
+comprovadamente não tem.
+
+### 9.4 O candidato 2 (`tini`/`trap`) fica na gaveta
+
+O `entrypoint` do `Dockerfile` do `extracao` já é `exec` form com `java` como PID 1, então o
+`SIGTERM` chega direto na JVM (§8) — não há sinal perdido a consertar. Um wrapper com `trap`
+só faria fora do processo o que a §9.3 faz dentro dele, e reabriria a pergunta de
+encaminhamento de sinal que o `exec` form fecha. Não foi implementado, e o `Dockerfile` não
+mudou.
+
+### 9.5 O ack precisa entrar na conta, e por isso o ack virou manual
+
+Esperar o ffmpeg terminar não basta: uma Extração que termina e perde o canal antes de ackear
+é reenfileirada do mesmo jeito, e a espera inteira foi desperdiçada. Com o ack implícito do
+SmallRye, o `Uni` devolvido pelo `@Incoming` completa **antes** de o pipeline ackear, então
+qualquer "terminei" sinalizado ali chega cedo demais. Daí `@Acknowledgment(Strategy.MANUAL)`
+no `ExtrairVideoConsumer`: o `ack()` entra na cadeia do `Uni`, e o dreno só é liberado depois
+dele.
+
+Onde esse `ack()` de fato completa, lido do conector 4.32.1
+(`IncomingRabbitMQMessage.ack` → `RabbitMQAck.handle` → `ClientHolder.runOnContext`):
+
+```java
+public static CompletionStage<Void> runOnContext(Context context, IncomingRabbitMQMessage<?> msg,
+        Consumer<IncomingRabbitMQMessage<?>> handle) {
+    return VertxContext.runOnContext(context.getDelegate(), f -> {
+        handle.accept(msg);
+        msg.runOnMessageContext(() -> f.complete(null));
+    });
+}
+```
+
+Ou seja: completa quando o `basicAck` foi **emitido no contexto Vert.x**, não quando o broker
+o processou — e não há como ser diferente, porque `basic.ack` em AMQP não tem confirmação de
+volta. É uma garantia mais fraca do que "byte no socket", e a diferença é registrada aqui em
+vez de escondida. Ainda assim é estritamente melhor que o ack implícito, que sequer entra na
+ordenação.
+
+### 9.6 O que continua fora do alcance
+
+O portão fechado impede uma Extração **nova** de começar; não impede o broker de **entregar**.
+Uma mensagem entregue depois do ack da última Extração e antes do `terminate()` do conector
+fica sem ack e é reenfileirada — uma entrega gasta num Vídeo que sequer começou.
+
+Ao escrever esta seção antes de medir, eu a tratei como janela estreita e improvável. **A
+medição desmentiu isso, e a correção é o achado mais importante do ticket 035:** a janela não é
+improvável, é *quase certa*, e o desenho do dreno é o que a torna assim. Com
+`max-outstanding-messages=1`, o crédito do canal só é devolvido quando a mensagem em voo é
+ackeada — e é exatamente esse ack que libera o dreno. As duas coisas acontecem no mesmo
+instante por construção: liberar o dreno **é** pedir a próxima mensagem.
+
+O `scripts/carga/conservacao.sh redeploy-extracao` mediu, em rodadas válidas com 2 réplicas,
+**2 reentregas numa e 1 noutra** — até uma por réplica, conforme o broker consiga ou não
+empurrar a mensagem seguinte antes de a conexão fechar, e o mesmo patamar de antes do dreno
+existir. E o log do `extracao` não tem uma única
+linha de portão fechado, o que prova que a mensagem reenfileirada nunca chegou ao consumidor:
+ela ficou entre o `basic.deliver` e o invoker quando a conexão fechou.
+
+Fechar isso exigiria a sequência clássica de drenagem — `basic.cancel` primeiro, ack depois,
+fechamento por último —, e o conector 4.32.1 **tem** a operação mas não a expõe:
+`IncomingRabbitMQChannel.terminate()` cancela só a assinatura, mas `incomings` é `private` e sem
+acessor, e o único método público, `RabbitMQConnector.terminate()`, é tudo-ou-nada e já fecha a
+conexão junto (`clients.forEach(... stopAndAwait())`, §8). É o que mantém o
+[ticket 035](../wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md) aberto.
+
+O que o mecanismo entrega, então, é uma troca e não uma vitória: a entrega gasta deixou de
+recair sobre a Extração em voo e passou a recair sobre uma mensagem que não começou trabalho
+nenhum. Some o viés sistemático contra Vídeos longos — os mais expostos a um deploy, e por isso
+os candidatos naturais a colecionar três entregas. A contagem, essa, não desce. `SIGKILL` por
+OOM, morte do nó e queda de rede seguem exatamente como o ticket 030 os deixou.
+
+
 ---
 
 ## Fontes primárias

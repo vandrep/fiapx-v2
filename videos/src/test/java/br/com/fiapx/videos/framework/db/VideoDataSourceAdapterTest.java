@@ -4,6 +4,14 @@ import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
 import br.com.fiapx.videos.core.entities.Video;
+import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
+import br.com.fiapx.videos.core.interfaces.presenter.VideoPresenter;
+import br.com.fiapx.videos.core.interfaces.sender.ExtracaoSender;
+import br.com.fiapx.videos.core.interfaces.sender.NotificacaoSender;
+import br.com.fiapx.videos.core.usecases.video.EnviarVideoUseCase;
+import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoFalhouUseCase;
+import br.com.fiapx.videos.core.usecases.video.PublicarExtrairVideo;
+import br.com.fiapx.videos.core.usecases.video.PublicarVideoFalhou;
 import br.com.fiapx.videos.framework.db.entities.VideoEntity;
 import io.quarkus.hibernate.reactive.panache.Panache;
 import io.quarkus.test.junit.QuarkusTest;
@@ -13,9 +21,13 @@ import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
+import java.nio.ByteBuffer;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Flow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -170,16 +182,59 @@ class VideoDataSourceAdapterTest {
     }
 
     /**
-     * {@code adicionar} e o unico metodo do gateway sem {@code Panache.with*} proprio: no
-     * caminho de producao ele corre dentro da transacao que o envio ja abriu. Aqui a
-     * transacao entra por fora, entao.
+     * A confirmacao simulada de {@code ExtrairVideo} so completa depois de uma nova leitura
+     * encontrar o Video e de a falha permanente rapida ser processada. Assim, o encadeamento
+     * controlado pelo {@link UniAsserter} reproduz o consumidor que confirma o evento antes
+     * de o caminho de envio encerrar, sem sleeps nem sorte (ticket 040).
      */
+    @Test
+    @RunOnVertxContext
+    void confirmacaoDeEventoRapidoEnxergaOVideoEProduzFalha(UniAsserter asserter) {
+        var arquivo = new ArquivoGatewayDeTeste();
+        NotificacaoSender notificacao = (id, dono, nome, motivo, ocorridoEm) -> CompletableFuture.completedFuture(null);
+        var processarFalha = new ProcessarExtracaoFalhouUseCase(adapter, new PublicarVideoFalhou(notificacao, adapter));
+        ExtracaoSender extracao = (id, chaveVideo, chaveDestinoPacote) -> adapter.buscarPorId(id)
+                .thenCompose(encontrado -> {
+                    assertTrue(encontrado.isPresent(),
+                            "o consumidor do comando deve enxergar o Video ao confirma-lo");
+                    return processarFalha.executar(new ProcessarExtracaoFalhouUseCase.Command(
+                            id, MotivoFalha.ARQUIVO_INVALIDO, Instant.parse("2026-09-05T16:00:00Z")));
+                });
+        VideoPresenter presenter = video -> { };
+        var envio = new EnviarVideoUseCase(arquivo, adapter,
+                new PublicarExtrairVideo(arquivo, extracao, adapter), presenter);
+        var id = new UUID[1];
+
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> envio.executar(
+                new EnviarVideoUseCase.Command("visivel.mp4", "video/mp4", 1_024L,
+                        Path.of("/tmp/visivel.mp4"), DONO)).thenAccept(video -> id[0] = video.id())));
+        asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.buscarPorId(id[0])),
+                encontrado -> assertEquals(EstadoVideo.FALHOU, encontrado.orElseThrow().estado()));
+    }
+
+    private static final class ArquivoGatewayDeTeste implements ArquivoGateway {
+
+        @Override
+        public CompletableFuture<String> gravarVideo(UUID idVideo, String nome, Path arquivo) {
+            return CompletableFuture.completedFuture(idVideo + "/original.mp4");
+        }
+
+        @Override
+        public String chaveDoPacote(UUID idVideo) {
+            return idVideo + ".zip";
+        }
+
+        @Override
+        public CompletableFuture<Optional<Flow.Publisher<ByteBuffer>>> abrirPacote(String chavePacote) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+    }
+
     private void gravarRecebido(UniAsserter asserter, UUID[] id) {
         asserter.execute(() -> {
             var video = Video.novo("adapter.mp4", 1_024L, DONO).armazenadoEm("chave/original.mp4");
             id[0] = video.id();
-            return Panache.withTransaction(
-                    () -> Uni.createFrom().completionStage(() -> adapter.adicionar(video)));
+            return Uni.createFrom().completionStage(() -> adapter.adicionar(video));
         });
     }
 

@@ -8,7 +8,6 @@ import br.com.fiapx.videos.interfaces.presenters.VideoPresenterAdapter;
 import br.com.fiapx.videos.interfaces.presenters.VideosPaginadosPresenterAdapter;
 import br.com.fiapx.videos.interfaces.presenters.view_model.VideoViewModel;
 import br.com.fiapx.videos.interfaces.presenters.view_model.VideosPaginadosViewModel;
-import io.quarkus.hibernate.reactive.panache.common.WithTransaction;
 import io.quarkus.security.Authenticated;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
@@ -68,7 +67,6 @@ public class VideosResource {
     @Inject
     VideosPaginadosPresenterAdapter videosPaginadosPresenter;
 
-    @WithTransaction
     @POST
     @Consumes(MediaType.MULTIPART_FORM_DATA)
     @Produces(MediaType.APPLICATION_JSON)

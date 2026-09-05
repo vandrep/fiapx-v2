@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -52,6 +53,23 @@ class ReconciliarPublicacoesPendentesUseCaseTest {
         assertEquals(1, extracao.idsEnviados.size());
         assertEquals(video.id(), extracao.idsEnviados.get(0));
         assertNotNull(videos.comandoPublicadoEm.get(video.id()));
+    }
+
+    @Test
+    void publicacaoInterrompidaMantemComandoPendenteParaAProximaVarredura() {
+        var video = recebidoHa(2, ChronoUnit.MINUTES);
+        videos.armazenados.put(video.id(), video);
+        extracao.falharNoProximoEnvio(new RuntimeException("broker indisponivel"));
+
+        assertThrows(RuntimeException.class, () -> useCase.executar().join());
+        assertNull(videos.comandoPublicadoEm.get(video.id()),
+                "uma publicacao sem confirmacao nao pode deixar marca de sucesso");
+
+        var recuperacao = useCase.executar().join();
+
+        assertEquals(1, recuperacao.comandos());
+        assertNotNull(videos.comandoPublicadoEm.get(video.id()));
+        assertEquals(2, extracao.idsEnviados.size());
     }
 
     /**

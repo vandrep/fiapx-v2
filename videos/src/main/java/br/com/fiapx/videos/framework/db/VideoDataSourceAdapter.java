@@ -23,15 +23,16 @@ import java.util.concurrent.CompletableFuture;
  * As leituras abrem a sessao <b>aqui</b>, e nao por {@code @WithSession} no Resource, por
  * duas razoes. A anotacao exige retorno {@code Uni}, e o download devolve {@code RestMulti};
  * e ela manteria a sessao aberta enquanto o Pacote inteiro trafega — segurar conexao de banco
- * durante 1,5 GB de streaming e desperdicio. {@code Panache.withSession} e reentrante, entao
- * conviver com o {@code @WithTransaction} do envio e seguro.
+ * durante 1,5 GB de streaming e desperdicio. Cada escrita abre a propria transacao: em
+ * particular, {@link #adicionar(Video)} so confirma depois do commit, antes que o caminho de
+ * envio publique {@code ExtrairVideo} (ticket 040).
  */
 @ApplicationScoped
 public class VideoDataSourceAdapter implements VideoGateway {
 
     @Override
     public CompletableFuture<Void> adicionar(Video video) {
-        return paraEntity(video).persist()
+        return Panache.withTransaction(() -> paraEntity(video).persist())
                 .replaceWithVoid()
                 .subscribeAsCompletionStage();
     }

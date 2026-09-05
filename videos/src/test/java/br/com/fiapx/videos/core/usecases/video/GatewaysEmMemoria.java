@@ -189,12 +189,22 @@ final class GatewaysEmMemoria {
         final List<UUID> idsEnviados = new ArrayList<>();
         String ultimaChaveVideo;
         String ultimaChaveDestinoPacote;
+        private RuntimeException falhaNoProximoEnvio;
+
+        void falharNoProximoEnvio(RuntimeException falha) {
+            falhaNoProximoEnvio = falha;
+        }
 
         @Override
         public CompletableFuture<Void> enviarExtrairVideo(UUID idVideo, String chaveVideo, String chaveDestinoPacote) {
             idsEnviados.add(idVideo);
             ultimaChaveVideo = chaveVideo;
             ultimaChaveDestinoPacote = chaveDestinoPacote;
+            if (falhaNoProximoEnvio != null) {
+                var falha = falhaNoProximoEnvio;
+                falhaNoProximoEnvio = null;
+                return CompletableFuture.failedFuture(falha);
+            }
             return CompletableFuture.completedFuture(null);
         }
     }

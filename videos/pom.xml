@@ -65,6 +65,14 @@
             <artifactId>netty-nio-client</artifactId>
         </dependency>
 
+        <!-- @Retry no adapter de I/O do MinIO (ADR 0001). A borda sincrona nao tem fila
+             quorum atras dela: se o blip nao for absorvido aqui, ele vira 500 no cliente
+             (ticket 048). -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-fault-tolerance</artifactId>
+        </dependency>
+
         <!-- Token real, assinatura real, `sub` real na borda: @TestSecurity fabrica
              identidade e nao cobre o fluxo do Keycloak (ticket 004). -->
         <dependency>

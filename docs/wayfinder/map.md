@@ -511,6 +511,18 @@ verificadas por teste, não são sugestão). Projeto original em
   envio publica `recebidoEm` com nanossegundos e o `GET` publica o mesmo campo truncado em
   microssegundos pelo Postgres.
 
+- [A borda também absorve o blip do armazenamento](tickets/048-retry-no-acesso-ao-minio-pela-borda.md)
+  — o ADR 0001 dizia que o `@Retry` no adapter cobre os blips de I/O contra o MinIO, e só os
+  dois workers cumpriam. Implementado em vez de excetuado: atrás da borda síncrona não há fila
+  quorum para reentregar, então o blip que ela não absorve já virou `500` no cliente. O acesso
+  ao MinIO do `videos` ganhou o mesmo par de beans do `extracao` — `ArquivoMinioClient` com o
+  `@Retry`, `ArquivoMinioAdapter` com bucket e convenção de chave. Diferença do worker: o
+  `NoSuchKeyException` vira `Optional.empty()` **dentro** do método anotado, para a chave
+  ausente continuar `410` imediato em vez de gastar três tentativas. Quatro cenários pela
+  borda cobram os dois caminhos síncronos vezes os dois desfechos: com o blip, o envio responde
+  `202` e o download entrega o Pacote inteiro; com o armazenamento sempre fora, os dois
+  respondem `500`, com o corpo `problem+json` que o contrato prevê.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -598,18 +610,14 @@ verificadas por teste, não são sugestão). Projeto original em
      revisão de dois eixos sobre `3a3ec95...b4672ff` — o intervalo inteiro do projeto, do
      ticket 002 ao 047. O eixo Standards julgou o código contra o `AGENTS.md`, os contratos,
      os ADRs e o baseline de smells; o eixo Spec julgou-o contra `docs/enunciado.md` e os
-     próprios tickets. Os oito abaixo saem daí, e a ordem entre eles é a ordem do risco: os
-     dois P1 são requisito do enunciado não exercido e ADR desmentido pelo código; os dois P2
+     próprios tickets. Oito tickets saíram daí, e a ordem entre eles é a ordem do risco: os
+     dois P1 eram requisito do enunciado não exercido e ADR desmentido pelo código; os dois P2
      são janela de reconciliação assimétrica e vocabulário ambíguo atravessando fronteira; os
-     quatro P3 são manutenção e registro. Só o 053 é bloqueado (pelo 052) — os outros sete
-     estão na fronteira. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
+     quatro P3 são manutenção e registro. O 048 já fechou (ver Decisões até aqui). Dos sete
+     abaixo, só o 053 é bloqueado (pelo 052) — os outros seis estão na fronteira. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
      passaria verde, mas o próprio 045 já registra isso como escolha barata deliberada, e
      reabrir seria refazer decisão registrada. -->
 
-- **[048](tickets/048-retry-no-acesso-ao-minio-pela-borda.md) — o `videos` não tem `@Retry`.**
-  O ADR 0001 justifica a política de falhas dizendo que o `@Retry` no adapter cobre os blips de
-  I/O; os dois workers cumprem, o `videos` nem declara a extensão. Ou o adapter ganha a
-  proteção, ou o ADR declara a borda síncrona como exceção. P1.
 - **[049](tickets/049-compose-da-demo-processa-em-paralelo.md) — a stack da demo processa um
   vídeo por vez.** O primeiro requisito funcional do enunciado é processar mais de um ao mesmo
   tempo; a concorrência só existe no overlay de carga. A arquitetura permite, a entrega não

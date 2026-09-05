@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class ProcessarExtracaoConcluidaUseCaseTest {
 
@@ -54,6 +56,24 @@ class ProcessarExtracaoConcluidaUseCaseTest {
 
         assertEquals(EstadoVideo.CONCLUIDO, recemRecebido.estado());
         assertEquals(recemRecebido.id() + ".zip", recemRecebido.chavePacote());
+    }
+
+    @Test
+    void compareAndSwapQuePerdeACorridaNaoGravaOPacote() {
+        // A ExtracaoFalhou venceu a corrida entre o SELECT e o UPDATE desta: o Video lido
+        // ainda diz PROCESSANDO, entao so o UPDATE condicional reprova. A linha continua
+        // FALHOU, e sem chave de Pacote — entre terminais, o primeiro vence (ADR 0002).
+        videos.outraEntregaVenceACorridaPara(video.id(), EstadoVideo.FALHOU);
+
+        useCase.executar(new ProcessarExtracaoConcluidaUseCase.Command(
+                video.id(), Instant.now(), video.id() + ".zip", 1_200, 4_096L)).join();
+
+        var linha = videos.armazenados.get(video.id());
+        assertEquals(EstadoVideo.FALHOU, linha.estado());
+        assertNull(linha.chavePacote());
+        // E a guarda diz nao: o use case descarta o booleano, entao a linha parada sozinha
+        // nao distingue um UPDATE que reprovou de um que mentiu.
+        assertFalse(videos.marcarConcluida(video.id(), Instant.now(), video.id() + ".zip", 1_200, 4_096L).join());
     }
 
     @Test

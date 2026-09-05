@@ -8,13 +8,13 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Consumidor de {@code ExtracaoFalhou}: PROCESSANDO -> FALHOU, e a guarda de unicidade do
- * e-mail mora aqui (ADR 0001). {@code marcarFalha} so devolve o Vídeo preenchido quando
- * <b>esta</b> chamada de fato tirou a linha de PROCESSANDO — reentregas do mesmo evento
- * (o contrato nao garante ordem, e {@code x-delivery-limit} conta entregas) encontram o
- * Optional vazio e nao publicam nada. Tres entregas do mesmo evento produzem, portanto,
- * exatamente um {@code VideoFalhou}. O publish em si e {@link PublicarVideoFalhou}, o mesmo
- * caminho que a reconciliacao usa.
+ * Consumidor de {@code ExtracaoFalhou}: RECEBIDO/PROCESSANDO -> FALHOU (ADR 0002), e a guarda
+ * de unicidade do e-mail mora aqui (ADR 0001). {@code marcarFalha} so devolve {@code true}
+ * quando <b>esta</b> chamada de fato tirou a linha de um desses dois predecessores —
+ * reentregas do mesmo evento (o contrato nao garante ordem, e {@code x-delivery-limit} conta
+ * entregas) recebem {@code false} e nao publicam nada. Tres entregas do mesmo evento produzem,
+ * portanto, exatamente um {@code VideoFalhou}. O publish em si e {@link PublicarVideoFalhou},
+ * o mesmo caminho que a reconciliacao usa.
  */
 public class ProcessarExtracaoFalhouUseCase {
 

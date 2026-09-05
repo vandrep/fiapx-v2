@@ -541,6 +541,14 @@ verificadas por teste, não são sugestão). Projeto original em
   (limite 240s). A garantia do 029 permanece pendente de diagnóstico; o 038 resolve o boot
   e permite ao harness julgar os três critérios de verdade.
 
+- **[039](tickets/039-dubles-de-transicao-nao-guardam.md) — o dublê de `VideoGateway` volta a
+  guardar.** As três guardas em memória aplicam a transição do domínio à linha armazenada, e
+  `buscarPorId` devolve cópia: sem ela o use case movia o próprio objeto do mapa e a guarda
+  chegava sem nada para julgar. O flag `proximaTransicaoMudaLinha` saiu; a corrida perdida se
+  arma por id, no instante da leitura. As três transições ganharam teste de corrida — antes só
+  `falha` tinha, e nenhum reprovava. A unicidade do e-mail do ADR 0001 volta a ser provada
+  pela suíte unitária.
+
 
 <!-- Recusadas nesta rodada, com o motivo, para a recusa não virar esquecimento: **banco no
      `extracao`** (tentativa como entidade durável) — reverte o `AGENTS.md`, e o Dono lê o estado

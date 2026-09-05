@@ -2,7 +2,7 @@
 
 - id: 038
 - label: wayfinder:bug
-- status: aberto
+- status: resolvido
 - assignee:
 - bloqueado-por:
 
@@ -66,3 +66,43 @@ variáveis, e a presença delas é o defeito. Consertá-lo exige escolher um cam
 
 `scripts/carga/conservacao.sh mata-publicacao` sobe o stack e chega ao veredito, com os três
 critérios que ele imprime antes de rodar julgados de verdade — pela primeira vez.
+
+## Solução
+
+O canal conserva o nome `extracao-falhou`. As duas propriedades de exchange passam a
+resolver expressões com variáveis próprias `FIAPX_EXTRACAO_FALHOU_EXCHANGE_NAME` e
+`FIAPX_EXTRACAO_FALHOU_EXCHANGE_DECLARE`, com defaults `fiapx.eventos` e `true`.
+O overlay e o harness usam essas variáveis: a enumeração não acrescenta propriedades sob
+`mp.messaging`, então não inventa um canal `extracao`. Isso dispensa renomear o canal ou
+sobrescrever o entrypoint da imagem.
+
+Overrides diretos `MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_*` continuam sujeitos à ambiguidade
+do SmallRye; o caminho suportado para estas duas propriedades é o par `FIAPX_*` acima.
+
+## Validação
+
+- Reprodução antes da correção: `docker compose run --rm --no-deps` com as duas variáveis
+  antigas e valores default encerrou com código 1 e `SRMSG00071`, canal `extracao` sem
+  `connector` (`/tmp/038-antes.log`).
+- Build dos serviços: `./mvnw package -DskipTests` no devcontainer e reconstrução local da
+  imagem `extracao`.
+- Suíte completa na raiz: `./mvnw test -Dquarkus.http.test-port=0` no devcontainer;
+  392 testes (105 videos, 263 extracao, 24 notificacao), zero falhas/erros/skips.
+- `scripts/smoke.sh` aprovado após restaurar o Compose normal: processamento, download,
+  falha com notificação e isolamento por dono. Log em `/tmp/038-smoke.log`.
+- A regressão é exercitada pelo próprio harness no Compose: um profile com overrides
+  diretos de propriedades não reproduz a enumeração de variáveis de ambiente deste bug.
+- Aceite executado com `COMPOSE_PROJECT_NAME=fiapx-v2 FIAPX_ROTULO=038-mata-publicacao
+  scripts/carga/conservacao.sh mata-publicacao`: quatro réplicas do extracao, seis containers
+  saudáveis, três envios. O harness chegou ao veredito e encerrou com código 1:
+  - Critério 1 aprovado: três HTTP 202, zero recusas.
+  - Critério 2 aprovado: três de três Vídeos em `PROCESSANDO`, nenhum terminal ou ausente.
+  - Critério 3 reprovado: zero mensagens novas no estacionamento em 241s, base zero,
+    limite original de 240s mantido.
+  Log em `/tmp/038-carga.log`; censo e IDs em `scripts/carga/saida/038-mata-publicacao/`.
+
+O aceite deste ticket é chegar ao veredito com os três critérios julgados, não obter três
+aprovações. O boot está corrigido; a garantia de estacionamento do 029 **não foi confirmada**
+no prazo do harness e permanece pendente de diagnóstico. A medição não distingue atraso,
+circulação ou perda; não se atribui causa sem investigar. Logs do extracao foram capturados
+antes de restaurar o stack em `/tmp/038-extracao-final.log`.

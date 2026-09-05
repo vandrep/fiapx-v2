@@ -533,13 +533,13 @@ verificadas por teste, não são sugestão). Projeto original em
   4s; antes da correção, a mesma carga gastou uma reentrega. Cancelamento e espera dividem
   os 420s do dreno, abaixo dos 480s do Docker. SIGKILL e falhas de rede continuam fora.
 
-- **[038](tickets/038-override-de-canal-por-variavel-quebra-o-boot.md) — override de canal por
-  variável de ambiente derruba o boot do `extracao`.** A presença de
-  `MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_*`, com os valores default inclusive, mata o serviço
-  em `SRMSG00071`: o traço de `extracao-falhou` não sobrevive à conversão, e o SmallRye deduz
-  da enumeração um canal `extracao` sem `connector`. Achado no 035, que precisava do harness de
-  carga de pé. Desbloqueado o suficiente para os outros quatro modos (forma de lista no
-  overlay); o `mata-publicacao` continua sem nunca ter rodado contra o Compose.
+- **[038](tickets/038-override-de-canal-por-variavel-quebra-o-boot.md) — boot corrigido e
+  `mata-publicacao` medido.** Overrides por variáveis próprias `FIAPX_*`, resolvidas no
+  `.properties`, preservam `extracao-falhou` sem inventar canal na enumeração do SmallRye.
+  Quatro réplicas subiram; três envios aceitos e três Vídeos em `PROCESSANDO`: critérios
+  1 e 2 aprovados. Critério 3 reprovado: zero mensagens novas no estacionamento em 241s
+  (limite 240s). A garantia do 029 permanece pendente de diagnóstico; o 038 resolve o boot
+  e permite ao harness julgar os três critérios de verdade.
 
 
 <!-- Recusadas nesta rodada, com o motivo, para a recusa não virar esquecimento: **banco no

@@ -23,24 +23,11 @@ services:
       # para apontar a uma exchange inexistente sem declara-la, forcando a falha de
       # publicacao que aquele modo mede.
       #
-      # Forma de LISTA, e nao de mapa com default (ticket 035): no mapa, as duas chaves
-      # existiam sempre, e a mera presenca delas derruba o boot do `extracao` — com os
-      # valores default, iguais aos do application.properties, inclusive:
-      #
-      #   SRMSG00071: Invalid channel configuration - the `connector` attribute must be set
-      #   for channel `extracao`
-      #
-      # O traco de `extracao-falhou` nao sobrevive a conversao para variavel de ambiente:
-      # ao enumerar os nomes de propriedade, o SmallRye le
-      # `mp.messaging.outgoing.extracao.falhou.exchange.name` e deduz dali um canal chamado
-      # `extracao`, que nao existe e nao tem `connector`. A busca por nome funciona; a
-      # enumeracao e que nao. Na forma de lista o Compose so passa a variavel se ela existir
-      # no ambiente do harness, entao os modos que nao precisam dela sobem limpos.
-      #
-      # Isso NAO conserta o `mata-publicacao`, que precisa das duas: aquele modo esbarra no
-      # mesmo boot quebrado, agora com a causa conhecida — ticket 038.
-      - MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_EXCHANGE_NAME
-      - MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_EXCHANGE_DECLARE
+      # Variaveis proprias, resolvidas pelo application.properties (ticket 038):
+      # MP_MESSAGING_* transforma extracao-falhou em extracao.falhou na enumeracao
+      # e inventa um canal extracao sem connector, derrubando o boot.
+      - FIAPX_EXTRACAO_FALHOU_EXCHANGE_NAME
+      - FIAPX_EXTRACAO_FALHOU_EXCHANGE_DECLARE
     deploy:
       replicas: ${FIAPX_EXTRACAO_REPLICAS:-4}
       resources:

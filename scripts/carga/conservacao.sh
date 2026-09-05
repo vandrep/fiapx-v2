@@ -157,9 +157,9 @@ if [[ "$modo" == mata-publicacao ]]; then
     # para que toda publicacao de ExtracaoFalhou falhe e force o caminho ate o estacionamento.
     # Exportadas com o nome que o container le, e so neste modo: na forma de lista do
     # docker-compose.carga.yml, variavel ausente aqui e variavel ausente la — que e o que os
-    # outros modos precisam para o `extracao` subir (ticket 035).
-    export MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_EXCHANGE_NAME="extracao.eventos.inexistente"
-    export MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_EXCHANGE_DECLARE="false"
+    # outros modos precisam para usar os defaults do application.properties (ticket 038).
+    export FIAPX_EXTRACAO_FALHOU_EXCHANGE_NAME="extracao.eventos.inexistente"
+    export FIAPX_EXTRACAO_FALHOU_EXCHANGE_DECLARE="false"
 fi
 
 "${compose[@]}" up -d > "$saida/compose.log" 2>&1 \

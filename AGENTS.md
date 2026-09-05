@@ -113,8 +113,9 @@ ou revisão manual. Como cada cópia do teste roda com o CWD no seu módulo, a r
 `notificacao`, que hoje não publica: ela protege o serviço, não o canal que existe.
 
 O limite conhecido dela: a regra lê `application.properties`, então canal ou override que
-chegue por variável de ambiente (`MP_MESSAGING_OUTGOING_*`, como o overlay de carga faz em
-`docker-compose.carga.yml`) passa por fora. Overrides de Compose são deliberados e revisados
+chegue por variável de ambiente (`MP_MESSAGING_OUTGOING_*`) passa por fora. O overlay de
+carga usa variáveis próprias `FIAPX_*`, referenciadas no `.properties`, para evitar a ambiguidade dos nomes
+de canal com traço (ticket 038). Overrides de Compose são deliberados e revisados
 junto do arquivo que os declara; o defeito que este teste persegue é o canal esquecido no
 `.properties`.
 

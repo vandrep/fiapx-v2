@@ -585,6 +585,14 @@ verificadas por teste, não são sugestão). Projeto original em
   `extracao` são serviços diferentes sem módulo compartilhado, e o vocabulário do `videos` é
   sobre o Vídeo que concluiu, não sobre a Extração em si — não havia disputa de fato.
 
+- [A forma comum aos três use cases de evento mora em `TransicaoDeVideo`](tickets/053-unificar-a-forma-dos-use-cases-de-extracao.md)
+  — classe utilitária em `core/usecases/video`, sem sufixo `UseCase.java` (mesmo padrão de
+  `PublicarVideoFalhou`): busca o Video, aplica a transição da entidade, curto-circuita
+  quando ela recusa ou o Video não existe, grava, e roda um efeito posterior opcional. Só
+  `ProcessarExtracaoFalhouUseCase` usa o efeito posterior, para publicar `VideoFalhou`; os
+  outros dois passam um no-op. A decisão de transição continua na entidade (ADR 0002); nada
+  mudou no que cada evento aceita ou recusa.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -680,9 +688,6 @@ verificadas por teste, não são sugestão). Projeto original em
      passaria verde, mas o próprio 045 já registra isso como escolha barata deliberada, e
      reabrir seria refazer decisão registrada. -->
 
-- **[053](tickets/053-unificar-a-forma-dos-use-cases-de-extracao.md) — os três use cases de
-  evento repetem a mesma forma.** Busca, decide na entidade, curto-circuita, grava. O 052
-  fechou; as assinaturas que ele reescreveu estão estáveis. P3.
 - **[054](tickets/054-nomes-qualificados-inline.md) — nomes qualificados inline.** O recurso
   HTTP do `videos` e o adapter de espaço de trabalho do `extracao` escrevem tipo e anotação por
   extenso no meio de arquivos que importam normalmente. Cosmético. P3.

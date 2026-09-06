@@ -2,8 +2,8 @@
 
 - id: 053
 - label: wayfinder:task
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: andrepinedacunha@gmail.com
 - bloqueado-por: 052
 - prioridade: P3
 
@@ -35,3 +35,24 @@ evento repetido continua idempotente.
 
 Bloqueado pelo ticket 052: os dois reescrevem as mesmas assinaturas do caminho da conclusão,
 e fazer o 053 antes obrigaria a refazer a forma comum logo depois.
+
+## Resolução
+
+A forma comum passou a existir em `TransicaoDeVideo` (core/usecases/video, sem sufixo
+`UseCase.java`, mesmo padrão de `PublicarVideoFalhou`): busca o Video por id, aplica a
+transição (`Predicate<Video>` que chama o método da entidade), curto-circuita quando o
+Video não existe ou a entidade recusa, grava (`Function<Video, CompletableFuture<Boolean>>`)
+e roda um efeito posterior opcional (`BiFunction<Video, Boolean, CompletableFuture<Void>>`) —
+só `ProcessarExtracaoFalhouUseCase` usa o efeito posterior, para publicar `VideoFalhou`
+quando `mudou` é verdadeiro; os outros dois passam `TransicaoDeVideo::semEfeitoPosterior`.
+
+A decisão de transição continua inteiramente na entidade `Video` (ADR 0002); a classe nova
+não a move, só evita repetir o encadeamento de `CompletableFuture` em volta dela. Os três
+use cases mantiveram a assinatura pública e o record `Command` interno, o que o teste
+arquitetural `useCasesDevemUsarMetodoExecutarECompletableFuture` exige.
+
+Suíte completa (`./mvnw test` na raiz, com Docker de pé e `ffmpeg`/`ffprobe` no `PATH`):
+319 testes, 0 falhas, nos três serviços — incluindo os testes específicos dos três use cases
+e o `ArchitectureConstraintsTest` das três cópias. Nenhuma transição aceita ou recusada
+mudou; os testes existentes de corrida (compare-and-swap perdido), reentrega fora de ordem e
+guarda de unicidade do e-mail passaram sem alteração de asserção.

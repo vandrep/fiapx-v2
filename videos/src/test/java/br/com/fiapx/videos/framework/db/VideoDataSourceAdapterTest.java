@@ -132,6 +132,16 @@ class VideoDataSourceAdapterTest {
 
     @Test
     @RunOnVertxContext
+    void adicionarMesmoVideoNovamenteNaoCriaOutraLinha(UniAsserter asserter) {
+        var video = Video.novo("idempotente.mp4", 1_024L, DONO).armazenadoEm("chave/idempotente.mp4");
+
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.adicionar(video)));
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.adicionar(video)));
+        asserter.assertThat(() -> linhasDoVideo(video.id()), linhas -> assertEquals(1L, linhas));
+    }
+
+    @Test
+    @RunOnVertxContext
     void concluirDiretoDeRecebidoMudaALinha(UniAsserter asserter) {
         var id = new UUID[1];
         gravarRecebido(asserter, id);
@@ -370,5 +380,12 @@ class VideoDataSourceAdapterTest {
     private Uni<EstadoVideo> estadoDe(UUID id) {
         return Panache.withSession(
                 () -> VideoEntity.<VideoEntity>findById(id).map(entidade -> entidade.estado));
+    }
+
+    private Uni<Long> linhasDoVideo(UUID id) {
+        return pool.withConnection(conexao -> conexao
+                .preparedQuery("select count(*) from video where id = $1")
+                .execute(Tuple.of(id))
+                .map(linhas -> linhas.iterator().next().getLong(0)));
     }
 }

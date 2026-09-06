@@ -22,6 +22,28 @@
 # no `videos` dele `deploy.replicas` nunca aparece (nasce implicitamente em 1). O `extracao`
 # escala na demo sem essa complicacao justamente por nao publicar porta nenhuma.
 services:
+  # A observabilidade sai do experimento (ticket 058). E a mesma logica do cabecalho deste
+  # arquivo, invertida: se a demo nao deve carregar o instrumento para sempre, o experimento
+  # tambem nao deve carregar a demo.
+  #
+  # O motivo nao e purismo. Os numeros que o mapa registra — 15,6 Video/min, eficiencia 0,88 e
+  # 0,99, mediana do 202, 0 presos em 400 — foram medidos SEM esta stack, e o que eles medem e
+  # escalabilidade limitada por CPU, com teto de CPU por replica justamente para isolar o
+  # desenho do host. Um coletor disputando o mesmo host mede outra coisa, e as quatro medicoes
+  # dos tickets 025-028 deixariam de ser comparaveis com qualquer corrida futura.
+  #
+  # `replicas: 0` e nao `profiles`: com replicas zero, uma stack que ja estava de pe e reduzida
+  # a zero pelo `up` do overlay. Com profile, um container ja rodando continuaria rodando — e a
+  # garantia que este bloco precisa dar e sobre a corrida, nao sobre a intencao.
+  #
+  # O preco disto e uma configuracao medida que nao e a configuracao entregue, e ele esta
+  # registrado em `docs/arquitetura.md` § Limitacoes conhecidas. O que fecha o buraco e o
+  # numero de sobrecarga medido uma vez sobre o fixture de controle, no ticket 058, em vez de
+  # varrer N de novo.
+  observabilidade:
+    deploy:
+      replicas: 0
+
   extracao:
     environment:
       # Ticket 029, modo `mata-publicacao`: sobrescreve o canal de saida `extracao-falhou`

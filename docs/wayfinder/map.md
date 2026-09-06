@@ -10,6 +10,14 @@ assíncrono resiliente, listagem de status por usuário, download do ZIP e notif
 erro — acompanhado da documentação de arquitetura, do script de banco, do repositório no
 GitHub com CI/CD e do roteiro do vídeo de até 10 minutos.
 
+**Destino redesenhado em 06/09/2026**: soma-se ao acima uma **camada de observabilidade** —
+log, métrica e trace coletados e correlacionáveis por `idVideo`, com alertas sobre as filas.
+O monitoramento estava em *Fora de escopo* desde a cartografia, recusado porque canibalizaria
+o tempo do CI/CD, que é requisito. A premissa expirou: o CI/CD está entregue (ticket 013), a
+fronteira ficou vazia e restam 23 dias. Pela regra do wayfinder, trabalho fora de escopo não
+gradua — ele só volta se o destino for redesenhado, e então como esforço novo. É o que esta
+linha faz. O que **não** entra continua fora: painel curado e canal de notificação de alerta.
+
 Este mapa carrega **decisões e execução**: as decisões de arquitetura vêm primeiro, e os
 tickets de implementação graduam da névoa conforme cada decisão fecha.
 
@@ -611,6 +619,19 @@ verificadas por teste, não são sugestão). Projeto original em
   comentário dentro do próprio CSS já explicava o "porquê" para quem lê código, mas
   ninguém que só abre o repositório ou assiste ao vídeo passa por `META-INF/branding/`.
 
+- [O piso de observabilidade entrou, medido](tickets/058-piso-de-observabilidade.md)
+  — primeiro ticket do destino redesenhado de 06/09/2026. `grafana/otel-lgtm:0.32.1` num
+  container só, no Compose principal, fora do caminho de boot e sem volume. **Custa 365 MiB
+  de RAM** (5.814 → 7.857 → 8.222 MiB, host ocioso → demo → demo com a stack) e +23 s no `up`;
+  o custo que pesa é disco, 3,6 GB de imagem. A sobrecarga sobre o fixture de controle **não
+  se distingue do ruído** (7/6/7 s contra 6/7/6 s) — mas isso mede só competição por recurso,
+  porque os serviços ainda não exportam nada; o custo da instrumentação é do 059. As métricas
+  de fila vêm do `rabbitmq_prometheus`, que já estava habilitado, em `/metrics/detailed` (o
+  `/metrics` padrão é agregado e não tem rótulo de fila). Os três alertas avaliam, e o de
+  **fila com mensagem e zero consumidores** foi validado reproduzindo o incidente de 06/09.
+  O overlay de carga desliga a stack com `replicas: 0`, preservando o método dos tickets
+  025–028. Sem canal de notificação: os alertas existem, **a detecção não mudou**.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -710,9 +731,17 @@ verificadas por teste, não são sugestão). Projeto original em
 
 <!-- ruled beyond the destination; nunca gradua -->
 
-- **Prometheus + Grafana com dashboards** — o enunciado lista monitoramento como stack
-  *recomendada*, não como requisito técnico obrigatório. Com 5,5 semanas solo, é o
-  primeiro candidato a canibalizar o tempo do CI/CD. Health checks continuam dentro.
+- **Painel curado e canal de notificação de alerta** — o que resta fora depois do redesenho
+  de destino de 06/09/2026. A recusa original era mais larga: *"Prometheus + Grafana com
+  dashboards — o enunciado lista monitoramento como stack recomendada, não como requisito
+  técnico obrigatório. Com 5,5 semanas solo, é o primeiro candidato a canibalizar o tempo do
+  CI/CD. Health checks continuam dentro."* Ela valeu enquanto o CI/CD era risco; entregue o
+  CI/CD e esvaziada a fronteira, a coleta dos três sinais entrou (tickets 058–060). Ficaram
+  de fora as duas partes que continuam custando sem pagar nesta entrega: **painel curado**
+  (a exploração ad-hoc responde as mesmas perguntas sem manutenção) e **canal de notificação
+  de alerta** (os alertas existem e guardam histórico; entregá-los por e-mail é configuração
+  de *contact point*, adiada conscientemente — a detecção não muda, e isso está registrado
+  em Limitações conhecidas).
 - **Manifests Kubernetes** — o enunciado aceita "Docker Compose **ou** Kubernetes";
   Compose garante a demo.
 - **Interface web** — o projeto original tinha HTML embutido; a demo será por Swagger UI e

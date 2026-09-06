@@ -102,6 +102,13 @@ Quanto isso rende foi medido até 6 réplicas (eficiência de escala 0,88; 15,6 
 | RabbitMQ | http://localhost:15672 | `fiapx` / `fiapx` |
 | MinIO | http://localhost:9001 | `minioadmin` / `minioadmin` |
 | MailHog | http://localhost:8025 | — |
+| Grafana (observabilidade) | http://localhost:3000 | — (acesso anônimo) |
+
+O Grafana traz log, métrica e trace dos três serviços, correlacionados pelo `idVideo`, e três
+alertas sobre as filas — Estacionamento não-vazio, DLQ do `extracao` com mensagem, e fila com
+mensagem e zero consumidores. **Não há painel montado**: a exploração é pelo *Explore*, e os
+alertas não têm canal de notificação, então só são vistos por quem abre a tela. A retenção é
+efêmera: o histórico morre no `docker compose down`.
 
 Para derrubar preservando os dados: `docker compose down`. O próximo `docker compose up -d`
 reutiliza os volumes do mesmo projeto Compose: banco, buckets, uploads, mensagens do

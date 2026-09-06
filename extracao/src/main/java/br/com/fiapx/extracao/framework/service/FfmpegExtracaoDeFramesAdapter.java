@@ -6,9 +6,12 @@ import br.com.fiapx.extracao.core.entities.ResultadoExtracao;
 import br.com.fiapx.extracao.core.exceptions.FalhaPermanenteDeExtracaoException;
 import br.com.fiapx.extracao.core.exceptions.FalhaTransitoriaDeExtracaoException;
 import br.com.fiapx.extracao.core.interfaces.gateway.ExtracaoDeFramesGateway;
+import br.com.fiapx.extracao.framework.observabilidade.DuracaoDaExtracao;
+import br.com.fiapx.extracao.framework.observabilidade.Rastro;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.infrastructure.Infrastructure;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -36,11 +39,21 @@ import java.util.zip.ZipOutputStream;
  * nao no thread que chama {@link #processar}: quem chama pode ser o thread do SDK da AWS que
  * completou o download do MinIO, nao a event loop nem o worker pool do {@code @Blocking} do
  * consumidor — o adapter nao pode confiar no contexto de quem o invoca.
+ *
+ * <p>E aqui, e so aqui, que a {@link DuracaoDaExtracao} e cronometrada (ticket 059): o span
+ * cobre o pipeline inteiro, e a metrica mede o mesmo intervalo. Este e o trecho que nenhuma
+ * auto-instrumentacao alcanca — do lado de fora do JVM, o {@code ffmpeg} e um buraco no rastro.
  */
 @ApplicationScoped
 public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
 
     private static final Logger LOG = Logger.getLogger(FfmpegExtracaoDeFramesAdapter.class);
+
+    @Inject
+    Rastro rastro;
+
+    @Inject
+    DuracaoDaExtracao duracaoDaExtracao;
 
     @ConfigProperty(name = "fiapx.extracao.timeout-ffprobe-segundos", defaultValue = "30")
     long timeoutFfprobeSegundos;
@@ -51,9 +64,28 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
     @Override
     public CompletableFuture<ResultadoExtracao> processar(Path video, Path diretorioDeTrabalho,
                                                            Path destinoZip, Duration tetoDuracao) {
-        return Uni.createFrom().item(() -> processarBloqueante(video, diretorioDeTrabalho, destinoZip, tetoDuracao))
+        return rastro.emTorno("extracao.frames", () -> Uni.createFrom()
+                .item(() -> processarCronometrado(video, diretorioDeTrabalho, destinoZip, tetoDuracao))
                 .runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
-                .subscribeAsCompletionStage();
+                .subscribeAsCompletionStage());
+    }
+
+    /**
+     * Cronometra a tentativa inteira, desfecho qualquer. O {@code finally} e o ponto: uma
+     * Extracao que estoura o teto de {@code ffmpeg} ou morre no ffprobe e justamente a que mais
+     * interessa medir, e ela sai por excecao.
+     */
+    private ResultadoExtracao processarCronometrado(Path video, Path diretorioDeTrabalho, Path destinoZip,
+                                                     Duration tetoDuracao) {
+        var comeco = System.nanoTime();
+        var concluiu = false;
+        try {
+            var resultado = processarBloqueante(video, diretorioDeTrabalho, destinoZip, tetoDuracao);
+            concluiu = true;
+            return resultado;
+        } finally {
+            duracaoDaExtracao.registrar(Duration.ofNanos(System.nanoTime() - comeco), concluiu);
+        }
     }
 
     private ResultadoExtracao processarBloqueante(Path video, Path diretorioDeTrabalho, Path destinoZip,

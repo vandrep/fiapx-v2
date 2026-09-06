@@ -2,6 +2,9 @@ package br.com.fiapx.extracao.framework.service;
 
 import br.com.fiapx.extracao.core.entities.MotivoFalha;
 import br.com.fiapx.extracao.core.exceptions.FalhaPermanenteDeExtracaoException;
+import br.com.fiapx.extracao.framework.observabilidade.DuracaoDaExtracao;
+import br.com.fiapx.extracao.framework.observabilidade.Rastro;
+import io.opentelemetry.api.OpenTelemetry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,6 +34,11 @@ class SondagemSemFluxoDeVideoTest {
         var adapter = new FfmpegExtracaoDeFramesAdapter();
         adapter.timeoutFfprobeSegundos = 30;
         adapter.timeoutFfmpegSegundos = 300;
+        // No-op nos dois: o que este teste julga e a classificacao da falha, nao span nem
+        // histograma. Com o SDK ausente o Rastro devolve a cadeia crua e a metrica cai no vazio,
+        // entao o caminho exercitado e o mesmo de producao.
+        adapter.rastro = new Rastro(OpenTelemetry.noop().getTracer("teste"));
+        adapter.duracaoDaExtracao = new DuracaoDaExtracao(OpenTelemetry.noop().getMeter("teste"));
 
         var audio = scratch.resolve("somente-audio.wav");
         try (var recurso = getClass().getResourceAsStream("/fixtures/somente-audio.wav")) {

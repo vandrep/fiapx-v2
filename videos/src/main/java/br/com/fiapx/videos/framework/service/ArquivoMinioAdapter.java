@@ -2,6 +2,7 @@ package br.com.fiapx.videos.framework.service;
 
 import br.com.fiapx.videos.core.entities.FormatoDoArquivo;
 import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
+import br.com.fiapx.videos.framework.observabilidade.Rastro;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Context;
 import io.vertx.core.Vertx;
@@ -30,12 +31,20 @@ import java.util.concurrent.Flow;
  * <p>A ida ao MinIO em si vive em {@link ArquivoMinioClient}, com o {@code @Retry} do
  * ADR 0001 — separado porque {@code @Retry} exige {@code CompletionStage} e nao dispara em
  * chamada de dentro do proprio bean (ver javadoc la, ticket 048).
+ *
+ * <p>As duas idas ao MinIO ganham span (ticket 059): a extensao da AWS traz a instrumentacao do
+ * SDK, mas nenhum span de S3 chegou ao Tempo num ciclo completo de Video, e sem estes dois o
+ * upload de um Video de 200 MB era um vao mudo dentro do span do POST. O span cobre a operacao
+ * inteira, retentativas do {@code @Retry} incluidas — que e o que interessa a quem investiga.
  */
 @ApplicationScoped
 public class ArquivoMinioAdapter implements ArquivoGateway {
 
     @Inject
     ArquivoMinioClient minioClient;
+
+    @Inject
+    Rastro rastro;
 
     @ConfigProperty(name = "fiapx.armazenamento.bucket-videos")
     String bucketVideos;
@@ -46,9 +55,9 @@ public class ArquivoMinioAdapter implements ArquivoGateway {
     @Override
     public CompletableFuture<String> gravarVideo(UUID idVideo, String nome, Path arquivo) {
         var chave = chaveDoVideo(idVideo, nome);
-        return noContextoDeChamada(Uni.createFrom()
+        return rastro.emTorno("videos.gravar-video", () -> noContextoDeChamada(Uni.createFrom()
                 .completionStage(() -> minioClient.gravar(bucketVideos, chave, arquivo))
-                .replaceWith(chave));
+                .replaceWith(chave)));
     }
 
     @Override
@@ -58,8 +67,8 @@ public class ArquivoMinioAdapter implements ArquivoGateway {
 
     @Override
     public CompletableFuture<Optional<Flow.Publisher<ByteBuffer>>> abrirPacote(String chavePacote) {
-        return noContextoDeChamada(Uni.createFrom()
-                .completionStage(() -> minioClient.abrirSeExistir(bucketPacotes, chavePacote)));
+        return rastro.emTorno("videos.abrir-pacote", () -> noContextoDeChamada(Uni.createFrom()
+                .completionStage(() -> minioClient.abrirSeExistir(bucketPacotes, chavePacote))));
     }
 
     /**

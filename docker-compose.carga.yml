@@ -44,6 +44,16 @@ services:
     deploy:
       replicas: 0
 
+  # O SDK dos tres servicos desligado, pelo mesmo motivo e no mesmo movimento (ticket 059).
+  # Desligar so a stack deixaria os tres exportando para um endereco morto: cada um pagaria o
+  # custo de instrumentar — span, histograma, batch de log — e ainda o de um exportador
+  # tentando e falhando durante a rajada inteira. O que o overlay preserva e o metodo das
+  # medicoes dos tickets 025-028, e elas foram feitas com codigo que nao instrumentava nada.
+  #
+  # `QUARKUS_OTEL_SDK_DISABLED`, e nao um override de canal ou de perfil: e a chave que o
+  # proprio Quarkus expoe para "nao instrumente", e ela desliga os tres sinais de uma vez.
+  # Override de Compose por variavel de ambiente e deliberado e revisado junto do arquivo que
+  # o declara — a ressalva que o AGENTS.md faz sobre o limite do teste arquitetural.
   extracao:
     environment:
       # Ticket 029, modo `mata-publicacao`: sobrescreve o canal de saida `extracao-falhou`
@@ -55,6 +65,7 @@ services:
       # e inventa um canal extracao sem connector, derrubando o boot.
       - FIAPX_EXTRACAO_FALHOU_EXCHANGE_NAME
       - FIAPX_EXTRACAO_FALHOU_EXCHANGE_DECLARE
+      - QUARKUS_OTEL_SDK_DISABLED=true
     deploy:
       replicas: ${FIAPX_EXTRACAO_REPLICAS:-4}
       resources:
@@ -65,9 +76,18 @@ services:
           cpus: "${FIAPX_EXTRACAO_CPUS:-2}"
 
   videos:
+    environment:
+      QUARKUS_OTEL_SDK_DISABLED: "true"
     ports: !override []
     deploy:
       replicas: ${FIAPX_VIDEOS_REPLICAS:-1}
+
+  # So aparece neste overlay por causa do SDK: o `notificacao` nao tem parametro de
+  # experimento nenhum, mas nao pode ser o unico dos tres a continuar instrumentado durante a
+  # medicao.
+  notificacao:
+    environment:
+      QUARKUS_OTEL_SDK_DISABLED: "true"
 
   # So existe neste overlay — a demo da banca fala com o `videos` direto. O entrypoint gera o
   # nginx.conf em runtime porque o numero de replicas so existe em runtime: ver

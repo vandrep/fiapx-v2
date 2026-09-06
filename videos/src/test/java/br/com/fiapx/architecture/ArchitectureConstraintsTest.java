@@ -49,10 +49,26 @@ class ArchitectureConstraintsTest {
     private static final Set<String> INTERFACE_FRAMEWORK_IMPORT_EXCEPTIONS = Set.of();
 
     private static final Pattern PACKAGE_DECLARATION = Pattern.compile("(?m)^package\\s+([a-zA-Z0-9_.]+);");
+    /**
+     * As duas listas abaixo sao <b>nominais e fechadas</b>: o que nao esta nelas passa. Foi por
+     * isso que o ticket 059 acrescentou {@code io.opentelemetry} e {@code io.micrometer} —
+     * instrumentacao e infraestrutura igual a CDI ou a JAX-RS, e sem estes dois nomes um
+     * {@code @WithSpan} num use case passaria em silencio e a regra estaria mentindo por
+     * omissao. A doutrina do ticket e que a instrumentacao mora <b>so em framework</b>: borda
+     * HTTP, dispatcher de mensagem e adapters de I/O. O {@code core} fica sem span de
+     * proposito — os spans de fronteira ja contam a historia inteira, e o {@code core} e
+     * sincrono e rapido o bastante para span ali ser ruido.
+     */
     private static final Pattern FORBIDDEN_FRAMEWORK_IMPORT = Pattern.compile(
-            "(?m)^import\\s+(io\\.quarkus|io\\.smallrye|jakarta\\.(annotation\\.security|enterprise|inject|persistence|ws\\.rs)|org\\.eclipse\\.microprofile)\\.");
+            "(?m)^import\\s+(io\\.quarkus|io\\.smallrye|io\\.opentelemetry|io\\.micrometer|jakarta\\.(annotation\\.security|enterprise|inject|persistence|ws\\.rs)|org\\.eclipse\\.microprofile)\\.");
+    /**
+     * {@code WithSpan}, {@code SpanAttribute} e {@code AddingSpanAttributes} sao do
+     * OpenTelemetry; {@code Counted} e {@code Timed} sao do Micrometer. Estao aqui alem do
+     * import porque anotacao alcanca o codigo tambem por import estatico ou por nome
+     * totalmente qualificado, e a lista de import sozinha nao os pegaria (ticket 059).
+     */
     private static final Pattern FORBIDDEN_FRAMEWORK_ANNOTATION = Pattern.compile(
-            "@(ApplicationScoped|RequestScoped|Inject|Path|GET|POST|PUT|DELETE|PATCH|Produces|Consumes|RolesAllowed|WithSession|WithTransaction|Entity|Table)\\b");
+            "@(ApplicationScoped|RequestScoped|Inject|Path|GET|POST|PUT|DELETE|PATCH|Produces|Consumes|RolesAllowed|WithSession|WithTransaction|Entity|Table|WithSpan|SpanAttribute|AddingSpanAttributes|Counted|Timed)\\b");
     private static final Pattern FRAMEWORK_IMPORT = Pattern.compile("(?m)^import\\s+br\\.com\\.fiapx\\.[a-z0-9_]+\\.framework\\.");
     private static final Pattern PUBLIC_INSTANCE_METHOD = Pattern.compile(
             "(?m)^\\s+public\\s+(?!static\\b|record\\b|class\\b|interface\\b|enum\\b)([^\\s(]+(?:<[^\\n{;()]*>)?)\\s+([a-zA-Z_$][\\w$]*)\\s*\\(");

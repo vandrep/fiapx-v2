@@ -3,11 +3,13 @@ package br.com.fiapx.videos.framework.web;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.exceptions.ArquivoAusenteException;
 import br.com.fiapx.videos.core.usecases.video.BaixarPacoteUseCase;
+import br.com.fiapx.videos.framework.observabilidade.Rastro;
 import br.com.fiapx.videos.interfaces.controllers.VideosController;
 import br.com.fiapx.videos.interfaces.presenters.VideoPresenterAdapter;
 import br.com.fiapx.videos.interfaces.presenters.VideosPaginadosPresenterAdapter;
 import br.com.fiapx.videos.interfaces.presenters.view_model.VideoViewModel;
 import br.com.fiapx.videos.interfaces.presenters.view_model.VideosPaginadosViewModel;
+import io.opentelemetry.api.trace.Span;
 import io.quarkus.security.Authenticated;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
@@ -27,6 +29,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+import org.jboss.logging.MDC;
 import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.RestMulti;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
@@ -52,6 +55,12 @@ import java.util.function.Supplier;
  *
  * <p>Anotacoes OpenAPI so aqui, e so as que o gerador nao acerta sozinho: o caminho feliz
  * ele deduz dos tipos, mas os status de erro nao.
+ *
+ * <p>Esta e a ponta de cima da travessia (ticket 059): o span de servidor HTTP que a
+ * auto-instrumentacao abre e o pai de tudo o que vem depois, inclusive do que roda nos outros
+ * dois servicos, e {@link #marcarVideo} e o que o torna alcancavel por {@code idVideo}. Sem
+ * isso a busca por um Video acharia o trabalho do worker e perderia a requisicao que o
+ * originou — que costuma ser o comeco da investigacao, nao o fim.
  */
 @Tag(name = "Videos", description = "Envio, acompanhamento e download dos Vídeos do usuário autenticado")
 @Path("/videos")
@@ -95,6 +104,7 @@ public class VideosResource {
                 sub(),
                 email());
         return doController(() -> videosController.enviar(requisicao))
+                .invoke(VideosResource::marcarVideo)
                 .map(id -> Response.accepted(videoPresenter.viewModel())
                         .location(URI.create("/videos/" + id))
                         .build());
@@ -122,6 +132,7 @@ public class VideosResource {
     @APIResponse(responseCode = "404", description = "O Vídeo não existe, ou não é seu")
     @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
     public Uni<VideoViewModel> consultar(@PathParam("id") UUID id) {
+        marcarVideo(id);
         return doController(() -> videosController.consultar(id, sub(), email()))
                 .replaceWith(videoPresenter::viewModel);
     }
@@ -142,6 +153,7 @@ public class VideosResource {
     @APIResponse(responseCode = "410", description = "Não mais: o Pacote expirou (7 dias)")
     @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
     public RestMulti<byte[]> baixarPacote(@PathParam("id") UUID id) {
+        marcarVideo(id);
         return RestMulti.fromUniResponse(
                 doController(() -> videosController.baixarPacote(id, sub(), email())),
                 pacote -> Multi.createFrom().publisher(pacote.conteudo()).map(VideosResource::bytes),
@@ -162,6 +174,21 @@ public class VideosResource {
         var copia = new byte[buffer.remaining()];
         buffer.get(copia);
         return copia;
+    }
+
+    /**
+     * Pendura o {@code idVideo} nos dois lugares que a busca usa: atributo do span de servidor
+     * e campo do MDC, que o exportador de log copia para os atributos do registro. No envio ele
+     * so existe depois do use case — e o `videos` quem gera o identificador —, nos outros dois
+     * ele vem no caminho.
+     *
+     * <p>Sem {@code remove}: o MDC do Quarkus vive no contexto duplicado do Vert.x, que morre
+     * com a requisicao. Nao ha ThreadLocal a limpar, e limpar cedo apagaria o campo dos logs
+     * assincronos que vem depois deste metodo retornar.
+     */
+    private static void marcarVideo(UUID id) {
+        Span.current().setAttribute(Rastro.ID_VIDEO, id.toString());
+        MDC.put(Rastro.ID_VIDEO, id.toString());
     }
 
     /**

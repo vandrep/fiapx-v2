@@ -632,6 +632,31 @@ verificadas por teste, não são sugestão). Projeto original em
   O overlay de carga desliga a stack com `replicas: 0`, preservando o método dos tickets
   025–028. Sem canal de notificação: os alertas existem, **a detecção não mudou**.
 
+- [Os três sinais saem dos três serviços, costurados pelo idVideo](tickets/059-tres-sinais-nos-tres-servicos.md)
+  — buscar um `idVideo` devolve **um** trace com `fiapx-videos`, `fiapx-extracao` e
+  `fiapx-notificacao` dentro, e os logs dos três chegam ao Loki com `idVideo` como campo e o
+  `trace_id` do mesmo trace. O contexto atravessa o RabbitMQ por header AMQP; os cinco records do
+  contrato ficaram intactos. Duas coisas foram **medidas e mudaram uma decisão**: a
+  auto-instrumentação encerra o span de recebimento *antes* do método `@Incoming` rodar, então
+  sem um span nosso a publicação seguinte viraria raiz e o rastro se partiria em cada salto; e a
+  extensão da AWS, que monta o `AwsSdkTelemetry` sozinha, **não emitiu nenhum span de S3** — eu
+  havia removido os spans próprios de MinIO por causa dela e tive de devolvê-los. Uma métrica
+  própria só: `fiapx.extracao.duracao`, os 98,2% do tempo de serviço que rodam fora do JVM.
+  **Custo da instrumentação, que o 058 deixou por medir: ~5% no ciclo do Vídeo (0,56–0,59 s
+  contra 0,53–0,56 s) e ~160 MiB somando os três serviços**, com amostragem em 100%. O
+  `smoke.sh` ganhou os passos 10 e 11 — o 10 é a única prova de correlação ponta a ponta que
+  existe no repositório, e reprovou de verdade antes de a busca ser ancorada no serviço certo.
+  Deixou um defeito medido em aberto, [061](tickets/061-travamento-raro-com-o-sdk-desligado.md).
+
+- [Uma Extração trava, raramente, com o SDK desligado](tickets/061-travamento-raro-com-o-sdk-desligado.md)
+  — **aberto**. Achado ao medir o custo da instrumentação no 059: com
+  `QUARKUS_OTEL_SDK_DISABLED=true`, a configuração que o overlay de carga passou a usar, uma
+  Extração ocasionalmente para com o Vídeo em `PROCESSANDO`, a mensagem *unacked*, **nenhuma
+  thread e nenhum log** — e o `max-outstanding-messages=1` prende a réplica para sempre. A/B de
+  três rodadas alternadas: 1 travamento em 30 ciclos com as imagens do 059, 0 em 30 com as
+  pré-059. Sem causa raiz, e por isso sem correção: o critério é o do 027, defeito medido vira
+  ticket. A demo — com o SDK ligado — não exibiu o sintoma.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

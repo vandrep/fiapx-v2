@@ -15,6 +15,11 @@
 # Uso:
 #   scripts/smoke.sh              sobe o Compose se preciso, roda tudo, deixa a stack de pe
 #   scripts/smoke.sh --derruba    idem, mas encerra com `docker compose down` no final
+#
+# Os passos 10 e 11 sao do ticket 059 e julgam a camada de observabilidade. Eles nao sao
+# decoracao: o 10 e a UNICA coisa no repositorio que exercita a correlacao ponta a ponta —
+# nenhum @QuarkusTest publica mensagem entre servicos, e a suite roda com o SDK desligado —, e
+# o 11 e o que impede a observabilidade de virar, ela propria, uma causa de indisponibilidade.
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +28,7 @@ cd "$raiz"
 videos_url="${FIAPX_VIDEOS_URL:-http://localhost:8080}"
 keycloak_url="${FIAPX_KEYCLOAK_URL:-http://localhost:8081}"
 mailhog_url="${FIAPX_MAILHOG_URL:-http://localhost:8025}"
+grafana_url="${FIAPX_GRAFANA_URL:-http://localhost:3000}"
 
 fixture_valido="extracao/src/test/resources/fixtures/video-valido.mp4"
 fixture_invalido="extracao/src/test/resources/fixtures/arquivo-invalido.txt"
@@ -233,8 +239,84 @@ codigo="$(curl -sS -o "$trabalho/alheio.json" -w '%{http_code}' \
 ok "404 para o dono errado — o mesmo 404 de id inexistente, sem vazar a existencia"
 
 # ---------------------------------------------------------------------------------------
+passo "10. O rastro do Vídeo, correlacionado por idVideo pelos três serviços"
+
+# O Video que FALHOU, e nao o que concluiu, de proposito: e o unico cujo caminho passa pelos
+# TRES servicos — `videos` recebe, `extracao` prova que nao e video, `videos` transiciona e
+# anuncia, `notificacao` manda o e-mail. Achar os tres nomes num unico trace e o que prova que
+# o contexto atravessou o RabbitMQ nos quatro saltos, por header AMQP.
+#
+# O Tempo nao publica porta para fora (ticket 058): quem enxerga a stack por dentro e o
+# Grafana, entao a consulta vai pelo proxy de datasource dele. O uid e descoberto, nao fixado —
+# ele e gerado pelo provisionamento da imagem.
+tempo_uid="$(curl -sS "$grafana_url/api/datasources" | jq -r '.[] | select(.type=="tempo") | .uid' | head -1)"
+[[ -n "$tempo_uid" ]] || falha "nenhum datasource do tipo tempo no Grafana em $grafana_url"
+tempo="$grafana_url/api/datasources/proxy/uid/$tempo_uid"
+
+# Laco de retentativa porque a exportacao e assincrona em dois estagios: o processador em lote
+# do SDK segura os spans por alguns segundos, e o Tempo ainda leva mais alguns ate o trace
+# ficar buscavel. Nao ha o que sincronizar aqui — so esperar.
+inicio=$SECONDS
+id_trace=""
+while :; do
+    # O filtro por servico nao e enfeite: `marcarVideo` poe o idVideo tambem no span de cada
+    # GET de acompanhamento, entao a busca so pelo atributo casa dezenas de traces de uma linha
+    # — e o primeiro que voltasse seria uma consulta, nao a travessia. Ancorar no `fiapx-extracao`
+    # seleciona o unico trace em que o worker tocou este Video, que e a travessia inteira.
+    id_trace="$(curl -sS -G "$tempo/api/search" \
+        --data-urlencode "q={ .idVideo = \"$id_falha\" && resource.service.name = \"fiapx-extracao\" }" \
+        --data-urlencode "start=$(( $(date +%s) - 3600 ))" \
+        --data-urlencode "end=$(date +%s)" \
+        --data-urlencode "limit=20" \
+        | jq -r '.traces[0].traceID // empty' || true)"
+    [[ -n "$id_trace" ]] && break
+    (( SECONDS - inicio > 90 )) \
+        && falha "nenhum trace do fiapx-extracao com idVideo=$id_falha no Tempo em 90s"
+    printf '    ... aguardando a exportação\n'
+    sleep 5
+done
+ok "trace $id_trace encontrado buscando por idVideo=$id_falha"
+
+curl -sS "$tempo/api/traces/$id_trace" > "$trabalho/trace.json"
+# Le o service.name de dentro dos atributos de recurso, em qualquer profundidade: a forma do
+# OTLP-JSON muda entre versoes do Tempo, o nome do atributo nao.
+servicos_no_trace="$(jq -r '[.. | objects | select(.key? == "service.name") | .value.stringValue]
+    | unique | .[]' "$trabalho/trace.json")"
+echo "$servicos_no_trace" | sed 's/^/    /'
+for servico in fiapx-videos fiapx-extracao fiapx-notificacao; do
+    grep -qx "$servico" <<< "$servicos_no_trace" \
+        || falha "$servico não aparece no trace $id_trace; a travessia se partiu antes dele"
+done
+ok "os três serviços num único trace — o contexto atravessou o RabbitMQ por header AMQP"
+
+# ---------------------------------------------------------------------------------------
+passo "11. O ciclo do Vídeo sobrevive à observabilidade morta"
+
+# A propriedade que o ticket 058 desenhou e o 059 nao pode ter quebrado ao ligar a exportacao:
+# nenhum servico de negocio depende da stack para bootar, processar ou responder. Com ela
+# parada os tres exportadores passam a falhar — e o Video tem de completar o ciclo mesmo assim.
+docker compose stop observabilidade > "$trabalho/stop-obs.log" 2>&1 \
+    || { cat "$trabalho/stop-obs.log" >&2; falha "não consegui parar a observabilidade"; }
+# `start` de volta acontece de todo jeito, inclusive se um passo abaixo falhar: deixar a stack
+# pela metade transformaria uma reprovacao deste script em duas.
+religa_observabilidade() { docker compose start observabilidade > "$trabalho/start-obs.log" 2>&1 || true; }
+trap 'religa_observabilidade; rm -rf "$trabalho"; $derruba && docker compose down' EXIT
+ok "observabilidade parada"
+
+codigo="$(curl -sS -o "$trabalho/envio-sem-obs.json" -w '%{http_code}' -X POST "$videos_url/videos" \
+    "${autenticado[@]}" -F "arquivo=@$fixture_valido;type=video/mp4" || true)"
+[[ "$codigo" == 202 ]] || falha "POST /videos com a observabilidade morta devolveu $codigo, esperava 202"
+id_sem_obs="$(jq -r .id "$trabalho/envio-sem-obs.json")"
+espera_estado "$id_sem_obs" CONCLUIDO
+ok "Video $id_sem_obs chegou a CONCLUIDO sem stack de observabilidade nenhuma"
+
+religa_observabilidade
+ok "observabilidade de volta"
+
+# ---------------------------------------------------------------------------------------
 echo
 echo "${negrito}${verde}Smoke completo.${normal} Video concluido: $id | Video falho: $id_falha"
 echo "    Swagger UI:  $videos_url/q/swagger-ui"
 echo "    MailHog:     $mailhog_url"
+echo "    Grafana:     $grafana_url"
 $derruba || echo "    A stack continua de pe. Para encerrar: docker compose down"

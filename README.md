@@ -138,6 +138,11 @@ deixa seus containers e volumes para inspeção. Para encerrá-lo preservando os
 Não há interface web: a demo é o **Swagger UI**. Clique em **Authorize**, entre com
 `demo`/`demo` e as quatro operações passam a rodar autenticadas na própria página.
 
+O diálogo Authorize some com `client_id`, `client_secret` e o seletor "Client credentials
+location" — CSS de demo, não indisponibilidade: neste client público só há uma resposta
+certa para os três, e deixá-los visíveis só convida a preencher errado antes de digitar
+`demo`/`demo`.
+
 O realm traz dois usuários, `demo`/`demo` e `outro`/`outro` — o segundo existe para mostrar
 que o Vídeo de um usuário responde `404` para o outro. O dono vem sempre do `sub` do token,
 nunca do request.
@@ -212,6 +217,16 @@ Antes de escrever a primeira classe, leia [`AGENTS.md`](AGENTS.md): as regras de
 são convenção, são verificadas por `ArchitectureConstraintsTest` e reprovam o build.
 
 O CI roda o mesmo `verify` num job só e publica as três imagens no GHCR a partir da `main`.
+
+### Ferramental de agente versionado
+
+`.claude/skills/` e `.devcontainer/` estão no repositório de entrega, não num
+`.gitignore`, porque fazem parte de como este projeto foi construído: as skills
+automatizam o fluxo de tickets em [`docs/wayfinder/`](docs/wayfinder/map.md), e o
+devcontainer fixa o toolchain (Java, Node, Docker rootless) que qualquer clone precisa
+para reproduzir `./mvnw verify` sem depender do que já está instalado em quem entrega ou
+revisa. Nenhum dos dois é pedido pelo enunciado; versionar os dois é tratar o processo de
+construção como parte reproduzível da entrega, não como andaime descartado.
 
 ### Devcontainer com Docker rootless
 

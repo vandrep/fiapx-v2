@@ -5,7 +5,7 @@ funcionando — o entregável de apresentação do Hackathon. Este arquivo é a 
 palavra a palavra, com as tomadas que acompanham cada trecho.
 
 **Alvo: 9:00, não 10:00.** A folga é o que impede a entrega de ser reprovada por quinze
-segundos. Esta versão fecha em **9:19**, com 41 segundos de margem.
+segundos. Esta versão fecha em **9:41**, com 19 segundos de margem.
 
 ## Como este roteiro é usado
 
@@ -24,8 +24,8 @@ locução em português, ~145 palavras por minuto.
 | 1. Abertura | 0:00 | 0:29 | 70 |
 | 2. Funcionando | 0:29 | 2:28 | 357 |
 | 3. Arquitetura | 2:57 | 4:10 | 605 |
-| 4. Fechamento | 7:07 | 2:12 | 320 |
-| **Total** | | **9:19** | **1.352** |
+| 4. Fechamento | 7:07 | 2:34 | 373 |
+| **Total** | | **9:41** | **1.405** |
 
 Os números acima são medidos, não estimados: são as palavras que estão de fato escritas
 abaixo. Se você editar a narração, remeça — o teto de dez minutos não perdoa.
@@ -195,7 +195,7 @@ Encaixar aqui, por ~10s, a árvore de pacotes versionada do módulo `videos`.
 
 ---
 
-## Bloco 4 — Fechamento (7:07–9:19, 320 palavras)
+## Bloco 4 — Fechamento (7:07–9:41, 373 palavras)
 
 ### Tomada — tabela *Requisitos do enunciado* (53s)
 
@@ -232,6 +232,11 @@ Encaixar aqui, por ~10s, a árvore de pacotes versionada do módulo `videos`.
 > o desenho suporta réplicas, mas não há teste de carga que prove a linearidade. E o e-mail é
 > **pelo menos uma vez** — numa janela estreita, o usuário pode receber o aviso duas vezes.
 > Foi escolha consciente: duplicar um aviso é melhor que engolir uma falha.
+>
+> Uma terceira eu recusei de propósito: o enunciado lista Prometheus e Grafana na stack
+> recomendada, e eles não entraram. Com cinco semanas e meia sozinho, monitoramento com
+> dashboard é o primeiro candidato a consumir o tempo que o CI/CD precisa. Os health checks
+> continuam dentro — o que sai é só o painel.
 
 ### Tomada — README, encerramento (6s)
 

@@ -600,6 +600,17 @@ verificadas por teste, não são sugestão). Projeto original em
   código, destoando do resto dos próprios arquivos. Nenhum dos casos desambiguava tipo
   homônimo, então todos viraram import comum; nada mais mudou.
 
+- [As quatro escolhas sem registro ganharam a frase que faltava](tickets/055-registrar-as-escolhas-fora-do-enunciado.md)
+  — nenhuma mudou de comportamento, só ficou explicada onde a banca olha. A ausência de
+  Prometheus/Grafana entrou no roteiro do vídeo (Bloco 4) como recusa deliberada, coerente
+  com o que este mapa já registra em Fora de escopo. `.claude/skills/` e `.devcontainer/`
+  ganharam um parágrafo no README (`Ferramental de agente versionado`) dizendo por que
+  vivem no repositório de entrega em vez de num `.gitignore`. E o CSS que esconde
+  `client_id`, `client_secret` e o seletor de client credentials no Authorize do Swagger
+  ganhou uma linha no README, ao lado de onde a demo já manda clicar em Authorize — o
+  comentário dentro do próprio CSS já explicava o "porquê" para quem lê código, mas
+  ninguém que só abre o repositório ou assiste ao vídeo passa por `META-INF/branding/`.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -690,15 +701,10 @@ verificadas por teste, não são sugestão). Projeto original em
      próprios tickets. Oito tickets saíram daí, e a ordem entre eles é a ordem do risco: os
      dois P1 eram requisito do enunciado não exercido e ADR desmentido pelo código; os dois P2
      são janela de reconciliação assimétrica e vocabulário ambíguo atravessando fronteira; os
-     quatro P3 são manutenção e registro. O 048, o 049, o 050, o 051 e o 052 já fecharam (ver
-     Decisões até aqui). Dos três abaixo, nenhum é bloqueado. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
-     passaria verde, mas o próprio 045 já registra isso como escolha barata deliberada, e
-     reabrir seria refazer decisão registrada. -->
-
-- **[055](tickets/055-registrar-as-escolhas-fora-do-enunciado.md) — quatro escolhas sem
-  registro.** Monitoramento ausente, skills de agente versionadas, devcontainer e o CSS que
-  esconde um campo do Authorize: nenhuma é defeito, nenhuma tem uma frase que a explique onde a
-  banca olha. P3.
+     quatro P3 são manutenção e registro. Os oito já fecharam (ver Decisões até aqui). Um
+     achado foi recusado: a cerca do 045 é sintática e `Uni.join` passaria verde, mas o
+     próprio 045 já registra isso como escolha barata deliberada, e reabrir seria refazer
+     decisão registrada. -->
 
 ## Fora de escopo
 

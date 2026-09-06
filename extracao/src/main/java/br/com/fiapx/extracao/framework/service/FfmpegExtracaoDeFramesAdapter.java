@@ -1,6 +1,6 @@
 package br.com.fiapx.extracao.framework.service;
 
-import br.com.fiapx.extracao.core.entities.CicloDaExtracao;
+import br.com.fiapx.extracao.core.entities.Extracao;
 import br.com.fiapx.extracao.core.entities.MotivoFalha;
 import br.com.fiapx.extracao.core.entities.ResultadoExtracao;
 import br.com.fiapx.extracao.core.exceptions.FalhaPermanenteDeExtracaoException;
@@ -59,9 +59,11 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
     private ResultadoExtracao processarBloqueante(Path video, Path diretorioDeTrabalho, Path destinoZip,
                                                    Duration tetoDuracao) {
         var duracao = medirDuracaoEValidarStreamDeVideo(video);
-        CicloDaExtracao.motivoAoValidarDuracao(duracao, tetoDuracao)
-                .ifPresent(motivo -> lancarFalhaPermanente(motivo,
-                        "duracao " + duracao.toMillis() + "ms; teto " + tetoDuracao.toMillis() + "ms"));
+        Extracao.motivoAoValidarDuracao(duracao, tetoDuracao)
+                .ifPresent(motivo -> {
+                    throw falhaPermanente(motivo,
+                            "duracao " + duracao.toMillis() + "ms; teto " + tetoDuracao.toMillis() + "ms");
+                });
 
         extrairFrames(video, diretorioDeTrabalho);
         var frames = listarFramesOrdenados(diretorioDeTrabalho);
@@ -78,9 +80,10 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 video.toString());
 
-        CicloDaExtracao.motivoSeSondagemFalhou(duracaoBruta.exitCode())
-                .ifPresent(motivo -> lancarFalhaPermanente(motivo,
-                        "ffprobe saiu com " + duracaoBruta.exitCode() + ": " + resumo(duracaoBruta.stderr())));
+        if (duracaoBruta.exitCode() != 0) {
+            throw falhaPermanente(MotivoFalha.ARQUIVO_INVALIDO,
+                    "ffprobe saiu com " + duracaoBruta.exitCode() + ": " + resumo(duracaoBruta.stderr()));
+        }
 
         double segundos;
         try {
@@ -97,11 +100,14 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
                 "-show_entries", "stream=codec_type",
                 "-of", "csv=p=0",
                 video.toString());
-        CicloDaExtracao.motivoSeSondagemFalhou(streamDeVideo.exitCode())
-                .or(() -> CicloDaExtracao.motivoAoValidarFluxoDeVideo(
-                        streamDeVideo.stdout() != null && !streamDeVideo.stdout().isBlank()))
-                .ifPresent(motivo -> lancarFalhaPermanente(motivo,
-                        "ffprobe de stream saiu com " + streamDeVideo.exitCode() + ": " + resumo(streamDeVideo.stderr())));
+        var detalheDoStream = "ffprobe de stream saiu com " + streamDeVideo.exitCode()
+                + ": " + resumo(streamDeVideo.stderr());
+        if (streamDeVideo.exitCode() != 0) {
+            throw falhaPermanente(MotivoFalha.ARQUIVO_INVALIDO, detalheDoStream);
+        }
+        if (streamDeVideo.stdout() == null || streamDeVideo.stdout().isBlank()) {
+            throw falhaPermanente(MotivoFalha.SEM_FLUXO_DE_VIDEO, detalheDoStream);
+        }
 
         return duracao;
     }
@@ -146,8 +152,8 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
      */
     private RuntimeException criarFalhaDoFfmpeg(int exitCode, String stderr) {
         LOG.warnf("ffmpeg saiu com exit %d: %s", exitCode, stderr);
-        var decisao = CicloDaExtracao.classificarFalhaDoFfmpeg(
-                new CicloDaExtracao.SinaisDoFfmpeg(exitCode, stderr));
+        var decisao = Extracao.classificarFalhaDoFfmpeg(
+                new Extracao.SinaisDoFfmpeg(exitCode, stderr));
         var detalhe = "ffmpeg saiu com exit " + exitCode + ": " + resumo(stderr);
         return decisao.motivoPermanente()
                 .<RuntimeException>map(motivo -> new FalhaPermanenteDeExtracaoException(motivo, detalhe))
@@ -178,15 +184,16 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
      * absorve arredondamento do filtro {@code fps=1} nas bordas do video.
      */
     private void validarContagemDeFrames(int quantidadeFrames, Duration duracao) {
-        CicloDaExtracao.motivoAoValidarContagemDeFrames(quantidadeFrames, duracao)
+        Extracao.motivoAoValidarContagemDeFrames(quantidadeFrames, duracao)
                 .ifPresent(motivo -> {
-                    lancarFalhaPermanente(motivo,
+                    throw falhaPermanente(motivo,
                             "duracao " + duracao.toMillis() + "ms, extraiu " + quantidadeFrames + " frames");
                 });
     }
 
-    private static void lancarFalhaPermanente(MotivoFalha motivo, String detalheTecnico) {
-        throw new FalhaPermanenteDeExtracaoException(motivo, detalheTecnico);
+    private static FalhaPermanenteDeExtracaoException falhaPermanente(MotivoFalha motivo,
+                                                                       String detalheTecnico) {
+        return new FalhaPermanenteDeExtracaoException(motivo, detalheTecnico);
     }
 
     /** ZIP STORED: deflate nao comprime PNG (medido, ticket 006). */

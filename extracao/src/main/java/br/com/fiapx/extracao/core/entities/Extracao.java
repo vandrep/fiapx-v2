@@ -6,13 +6,14 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Decide o desfecho da Extração a partir dos sinais produzidos por {@code ffmpeg} e
- * {@code ffprobe}. Os processos pertencem à infraestrutura; o significado dos resultados
- * pertence ao domínio.
+ * As regras da Extração — o termo do glossário (CONTEXT.md): a operação que lê um Vídeo e
+ * produz seus frames. A operação em si acontece nos processos externos; o que mora aqui é o
+ * que decide o desfecho dela a partir dos sinais que eles produzem. Os processos pertencem à
+ * infraestrutura; o significado dos resultados pertence ao domínio.
  */
-public final class CicloDaExtracao {
+public final class Extracao {
 
-    private CicloDaExtracao() {
+    private Extracao() {
     }
 
     public static DecisaoFalha classificarFalhaDoFfmpeg(SinaisDoFfmpeg sinais) {
@@ -33,14 +34,6 @@ public final class CicloDaExtracao {
             return DecisaoFalha.permanente(MotivoFalha.SEM_FLUXO_DE_VIDEO);
         }
         return DecisaoFalha.transitoria();
-    }
-
-    public static Optional<MotivoFalha> motivoSeSondagemFalhou(int exitCode) {
-        return exitCode == 0 ? Optional.empty() : Optional.of(MotivoFalha.ARQUIVO_INVALIDO);
-    }
-
-    public static Optional<MotivoFalha> motivoAoValidarFluxoDeVideo(boolean temFluxoDeVideo) {
-        return temFluxoDeVideo ? Optional.empty() : Optional.of(MotivoFalha.SEM_FLUXO_DE_VIDEO);
     }
 
     public static Optional<MotivoFalha> motivoAoValidarDuracao(Duration duracao, Duration tetoDuracao) {

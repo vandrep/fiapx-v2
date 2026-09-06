@@ -554,6 +554,25 @@ verificadas por teste, não são sugestão). Projeto original em
   reprovava antes é o gêmeo do que já existia para o comando, e o predicado novo, que é HQL e
   nenhum dublê alcança, ganhou teste contra Postgres de verdade.
 
+- [O tipo fala o vocabulário do glossário, e cada método carrega regra](tickets/051-ciclo-da-extracao-no-glossario.md)
+  — `CicloDaExtracao` usava em código um termo que o `CONTEXT.md` não define, contra a regra do
+  `AGENTS.md`. Resolvido **pelo lado do código**: a classe virou `Extracao`, o termo que o
+  glossário já define, em vez de o glossário ganhar um verbete novo. "Ciclo" não nomeava nada
+  que a Extração já não nomeasse — a peça não modela ciclo de vida com estados próprios, ela
+  decide o desfecho de uma Extração a partir dos sinais do `ffmpeg` e do `ffprobe` —, e um
+  verbete a mais obrigaria o leitor a distinguir dois termos onde o domínio tem um. O
+  `CONTEXT.md` ficou intocado de propósito. Na mesma passada, `motivoSeSondagemFalhou(int)` e
+  `motivoAoValidarFluxoDeVideo(boolean)` saíram: eram ternário → `Optional`, sem limiar nem
+  tolerância, e viraram duas guardas explícitas no adapter, onde a precedência entre
+  `ARQUIVO_INVALIDO` e `SEM_FLUXO_DE_VIDEO` passou a ser a ordem das linhas em vez de semântica
+  de `Optional` encadeado. Ficaram na entidade os três que decidem algo: a tabela de exit codes
+  do ffmpeg, o teto de duração e a tolerância de 10% da contagem de frames. Classificação
+  idêntica, entrada por entrada. Dos dois caminhos que o unitário removido cobria, um já era
+  exercido pela borda — o cenário BDD do arquivo que não é vídeo —, e o outro,
+  `SEM_FLUXO_DE_VIDEO` na sondagem de stream, teria ficado descoberto: o cenário BDD para na
+  primeira sondagem, a de duração. A revisão o pegou, e ele ganhou teste próprio contra
+  `ffprobe` de verdade sobre um segundo de áudio sem vídeo nenhum.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -644,17 +663,14 @@ verificadas por teste, não são sugestão). Projeto original em
      próprios tickets. Oito tickets saíram daí, e a ordem entre eles é a ordem do risco: os
      dois P1 eram requisito do enunciado não exercido e ADR desmentido pelo código; os dois P2
      são janela de reconciliação assimétrica e vocabulário ambíguo atravessando fronteira; os
-     quatro P3 são manutenção e registro. O 048, o 049 e o 050 já fecharam (ver Decisões até
-     aqui). Dos cinco abaixo, só o 053 é bloqueado (pelo 052) — os outros quatro estão na fronteira. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
+     quatro P3 são manutenção e registro. O 048, o 049, o 050 e o 051 já fecharam (ver Decisões
+     até aqui). Dos quatro abaixo, só o 053 é bloqueado (pelo 052) — os outros três estão na fronteira. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
      passaria verde, mas o próprio 045 já registra isso como escolha barata deliberada, e
      reabrir seria refazer decisão registrada. -->
 
 - **[052](tickets/052-nomear-o-resultado-da-extracao-no-videos.md) — os dados da conclusão
   viajam soltos.** Quatro campos atravessam cinco assinaturas juntos, e `tamanhoBytes` é o
   Pacote no consumidor e o vídeo na entidade. O `extracao` já batizou metade do conceito. P2.
-- **[051](tickets/051-ciclo-da-extracao-no-glossario.md) — Ciclo da Extração não está no
-  glossário.** O `AGENTS.md` manda todo termo de domínio passar pelo `CONTEXT.md`, e esse não
-  passou; de lambuja, parte dos métodos da peça só traduz booleano em opcional. P3.
 - **[053](tickets/053-unificar-a-forma-dos-use-cases-de-extracao.md) — os três use cases de
   evento repetem a mesma forma.** Busca, decide na entidade, curto-circuita, grava. Bloqueado
   pelo 052: os dois reescrevem as mesmas assinaturas. P3.

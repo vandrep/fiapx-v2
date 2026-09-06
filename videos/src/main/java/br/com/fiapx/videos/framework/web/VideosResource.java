@@ -13,6 +13,7 @@ import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -30,11 +31,13 @@ import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.RestMulti;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 
+import java.net.URI;
 import java.nio.ByteBuffer;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Supplier;
 
@@ -93,7 +96,7 @@ public class VideosResource {
                 email());
         return doController(() -> videosController.enviar(requisicao))
                 .map(id -> Response.accepted(videoPresenter.viewModel())
-                        .location(java.net.URI.create("/videos/" + id))
+                        .location(URI.create("/videos/" + id))
                         .build());
     }
 
@@ -104,8 +107,8 @@ public class VideosResource {
     @APIResponse(responseCode = "200", description = "Página de Vídeos do usuário")
     @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
     public Uni<VideosPaginadosViewModel> listar(@QueryParam("estado") EstadoVideo estado,
-                                                @QueryParam("pagina") @jakarta.ws.rs.DefaultValue("0") int pagina,
-                                                @QueryParam("tamanho") @jakarta.ws.rs.DefaultValue("20") int tamanho) {
+                                                @QueryParam("pagina") @DefaultValue("0") int pagina,
+                                                @QueryParam("tamanho") @DefaultValue("20") int tamanho) {
         var requisicao = new VideosController.ListagemRequest(sub(), email(), estado, pagina, tamanho);
         return doController(() -> videosController.listar(requisicao))
                 .replaceWith(videosPaginadosPresenter::viewModel);
@@ -166,7 +169,7 @@ public class VideosResource {
      * assincronas colocam por cima da excecao de dominio — sem isso, toda falha do core
      * cairia no mapper de 500 em vez do seu.
      */
-    private static <T> Uni<T> doController(Supplier<java.util.concurrent.CompletableFuture<T>> chamada) {
+    private static <T> Uni<T> doController(Supplier<CompletableFuture<T>> chamada) {
         return Uni.createFrom().completionStage(chamada)
                 .onFailure(CompletionException.class)
                 .transform(falha -> falha.getCause() == null ? falha : falha.getCause());

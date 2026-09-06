@@ -39,6 +39,14 @@ final class GatewaysEmMemoria {
         final Map<UUID, Video> armazenados = new LinkedHashMap<>();
         final Map<UUID, Instant> comandoPublicadoEm = new LinkedHashMap<>();
         final Map<UUID, Instant> falhaPublicadaEm = new LinkedHashMap<>();
+
+        /**
+         * Os instantes de corte que cada metade da varredura pediu. Guardados porque a
+         * simetria do ticket 050 e uma propriedade da <b>passada</b>, nao de cada busca: dois
+         * testes independentes de idade passariam verde com folgas diferentes.
+         */
+        final List<Instant> cortesDeComandos = new ArrayList<>();
+        final List<Instant> cortesDeFalhas = new ArrayList<>();
         private final Map<UUID, EstadoVideo> corridasArmadas = new LinkedHashMap<>();
 
         /**
@@ -143,6 +151,7 @@ final class GatewaysEmMemoria {
 
         @Override
         public CompletableFuture<List<Video>> buscarComandosPendentes(Instant recebidosAntesDe, int tamanhoDoLote) {
+            cortesDeComandos.add(recebidosAntesDe);
             var pendentes = armazenados.values().stream()
                     .filter(video -> video.estado() == EstadoVideo.RECEBIDO)
                     .filter(video -> !comandoPublicadoEm.containsKey(video.id()))
@@ -155,6 +164,7 @@ final class GatewaysEmMemoria {
 
         @Override
         public CompletableFuture<List<Video>> buscarFalhasPendentes(Instant falhadosAntesDe, int tamanhoDoLote) {
+            cortesDeFalhas.add(falhadosAntesDe);
             var pendentes = armazenados.values().stream()
                     .filter(video -> video.estado() == EstadoVideo.FALHOU)
                     .filter(video -> !falhaPublicadaEm.containsKey(video.id()))

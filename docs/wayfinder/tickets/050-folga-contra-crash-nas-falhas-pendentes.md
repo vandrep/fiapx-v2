@@ -25,15 +25,15 @@ duplicada por essa causa — ou a assimetria fica registrada como decisão, com 
 
 ## Condições de aceite
 
-- [ ] Decidir entre simetrizar a folga ou documentar a assimetria, e registrar a escolha
+- [x] Decidir entre simetrizar a folga ou documentar a assimetria, e registrar a escolha
   junto do ADR 0003.
-- [ ] Se simetrizado: a busca de falhas pendentes passa a respeitar a mesma janela de
+- [x] Se simetrizado: a busca de falhas pendentes passa a respeitar a mesma janela de
   proteção que a busca de comandos.
-- [ ] Verificar que uma varredura disparada durante uma publicação de falha em voo não
+- [x] Verificar que uma varredura disparada durante uma publicação de falha em voo não
   republica o evento.
-- [ ] Verificar que uma falha realmente perdida continua sendo alcançada pela varredura,
+- [x] Verificar que uma falha realmente perdida continua sendo alcançada pela varredura,
   sem regressão do que o ADR 0003 garante.
-- [ ] Executar a suíte de testes a partir da raiz com a infraestrutura exigida pelo projeto.
+- [x] Executar a suíte de testes a partir da raiz com a infraestrutura exigida pelo projeto.
 
 ## Dependências
 
@@ -80,6 +80,29 @@ Registro: o ADR 0003 ganhou a consequência *Uma folga só, aplicada às duas me
 varredura*, com a razão e o limite do `finalizado_em`; o comentário do índice em
 `docker/postgres/init.sql` deixou de tratar a coluna como só ordenação.
 
-**Suíte verde a partir da raiz**, com Docker e `ffmpeg` de pé. Como nos tickets anteriores, o
+A revisão de dois eixos sobre este trabalho levantou três coisas, e as três entraram:
+
+- **`finalizado_em` nulo sumiria da varredura para sempre.** Comparação com `NULL` nunca é
+  verdadeira, e o predicado antigo não olhava a coluna. Hoje só `marcarFalha` escreve `FALHOU`
+  e sempre grava o instante, mas o esquema não obrigava; ganhou
+  `ck_video_falhou_finalizado` no `init.sql`, para que um seed, um backfill ou uma rota futura
+  quebrem alto em vez de em silêncio. O CHECK vale em `%prod` e no Compose — em teste o
+  esquema vem do Hibernate, então ele não é exercido pela suíte.
+- **A simetria não estava amarrada por teste.** Os dois testes de idade são independentes: um
+  refactor que devolvesse folgas diferentes passaria verde nos dois. `asDuasMetadesDaVarreduraPedemOMesmoInstanteDeCorte`
+  julga a propriedade que o ticket entrega — o dublê registra o corte que cada busca pediu, e
+  o teste exige que sejam o mesmo.
+- **O skew de relógio ficou registrado no ADR** junto do backlog: `finalizado_em` vem do
+  relógio do `extracao` e o corte do `Instant.now()` do `videos`, então worker adiantado
+  alonga a folga e atrasa o resgate, como backlog a encurta.
+
+Duas observações da revisão foram registradas e **não** viraram código. A condição de aceite
+fala em varredura concorrente com publicação em voo, e o que os testes encenam é *idade* — mas
+o mecanismo **é** o corte por idade, e um teste de concorrência real aqui provaria o
+escalonador, não a regra. E o dublê em memória levanta `NullPointerException` onde o SQL
+apenas omitiria a linha: com o CHECK no esquema o estado é impossível, e um guarda de nulo
+seria código para estado que não existe.
+
+**Suíte verde a partir da raiz**, com Docker e `ffmpeg` de pé: 132 testes no `videos`, 268 no `extracao` e 24 no `notificacao`. O `init.sql` com o CHECK novo foi aplicado num Postgres descartável, para não descobrir erro de sintaxe só no boot do Compose. Como nos tickets anteriores, o
 Keycloak da stack de demo ocupa a 8081 nesta máquina, então rodei com
 `-Dquarkus.http.test-port=0`.

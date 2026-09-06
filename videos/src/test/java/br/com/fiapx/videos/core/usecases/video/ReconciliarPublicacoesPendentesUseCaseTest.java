@@ -155,6 +155,19 @@ class ReconciliarPublicacoesPendentesUseCaseTest {
         assertNull(videos.falhaPublicadaEm.get(video.id()));
     }
 
+    /**
+     * O que o ticket 050 entrega nao e "cada metade tem folga", e sim "as duas tratam a mesma
+     * janela do mesmo jeito". Os dois testes de idade acima passariam verde com folgas
+     * diferentes; este reprova se elas divergirem.
+     */
+    @Test
+    void asDuasMetadesDaVarreduraPedemOMesmoInstanteDeCorte() {
+        useCase.executar().join();
+
+        assertEquals(1, videos.cortesDeComandos.size());
+        assertEquals(videos.cortesDeComandos, videos.cortesDeFalhas);
+    }
+
     @Test
     void umaFalhaJaMarcadaNaoETocada() {
         var video = falhouHa(2, ChronoUnit.MINUTES);

@@ -57,14 +57,14 @@ public class ReconciliarPublicacoesPendentesUseCase {
     }
 
     public CompletableFuture<Republicacoes> executar() {
-        var antesDe = Instant.now().minus(FOLGA_CONTRA_CRASH_MINUTOS, ChronoUnit.MINUTES);
+        var instanteDeCorte = Instant.now().minus(FOLGA_CONTRA_CRASH_MINUTOS, ChronoUnit.MINUTES);
         var comandos = new int[1];
-        return videoGateway.buscarComandosPendentes(antesDe, TAMANHO_DO_LOTE)
+        return videoGateway.buscarComandosPendentes(instanteDeCorte, TAMANHO_DO_LOTE)
                 .thenCompose(pendentes -> {
                     comandos[0] = pendentes.size();
                     return emSequencia(pendentes, publicarExtrairVideo::publicar);
                 })
-                .thenCompose(ignorado -> videoGateway.buscarFalhasPendentes(antesDe, TAMANHO_DO_LOTE))
+                .thenCompose(ignorado -> videoGateway.buscarFalhasPendentes(instanteDeCorte, TAMANHO_DO_LOTE))
                 .thenCompose(pendentes -> emSequencia(pendentes, publicarVideoFalhou::publicar)
                         .thenApply(ignorado -> new Republicacoes(comandos[0], pendentes.size())));
     }

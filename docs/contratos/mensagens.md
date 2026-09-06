@@ -72,13 +72,17 @@ do ar por minutos.
 
 ### Quem declara o quê
 
-Cada serviço declara pelo conector SmallRye o que publica e o que consome
-(`exchange.declare`, `queue.declare`, `auto-bind-dlq`, `dead-letter-*`). O
-`definitions.json` do Compose carrega **apenas** o que não é queue argument: a policy
-`dead-letter-strategy=at-least-once` e os usuários.
+Em teste, cada serviço declara pelo conector SmallRye o que publica e o que consome
+(`exchange.declare`, `queue.declare`, `auto-bind-dlq`, `dead-letter-*`). No Compose, o
+`definitions.json` pré-provisiona a mesma topologia durável — exchanges, filas, DLQs,
+argumentos quorum e bindings — antes de os serviços de negócio subirem. Ele também carrega
+os usuários e a policy `dead-letter-strategy=at-least-once`. As declarações dos conectores
+continuam ativas em produção e são idempotentes no Compose.
 
-O motivo é o teste: os Dev Services sobem um broker limpo em `@QuarkusTest` sem o
-`definitions.json`. Se a topologia morasse lá, nada rodaria em teste.
+O motivo da declaração duplicada é o teste: os Dev Services sobem um broker limpo em
+`@QuarkusTest` sem o `definitions.json`. Se a topologia dependesse só dele, nada rodaria
+em teste. No Compose, o provisionamento anterior fecha a janela em que o `videos` já está
+disponível e um exchange ainda não tem binding.
 
 Há um terceiro declarante, e ele só existe em teste: a `BordaDeMensageria` dos cenários BDD
 dos dois workers (ticket 042). Ela redeclara os exchanges com **os mesmos argumentos** do

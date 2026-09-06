@@ -2,9 +2,7 @@
   "users": [
     { "name": "fiapx", "password": "fiapx", "tags": "administrator" }
   ],
-  "vhosts": [
-    { "name": "/" }
-  ],
+  "vhosts": [ { "name": "/" } ],
   "permissions": [
     { "user": "fiapx", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" }
   ],
@@ -17,5 +15,36 @@
       "definition": { "dead-letter-strategy": "at-least-once" },
       "priority": 0
     }
+  ],
+  "exchanges": [
+    { "name": "fiapx.comandos", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false },
+    { "name": "fiapx.eventos", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false },
+    { "name": "extracao.dlx", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false },
+    { "name": "videos.dlx", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false },
+    { "name": "notificacao.dlx", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false }
+  ],
+  "queues": [
+    { "name": "extracao.extrair", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 3, "x-dead-letter-exchange": "extracao.dlx", "x-dead-letter-routing-key": "extracao.extrair" } },
+    { "name": "extracao.extrair.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-dead-letter-exchange": "extracao.dlx", "x-dead-letter-routing-key": "extracao.extrair.estacionado" } },
+    { "name": "extracao.extrair.estacionamento", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum" } },
+    { "name": "videos.extracao-iniciada", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 3, "x-dead-letter-exchange": "videos.dlx", "x-dead-letter-routing-key": "videos.extracao-iniciada" } },
+    { "name": "videos.extracao-concluida", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 3, "x-dead-letter-exchange": "videos.dlx", "x-dead-letter-routing-key": "videos.extracao-concluida" } },
+    { "name": "videos.extracao-falhou", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 3, "x-dead-letter-exchange": "videos.dlx", "x-dead-letter-routing-key": "videos.extracao-falhou" } },
+    { "name": "videos.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {} },
+    { "name": "notificacao.video-falhou", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 3, "x-dead-letter-exchange": "notificacao.dlx", "x-dead-letter-routing-key": "notificacao.video-falhou" } },
+    { "name": "notificacao.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {} }
+  ],
+  "bindings": [
+    { "source": "fiapx.comandos", "vhost": "/", "destination": "extracao.extrair", "destination_type": "queue", "routing_key": "extracao.extrair", "arguments": {} },
+    { "source": "fiapx.eventos", "vhost": "/", "destination": "videos.extracao-iniciada", "destination_type": "queue", "routing_key": "extracao.iniciada", "arguments": {} },
+    { "source": "fiapx.eventos", "vhost": "/", "destination": "videos.extracao-concluida", "destination_type": "queue", "routing_key": "extracao.concluida", "arguments": {} },
+    { "source": "fiapx.eventos", "vhost": "/", "destination": "videos.extracao-falhou", "destination_type": "queue", "routing_key": "extracao.falhou", "arguments": {} },
+    { "source": "fiapx.eventos", "vhost": "/", "destination": "notificacao.video-falhou", "destination_type": "queue", "routing_key": "video.falhou", "arguments": {} },
+    { "source": "extracao.dlx", "vhost": "/", "destination": "extracao.extrair.dlq", "destination_type": "queue", "routing_key": "extracao.extrair", "arguments": {} },
+    { "source": "extracao.dlx", "vhost": "/", "destination": "extracao.extrair.estacionamento", "destination_type": "queue", "routing_key": "extracao.extrair.estacionado", "arguments": {} },
+    { "source": "videos.dlx", "vhost": "/", "destination": "videos.dlq", "destination_type": "queue", "routing_key": "videos.extracao-iniciada", "arguments": {} },
+    { "source": "videos.dlx", "vhost": "/", "destination": "videos.dlq", "destination_type": "queue", "routing_key": "videos.extracao-concluida", "arguments": {} },
+    { "source": "videos.dlx", "vhost": "/", "destination": "videos.dlq", "destination_type": "queue", "routing_key": "videos.extracao-falhou", "arguments": {} },
+    { "source": "notificacao.dlx", "vhost": "/", "destination": "notificacao.dlq", "destination_type": "queue", "routing_key": "notificacao.video-falhou", "arguments": {} }
   ]
 }

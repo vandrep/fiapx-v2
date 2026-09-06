@@ -255,6 +255,12 @@ disco, então buscar dez mensagens de uma vez só faria uma réplica segurar tra
 ociosa, poderia estar fazendo. Já o `notificacao` usa `prefetch=10`, porque uma chamada SMTP
 é espera de rede.
 
+A stack padrão do `docker-compose.yml` sobe **duas** réplicas do `extracao` desde o
+[ticket 049](wayfinder/tickets/049-compose-da-demo-processa-em-paralelo.md): a concorrência é
+requisito do enunciado, não instrumento de medição, e antes disso ela só existia no overlay de
+carga. O que continua morando só no overlay é o `N` variável e o teto de CPU por réplica.
+`./scripts/concorrencia.sh` observa a concorrência pela borda pública, sem o overlay e sem k6.
+
 O gargalo real é o `extracao`, e é exatamente o serviço projetado para ser multiplicado. É
 também o motivo de as imagens serem publicadas para `amd64` **e** `arm64`: `ffmpeg` emulado
 inviabilizaria o serviço na máquina de quem avalia.
@@ -460,7 +466,7 @@ Fica registrado como candidato não implementado, não como conserto pendente.
 
 | Requisito | Como é atendido | Onde |
 |---|---|---|
-| Processar mais de um vídeo ao mesmo tempo | *competing consumers* no `extracao`, `prefetch=1`, réplicas independentes | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
+| Processar mais de um vídeo ao mesmo tempo | *competing consumers* no `extracao`, `prefetch=1`, réplicas independentes — e a stack padrão sobe **duas**, então o requisito é demonstrável sem overlay: `./scripts/concorrencia.sh` envia a rajada e reprova se nunca houver duas extrações no mesmo instante (ticket 049) | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
 | Não perder requisição em pico | `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit`, reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada. Escalar a borda por réplicas atrás de um proxy reduz a perda ao derrubar uma delas de 90,25% para 9,75% (ticket 028) — a ressalva que resta é que esse número não é zero | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
 | Protegido por usuário e senha | Keycloak, OIDC *bearer-only*; o dono vem do `sub` do token | [pesquisa](pesquisa/oidc-keycloak.md) |
 | Listagem de status dos vídeos do usuário | `GET /videos` paginado, escopado pelo dono; não existe consulta sem dono na interface do gateway | [contrato HTTP](contratos/http-videos.md) |
@@ -503,9 +509,14 @@ O que eu não defendo — apenas aceitei.
   mesmo cenário e 0 em 133 com a borda derrubada. Deixa de ser limitação; fica aqui como
   histórico porque foi a única a contrariar um requisito explícito do enunciado, e porque
   ninguém a teria encontrado sem medir.
-- **A demo sobe uma réplica só, e escalar por réplicas não zera a perda.** O
+- **A borda da demo sobe réplica única, e escalar por réplicas não zera a perda.** O
+  `extracao` da demo passou a subir com duas réplicas no
+  [ticket 049](wayfinder/tickets/049-compose-da-demo-processa-em-paralelo.md) — processar mais
+  de um vídeo ao mesmo tempo é requisito do enunciado, e até ali a stack do README o exercia
+  com uma réplica e `max-outstanding-messages=1`, isto é, um vídeo por vez. O `videos`, não: o
   [ticket 028](wayfinder/tickets/028-escala-da-borda.md) mediu N=3 réplicas atrás de um proxy
-  no overlay de carga (não no `docker-compose.yml` da demo, que segue com uma só): matar uma
+  no overlay de carga (não no `docker-compose.yml` da demo, que segue com uma só, porque
+  escalar a borda exige o proxy na frente da porta publicada): matar uma
   durante a rajada caiu de 361/400 recusados para **39/400 (9,75%)** — melhor por 9,3×, mas não
   zero, porque o proxy recusa reencaminhar um `POST` para outra réplica depois que a conexão já
   falhou esperando resposta, para não arriscar duplicar o Vídeo. A varredura do

@@ -2,10 +2,14 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.carga.yml up -d
 #
-# O `docker-compose.yml` principal **e a demo da banca**, e por isso nao recebe `replicas:`
-# nem limite de CPU: sao parametros que existem so para o experimento, e deixa-los la faria a
-# demo carregar o instrumento para sempre. Overlay e a construcao que o proprio Compose
+# O `docker-compose.yml` principal **e a demo da banca**, e por isso nao recebe limite de CPU
+# nem replica da borda: sao parametros que existem so para o experimento, e deixa-los la faria
+# a demo carregar o instrumento para sempre. Overlay e a construcao que o proprio Compose
 # oferece para esta separacao.
+#
+# Uma excecao, desde o ticket 049: o `extracao` da demo sobe com `replicas: 2`, porque
+# processar mais de um video ao mesmo tempo e requisito do enunciado, nao instrumento de
+# medicao. O que continua morando so aqui e o N variavel e o teto de CPU por replica.
 #
 # As duas variaveis abaixo sao o parametro que o ticket 026 varre. O 025 fixa
 # FIAPX_EXTRACAO_REPLICAS=4 para a drenagem da rajada nao levar meia hora; o 026 percorre
@@ -15,7 +19,8 @@
 # frente, porque a porta publicada (`8080:8080`) nao pode ser aberta por N containers ao mesmo
 # tempo. `!override []` some com a publicacao de porta do `videos` so aqui — o
 # `docker-compose.yml` principal, que e a demo, continua publicando a porta como sempre porque
-# ali `deploy.replicas` nunca aparece (nasce implicitamente em 1).
+# no `videos` dele `deploy.replicas` nunca aparece (nasce implicitamente em 1). O `extracao`
+# escala na demo sem essa complicacao justamente por nao publicar porta nenhuma.
 services:
   extracao:
     environment:

@@ -35,8 +35,12 @@ espera() {
         sleep 2
     done
 }
+# Uma linha por container, e nao por servico: o `extracao` sobe com duas replicas desde o
+# ticket 049. Saudavel e "existe container e nenhum deles esta fora de healthy".
 saudavel() {
-    [[ "$(docker compose ps "$1" --format '{{.Health}}')" == healthy ]]
+    local estados
+    estados="$(docker compose ps "$1" --format '{{.Health}}')"
+    [[ -n "$estados" ]] && ! grep -qv '^healthy$' <<< "$estados"
 }
 broker() { curl -fsS --max-time 10 -u fiapx:fiapx "http://localhost:25672/api/$1"; }
 token_demo() {

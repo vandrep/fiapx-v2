@@ -182,6 +182,12 @@ mensageria, config de Compose ou imagem: é a única coisa no repo que reprova u
 passa nos próprios testes e mesmo assim não fala com o vizinho. `verify` em vez de `test`
 porque o CI precisa do `package` para construir as imagens no mesmo runner.
 
+`scripts/concorrencia.sh` é o degrau seguinte, e o único que julga um requisito do enunciado
+em vez do fluxo: manda uma rajada de oito Vídeos contra o Compose padrão e reprova se a
+listagem nunca mostrar dois em `PROCESSANDO` ao mesmo tempo. Rode-o quando mexer em réplica,
+prefetch ou canal de entrada do `extracao` — é ele que segura a regressão do ticket 049, onde
+a demo processava um vídeo por vez enquanto a documentação dava o requisito como atendido.
+
 `scripts/carga/conservacao.sh` é o outro degrau: rajada de centenas de envios contra o Compose
 com falha injetada (`docker kill` no `extracao` ou no `videos`), julgada por critérios fixados
 antes de rodar. Rode-o quando mexer em máquina de estados, consumo de evento ou reconciliação —

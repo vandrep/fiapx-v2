@@ -56,6 +56,45 @@ ponto exato. Precisa de `jq` e `unzip` além do Docker.
 
 A seção [Usar](#usar) é o mesmo percurso passo a passo, para quem quiser conduzir na mão.
 
+### Mais de um vídeo ao mesmo tempo
+
+O `extracao` sobe com **duas réplicas** nesta stack — elas competem pela mesma fila, e cada
+uma pega uma extração por vez. Não é preciso ligar nada:
+
+```bash
+docker compose ps extracao   # duas linhas, ambas (healthy)
+./scripts/concorrencia.sh    # rajada de 8 vídeos, ~1 min do zero
+```
+
+O script envia a rajada autenticada e acompanha a listagem `GET /videos`, desenhando a linha
+do tempo de cada Vídeo em `PROCESSANDO` — que é exatamente o intervalo da extração, porque o
+estado abre no início e fecha na conclusão. Barras que se sobrepõem são extrações
+simultâneas, e ele reprova se nunca houver duas ao mesmo tempo por mais de um instante:
+
+```
+    302aa8a5           #######  CONCLUIDO (0,7s)
+    d4b25402           #######  CONCLUIDO (0,7s)
+```
+
+No fim ele confere que cada Vídeo chegou a `CONCLUIDO` com o Pacote íntegro e invisível para
+o outro usuário: concorrência que troca resultado não conta. Precisa de `jq` e `unzip`, como
+o smoke. Para acompanhar por dentro, `docker compose logs -f extracao` mostra as duas
+réplicas trabalhando ao mesmo tempo.
+
+Para ver mais em paralelo, escale o worker — nada mais precisa mudar, porque ele não publica
+porta nem guarda estado:
+
+```bash
+FIAPX_EXTRACAO_REPLICAS=4 ./scripts/concorrencia.sh 16
+```
+
+A variável é a mesma do `docker-compose.yml` (`replicas: ${FIAPX_EXTRACAO_REPLICAS:-2}`),
+então vale igual para um `docker compose up -d` avulso. Prefira-a a `--scale`: o script roda
+`up -d`, que devolveria a stack ao valor do arquivo.
+
+Quanto isso rende foi medido até 6 réplicas (eficiência de escala 0,88; 15,6 vídeo/min) em
+[`docs/pesquisa/carga-escalabilidade.md`](docs/pesquisa/carga-escalabilidade.md).
+
 | Console | Endereço | Credenciais |
 |---|---|---|
 | **Swagger UI** (a demo) | http://localhost:8080/q/swagger-ui | `demo` / `demo` |

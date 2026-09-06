@@ -69,11 +69,17 @@ ok "docker compose up -d"
 # Nao da para usar `docker compose up --wait`: o `minio-seed` e one-shot e sai com 0, o que
 # o `--wait` trata como servico morto. A saude dos tres de negocio ja implica a de todo o
 # resto — eles so sobem depois do `depends_on: service_healthy`.
+#
+# Conta servicos distintos, e nao linhas: o `extracao` sobe com duas replicas desde o ticket
+# 049, entao `docker compose ps` traz quatro linhas para tres servicos — e mais, se alguem
+# usar `--scale`. O criterio continua o mesmo: os tres servicos presentes e nenhum container
+# fora de `healthy`.
 inicio=$SECONDS
 while :; do
     saude="$(docker compose ps --format '{{.Service}} {{.Health}}' | grep -E '^(videos|extracao|notificacao) ' || true)"
+    servicos="$(echo "$saude" | awk 'NF {print $1}' | sort -u | wc -l)"
     doentes="$(echo "$saude" | grep -cv ' healthy$' || true)"
-    [[ "$(echo "$saude" | wc -l)" == 3 && "$doentes" == 0 ]] && break
+    (( servicos == 3 && doentes == 0 )) && break
     (( SECONDS - inicio > timeout_saude )) && falha "servicos nao ficaram saudaveis em ${timeout_saude}s:"$'\n'"$saude"
     sleep 3
 done

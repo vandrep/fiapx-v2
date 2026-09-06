@@ -3,9 +3,10 @@
 #
 # A afirmacao sob julgamento e a do ADR 0003 levada ao disco: *duas replicas podem receber o
 # mesmo comando de Extracao sem destruir o trabalho uma da outra*. O `smoke.sh` nao alcanca
-# isso — ele manda um Video de cada vez para uma replica so —, e a suite tambem nao: dentro de
-# um `@QuarkusTest` ha um consumidor so, e o `max-outstanding-messages=1` serializa a
-# duplicata. Concorrencia de verdade sobre o volume compartilhado `fiapx-extracao-scratch` so
+# isso — ele manda um Video de cada vez —, e a suite tambem nao: dentro de um `@QuarkusTest`
+# ha um consumidor so, e o `max-outstanding-messages=1` serializa a duplicata. O
+# `concorrencia.sh` tampouco: la o estimulo sao Videos distintos, aqui e o MESMO comando duas
+# vezes. Concorrencia de verdade sobre o volume compartilhado `fiapx-extracao-scratch` so
 # existe com duas replicas de pe, que e o que este script sobe.
 #
 # O estimulo e deliberado: o comando duplicado e publicado direto na routing key real
@@ -24,7 +25,9 @@
 # Uso:
 #   scripts/carga/duplicata-em-replicas.sh [duplicatas]     # default 3
 #
-# Deixa a stack de pe com DUAS replicas de extracao; `docker compose up -d` a devolve a uma.
+# Deixa a stack de pe com DUAS replicas de extracao — que desde o ticket 049 e o default do
+# `docker-compose.yml`, entao o `--scale extracao=2` daqui virou redundante e fica so como
+# declaracao do que o ensaio exige.
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

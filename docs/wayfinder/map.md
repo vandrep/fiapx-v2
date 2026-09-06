@@ -523,6 +523,23 @@ verificadas por teste, não são sugestão). Projeto original em
   `202` e o download entrega o Pacote inteiro; com o armazenamento sempre fora, os dois
   respondem `500`, com o corpo `problem+json` que o contrato prevê.
 
+- [A demo processa mais de um vídeo ao mesmo tempo](tickets/049-compose-da-demo-processa-em-paralelo.md)
+  — o primeiro requisito do enunciado só era exercido pelo overlay de carga: a stack do README
+  subia uma réplica do `extracao` com `max-outstanding-messages=1`, um vídeo por vez. Resolvido
+  por réplicas, não por mensagens em voo — o prefetch de 1 protege memória e disco de uma
+  extração de até 4,4 GB de PNG, e subi-lo poria N extrações no mesmo JVM e no mesmo scratch.
+  `deploy.replicas: ${FIAPX_EXTRACAO_REPLICAS:-2}` no Compose da demo — o ponto medido com
+  eficiência 0,99, e a mesma variável que o overlay já usava. Fica registrado o que a réplica
+  extra muda e o prefetch não protegia: o scratch é um volume só, então o pior caso de disco
+  dobra, e sem teto de CPU as duas se sobre-assinam (o 0,99 foi medido com `cpus=2`).
+  `scripts/concorrencia.sh` observa a concorrência pela borda pública — rajada de oito,
+  amostragem da listagem a cada 100 ms, critério de pelo menos dois em `PROCESSANDO` no mesmo
+  instante e por duas amostras seguidas, porque um instante isolado é indistinguível de
+  reordenação entre `extracao.iniciada` e `extracao.concluida` — e foi conferido por controle
+  negativo: com uma réplica só, ele reprova e a linha do tempo sai em escada. O smoke e o
+  ensaio de persistência contavam saúde por linha de `docker compose ps` e esperariam até o
+  timeout com duas réplicas; passaram a contar serviços distintos e containers não-saudáveis.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -613,15 +630,11 @@ verificadas por teste, não são sugestão). Projeto original em
      próprios tickets. Oito tickets saíram daí, e a ordem entre eles é a ordem do risco: os
      dois P1 eram requisito do enunciado não exercido e ADR desmentido pelo código; os dois P2
      são janela de reconciliação assimétrica e vocabulário ambíguo atravessando fronteira; os
-     quatro P3 são manutenção e registro. O 048 já fechou (ver Decisões até aqui). Dos sete
-     abaixo, só o 053 é bloqueado (pelo 052) — os outros seis estão na fronteira. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
+     quatro P3 são manutenção e registro. O 048 e o 049 já fecharam (ver Decisões até aqui).
+     Dos seis abaixo, só o 053 é bloqueado (pelo 052) — os outros cinco estão na fronteira. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
      passaria verde, mas o próprio 045 já registra isso como escolha barata deliberada, e
      reabrir seria refazer decisão registrada. -->
 
-- **[049](tickets/049-compose-da-demo-processa-em-paralelo.md) — a stack da demo processa um
-  vídeo por vez.** O primeiro requisito funcional do enunciado é processar mais de um ao mesmo
-  tempo; a concorrência só existe no overlay de carga. A arquitetura permite, a entrega não
-  exerce. P1.
 - **[050](tickets/050-folga-contra-crash-nas-falhas-pendentes.md) — a janela do ADR 0003 é
   assimétrica.** A varredura protege comandos pendentes com folga de tempo e falhas pendentes
   com nenhuma: cair sobre uma publicação de falha em voo duplica o e-mail. Não quebra o ADR

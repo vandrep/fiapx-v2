@@ -22,10 +22,10 @@ locução em português, ~145 palavras por minuto.
 | Bloco | Entra em | Duração | Palavras |
 |---|---|---|---|
 | 1. Abertura | 0:00 | 0:29 | 70 |
-| 2. Funcionando | 0:29 | 2:28 | 357 |
-| 3. Arquitetura | 2:57 | 4:10 | 605 |
-| 4. Fechamento | 7:07 | 2:34 | 373 |
-| **Total** | | **9:41** | **1.405** |
+| 2. Funcionando | 0:29 | 2:43 | 395 |
+| 3. Arquitetura | 3:12 | 4:10 | 605 |
+| 4. Fechamento | 7:22 | 2:19 | 336 |
+| **Total** | | **9:41** | **1.406** |
 
 Os números acima são medidos, não estimados: são as palavras que estão de fato escritas
 abaixo. Se você editar a narração, remeça — o teto de dez minutos não perdoa.
@@ -74,17 +74,19 @@ projeto original antes dele — como *antes*, não como leitura de código.
 
 ---
 
-## Bloco 2 — O projeto funcionando (0:29–2:57, 357 palavras)
+## Bloco 2 — O projeto funcionando (0:29–3:12, 395 palavras)
 
-Um único take do `scripts/smoke.sh`, do passo 2 ao 9. Os passos 0 e 1 (dependências e
-Compose) não entram.
+Um único take do `scripts/smoke.sh`, do passo 2 ao 10. Os passos 0 e 1 (dependências e
+Compose) não entram, e o 11 também não: derrubar a observabilidade para provar que o Vídeo
+não depende dela é uma garantia que se afirma em uma frase e custaria meio minuto de tela.
 
 ### Tomada — o script começa
 
 > O que você vai ver é o `scripts/smoke.sh`, versionado no repositório. Não é uma sequência
 > de comandos que eu digito na hora: é a verificação ponta a ponta do projeto, que qualquer
-> pessoa roda com um comando só. A stack já está de pé; do zero, ela sobe e o smoke completa
-> em um minuto e oito segundos. As esperas estão aceleradas quatro vezes, e nada foi cortado.
+> pessoa roda com um comando só. A stack já está de pé; com ela quente, os onze passos
+> levam quarenta e cinco segundos. As esperas estão aceleradas quatro vezes, e nada
+> foi cortado.
 
 ### Tomada — passo 2, token no Keycloak
 
@@ -119,15 +121,19 @@ Compose) não entram.
 > identificador deste vídeo dentro do corpo, porque a caixa de entrada sobrevive entre
 > execuções e contar daria falso verde.
 
-### Tomada — passo 9, propriedade do vídeo
+### Tomada — passos 9 e 10, propriedade do vídeo e o rastro *(a espera do 10, acelerada 4×)*
 
-> Por último, um segundo usuário. O vídeo do primeiro não aparece na listagem dele, e o acesso
-> direto pelo identificador responde 404 — não 403, porque a existência de um recurso alheio
-> também é informação.
+> Um segundo usuário. O vídeo do primeiro não aparece na listagem dele, e o acesso direto pelo
+> identificador responde 404 — não 403, porque a existência de um recurso alheio também é
+> informação.
+>
+> O último passo não pergunta à API, pergunta à observabilidade: pelo identificador do vídeo
+> que falhou, o script cobra os três serviços num rastro só. É a travessia que você viu,
+> por dentro — é assim que se descobre onde um vídeo parou.
 
 ---
 
-## Bloco 3 — Arquitetura (2:57–7:07, 605 palavras)
+## Bloco 3 — Arquitetura (3:12–7:22, 605 palavras)
 
 Cinco diagramas, todos de [`docs/arquitetura.md`](arquitetura.md), em tela cheia.
 
@@ -195,7 +201,7 @@ Encaixar aqui, por ~10s, a árvore de pacotes versionada do módulo `videos`.
 
 ---
 
-## Bloco 4 — Fechamento (7:07–9:41, 373 palavras)
+## Bloco 4 — Fechamento (7:22–9:41, 336 palavras)
 
 ### Tomada — tabela *Requisitos do enunciado* (53s)
 
@@ -220,7 +226,7 @@ Encaixar aqui, por ~10s, a árvore de pacotes versionada do módulo `videos`.
 
 ### Tomada — árvore de `docs/` (24s)
 
-> A documentação está toda no repositório: três ADRs, dois contratos, o desenho de
+> A documentação está toda no repositório: quatro ADRs, dois contratos, o desenho de
 > arquitetura, e o mapa com os vinte e quatro tickets que produziram cada decisão — com as
 > alternativas consideradas e o que foi medido em cada uma. JavaCV, outbox canônico,
 > Kubernetes e módulo Maven compartilhado foram recusados, e o motivo de cada recusa está
@@ -233,10 +239,7 @@ Encaixar aqui, por ~10s, a árvore de pacotes versionada do módulo `videos`.
 > **pelo menos uma vez** — numa janela estreita, o usuário pode receber o aviso duas vezes.
 > Foi escolha consciente: duplicar um aviso é melhor que engolir uma falha.
 >
-> Uma terceira eu recusei de propósito: o enunciado lista Prometheus e Grafana na stack
-> recomendada, e eles não entraram. Com cinco semanas e meia sozinho, monitoramento com
-> dashboard é o primeiro candidato a consumir o tempo que o CI/CD precisa. Os health checks
-> continuam dentro — o que sai é só o painel.
+> A terceira eu não recuso mais: o monitoramento entrou — três sinais e alertas de fila.
 
 ### Tomada — README, encerramento (6s)
 

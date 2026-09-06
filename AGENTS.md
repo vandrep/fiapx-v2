@@ -29,6 +29,7 @@ O resto do contexto está atrás de ponteiros, cada um com o seu gatilho:
 | tocar em retry, dead-letter ou notificação duplicada | [ADR 0001](docs/adr/0001-politica-de-falhas.md) |
 | tocar em transição de estado do Vídeo | [ADR 0002](docs/adr/0002-maquina-de-estados-em-duas-camadas.md) |
 | tocar em publicação de comando ou de falha no `videos` | [ADR 0003](docs/adr/0003-reconciliacao-por-varredura.md) |
+| tocar em span, métrica, log estruturado ou na stack de observabilidade | [ADR 0004](docs/adr/0004-camada-de-observabilidade.md) — e § Nomes na observabilidade, abaixo |
 
 ## Layout
 
@@ -118,6 +119,30 @@ carga usa variáveis próprias `FIAPX_*`, referenciadas no `.properties`, para e
 de canal com traço (ticket 038). Overrides de Compose são deliberados e revisados
 junto do arquivo que os declara; o defeito que este teste persegue é o canal esquecido no
 `.properties`.
+
+## Nomes na observabilidade
+
+Os três serviços exportam log, métrica e trace por OTLP (ticket 059). Os nomes têm **duas
+origens, e duas regras** — não misture:
+
+- **O que a auto-instrumentação emite fica como o OTel emite.** `http.route`,
+  `messaging.destination.name`, os nomes de span do conector RabbitMQ e do SDK da AWS: são
+  contrato com a ferramenta. Traduzir para o vocabulário do projeto quebra consulta, receita
+  de ecossistema e qualquer painel que alguém venha a montar, e não compra nada em troca.
+  Isso vale inclusive quando o nome soa feio ao lado do resto do código.
+- **O que é nosso usa o vocabulário do [`CONTEXT.md`](CONTEXT.md).** A métrica própria é
+  `fiapx.extracao.duracao`, com o atributo `resultado` em `concluida`/`falhou` — as palavras
+  do glossário, não `success`/`error`. A mesma regra vale para atributo próprio de span e
+  campo estruturado de log: `idVideo` é `idVideo`, como no contrato de mensagens.
+
+Métrica nova precisa de justificativa igual à da primeira: existe uma só, e ela existe porque
+mede um intervalo que roda fora do JVM e que nenhuma auto-instrumentação enxerga. O que já é
+respondível pela auto-instrumentação ou por um endpoint não vira métrica.
+
+Instrumentação vive **só em `framework`**, e o teste arquitetural cobra: `io.opentelemetry` e
+`io.micrometer` são import proibido em `core` e `interfaces`, e `WithSpan`, `SpanAttribute`,
+`AddingSpanAttributes`, `Counted` e `Timed` são anotação proibida. O porquê está no
+[ADR 0004](docs/adr/0004-camada-de-observabilidade.md).
 
 ## BDD
 

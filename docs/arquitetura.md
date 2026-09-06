@@ -477,9 +477,19 @@ Fica registrado como candidato não implementado, não como conserto pendente.
 | Testes que garantam a qualidade | 144 testes (103 sem Docker): unitários do `core` com dublês, Cucumber pela borda, teste arquitetural, `ffmpeg` real no `extracao`, e o smoke ponta-a-ponta | [`scripts/smoke.sh`](../scripts/smoke.sh) |
 | CI/CD | GitHub Actions: `verify` e publicação das três imagens multi-arquitetura no GHCR | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) |
 
-Da stack *recomendada*, monitoramento (Prometheus/Grafana) ficou de fora conscientemente —
-veja a seção seguinte. Redis também: não há leitura repetida o bastante para justificar
-cache, e a consulta de status já é uma linha por chave primária.
+Da stack *recomendada*, monitoramento entrou — depois, e não junto. A recusa original valia
+enquanto o CI/CD era o risco; entregue o CI/CD, ela perdeu a premissa. Um container
+`grafana/otel-lgtm` sobe com a demo, fora do caminho de boot dos três serviços
+([ticket 058](wayfinder/tickets/058-piso-de-observabilidade.md)), e os três exportam log,
+métrica e trace por OTLP ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)):
+buscar um `idVideo` devolve **um** trace com os três serviços dentro, com os registros de log
+pendurados nos spans certos, e três alertas binários avaliam Estacionamento não-vazio, DLQ com
+mensagem, e fila com mensagem e zero consumidores. O que continua de fora é **painel curado e
+canal de notificação de alerta** — veja a seção seguinte. O que a camada deliberadamente não
+faz está no [ADR 0004](adr/0004-camada-de-observabilidade.md) e em *Limitações conhecidas*.
+
+Redis, esse ficou de fora mesmo: não há leitura repetida o bastante para justificar cache, e a
+consulta de status já é uma linha por chave primária.
 
 ## O que foi recusado, e por quê
 
@@ -492,7 +502,7 @@ Cada linha tem a discussão inteira no arquivo apontado.
 | **Outbox canônico** com tabela e payload | compraria *exatamente uma vez*, regime que o ADR 0001 já recusou; a tabela `video` com duas colunas marcadoras fecha as mesmas janelas sem tabela nova ([ADR 0003](adr/0003-reconciliacao-por-varredura.md)) |
 | **Kubernetes** | o enunciado aceita Compose *ou* Kubernetes; Compose garante que a demonstração roda na máquina de quem avalia, sem cluster |
 | **Módulo Maven `shared`** com os contratos | duplicar cinco records é mais honesto que acoplar três serviços por um jar; extrair depois, se doer |
-| **Prometheus + Grafana** | é stack *recomendada*, não requisito; com o prazo desta entrega, seria o primeiro a canibalizar o tempo do CI/CD, que é requisito. Health checks ficaram — e são o que o Compose usa para ordenar a subida |
+| **Painel curado no Grafana e canal de notificação de alerta** | a coleta dos três sinais entrou (tickets [058](wayfinder/tickets/058-piso-de-observabilidade.md) e [059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)) e os três alertas avaliam; o que sobra fora são as duas partes que continuam custando sem pagar nesta entrega. **Painel**: a exploração ad-hoc no *Explore* responde as mesmas perguntas sem manutenção, e um painel vazio na demo prova menos que uma busca por `idVideo`. **Canal**: entregar o alerta por e-mail é configuração de *contact point*, adiada conscientemente — e por isso a detecção não mudou, o que está escrito abaixo em vez de subentendido |
 | **E2E automatizado no CI** | Compose inteiro num runner (ffmpeg + MinIO + Keycloak + RabbitMQ) é fonte de instabilidade que não acrescenta garantia; `scripts/smoke.sh` faz a mesma verificação onde ela é confiável |
 
 ## Limitações conhecidas
@@ -548,9 +558,39 @@ O que eu não defendo — apenas aceitei.
   antes de entrar no consumidor, também podem ser reenfileiradas quando a assinatura é
   cancelada; o ensaio não prova zero reentregas em toda corrida de entrega. Trabalho que exceda esse teto, SIGKILL, OOM e queda de
   rede continuam podendo gastar entrega. A medição verde cobre redeploy com broker saudável.
-- **Não há observabilidade além de health check.** Sem métrica, sem tracing distribuído. Num
-  sistema assíncrono com DLQ, a primeira coisa que eu acrescentaria com mais tempo seria
-  visibilidade sobre profundidade de fila e taxa de dead-letter.
+- **Os alertas existem, mas a detecção não mudou.** As três regras do
+  [ticket 058](wayfinder/tickets/058-piso-de-observabilidade.md) avaliam continuamente e
+  guardam histórico, e nenhuma delas sai do Grafana: não há *contact point*, não há e-mail,
+  não há webhook. Um alerta disparado só é visto por quem já foi olhar — que é exatamente a
+  propriedade do health check no incidente de 06/09/2026, em que `docker ps` dizia `unhealthy`
+  por 14 minutos e ninguém perguntou. O que a camada acrescentou ali foi o **diagnóstico** (20
+  minutos de leitura de log viraram uma pergunta respondida em segundos), não a **descoberta**.
+  Fechar essa metade é configuração, não código, e continua adiada.
+- **A retenção é efêmera: o histórico morre no `docker compose down`.** A stack sobe sem volume
+  nomeado, de propósito — volume sem teto na máquina de quem avalia é pior que perder histórico.
+  A consequência é que nenhuma pergunta sobre ontem tem resposta, e a série temporal que
+  sustentaria um limiar calibrado por tendência não existe. Os três alertas serem binários e sem
+  número para calibrar não é só elegância: é o que sobra quando não há passado.
+- **A imagem da stack é declaradamente de demonstração, não de produção.** `grafana/otel-lgtm`
+  empacota Collector, Prometheus, Tempo, Loki e Grafana num container só, e o próprio projeto a
+  publica como ferramenta de desenvolvimento e teste. Ela sobe com acesso anônimo em papel
+  Admin, sem persistência e sem retenção configurada, e nada disso se leva a sério fora da demo.
+  A escolha comprou o piso inteiro por 365 MiB de RAM e 3,6 GB de imagem, num container em vez
+  de cinco; o que ela não compra é operação.
+- **A configuração medida não é a configuração entregue.** O overlay
+  `docker-compose.carga.yml` desliga a stack (`replicas: 0`) e roda os serviços com
+  `QUARKUS_OTEL_SDK_DISABLED=true`, para preservar o método das medições dos tickets 025–028 —
+  medir linearidade limitada por CPU com um coletor disputando o mesmo host mede outra coisa.
+  O preço é honesto e fica dito: **os números de escala deste documento descrevem um sistema sem
+  observabilidade, e a demo tem uma.** O custo dela foi medido à parte, sobre o fixture de
+  controle — ~5% no ciclo do Vídeo e ~160 MiB somando os três serviços
+  ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)) —, e a extrapolação
+  desse número para o regime de pico não foi feita. Há um segundo efeito: foi no caminho com o
+  SDK desligado — o do overlay — que apareceu o travamento raro do
+  [ticket 061](wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md), ainda sem causa
+  raiz; a configuração entregue não exibiu o sintoma em nenhuma execução. As decisões desta
+  camada estão no
+  [ADR 0004](adr/0004-camada-de-observabilidade.md).
 - **O fluxo entre os três serviços não roda no CI.** `./mvnw verify` testa cada serviço
   isolado; que eles conversam é verificado por `scripts/smoke.sh`, que alguém precisa rodar.
 - **O caminho de tentativas esgotadas não é testado automaticamente.** Exigiria derrubar o

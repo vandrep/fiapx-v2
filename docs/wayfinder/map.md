@@ -648,6 +648,25 @@ verificadas por teste, não são sugestão). Projeto original em
   existe no repositório, e reprovou de verdade antes de a busca ser ancorada no serviço certo.
   Deixou um defeito medido em aberto, [061](tickets/061-travamento-raro-com-o-sdk-desligado.md).
 
+- [A camada de observabilidade virou registro](tickets/060-registrar-a-camada-de-observabilidade.md)
+  — fecha a cadeia 058–060, na direção inversa do 055: lá o trabalho era registrar escolha sem
+  registro, aqui é desmentir quatro textos que a entrega tornou falsos. `docs/arquitetura.md`
+  mudou nos três pontos, e a linha da tabela de recusados passou a recusar **painel curado e
+  canal de notificação**, não monitoramento inteiro. Entraram **quatro limitações novas**, sem
+  eufemismo: a detecção não mudou (alerta sem canal é a mesma propriedade do health check no
+  incidente de 06/09), a retenção morre no `down`, a imagem da stack é de demonstração, e **a
+  configuração medida não é a entregue** — o overlay de carga desliga a observabilidade para
+  preservar o método dos tickets 025–028, então os números de escala descrevem um sistema que a
+  demo não é. **ADR 0004** responde as três perguntas que não tinham onde ser respondidas:
+  `core` sem span (com o teste endurecido, porque a lista nominal mentia por omissão), `idVideo`
+  × `trace_id`, e o overlay que desliga. `docs/contratos/mensagens.md` ganhou § Headers —
+  `traceparent` ao lado do `x-death`, corpos intactos —, e o `AGENTS.md` a regra de nomes: o que
+  o OTel emite fica como o OTel emite, o que é nosso usa o `CONTEXT.md`. O **`CONTEXT.md` não
+  mudou, e é decisão**: trace, span e travessia são vocabulário de infraestrutura, e glossário é
+  glossário. No roteiro, as 53 palavras que narravam a recusa viraram 16 de afirmação e o Bloco 2
+  ganhou o passo de trace dentro do take que já existia — 1.406 palavras, **9:41**, o mesmo teto
+  de antes. O único número novo é medido: três corridas de `smoke.sh` com a stack quente, 45/45/46 s.
+
 - [Uma Extração trava, raramente, com o SDK desligado](tickets/061-travamento-raro-com-o-sdk-desligado.md)
   — **aberto**. Achado ao medir o custo da instrumentação no 059: com
   `QUARKUS_OTEL_SDK_DISABLED=true`, a configuração que o overlay de carga passou a usar, uma

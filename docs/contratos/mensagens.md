@@ -70,6 +70,30 @@ Numa DLQ compartilhada, a fila de origem só se descobre pelo header `x-death`. 
 porque o destino é olho humano no management UI: mensagem ali significa banco ou SMTP fora
 do ar por minutos.
 
+### Headers
+
+Metadado de transporte anda nos **headers**, nunca no corpo. São dois, e nenhum dos dois é
+do domínio:
+
+| Header | Quem põe | Para quê |
+|---|---|---|
+| `x-death` | o broker, ao dead-letterar | descobrir a fila de origem numa DLQ compartilhada |
+| `traceparent` (e `tracestate`, quando houver) | o publicador, pelo OpenTelemetry | costurar a travessia do Vídeo pelos três serviços num único trace |
+
+O contexto de trace é o do **W3C Trace Context** e chegou no
+[ticket 059](../wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md). Os **corpos das cinco
+mensagens não mudaram** — nem então, nem por causa disto: o Vídeo nunca trafega na mensagem, e
+o contexto de trace também não entra no `record`. A regra do topo (*alterou aqui, alterou nos
+três*) vale para os `record`; header não é campo, e nenhuma das três cópias o menciona.
+
+`idVideo` e `trace_id` não são a mesma chave e não se substituem: `idVideo` é a chave de
+correlação do contrato, a que um humano digita e que sobrevive a qualquer reentrega; `trace_id`
+identifica uma **travessia**, é gerado pela infraestrutura e muda a cada uma
+([ADR 0004](../adr/0004-camada-de-observabilidade.md)).
+
+Um consumidor que ignore o header funciona igual: sem `traceparent` o span nasce raiz, e a
+mensagem é roteada, desserializada e processada exatamente do mesmo jeito.
+
 ### Quem declara o quê
 
 Em teste, cada serviço declara pelo conector SmallRye o que publica e o que consome

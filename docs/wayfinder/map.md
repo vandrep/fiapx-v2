@@ -593,6 +593,13 @@ verificadas por teste, não são sugestão). Projeto original em
   outros dois passam um no-op. A decisão de transição continua na entidade (ADR 0002); nada
   mudou no que cada evento aceita ou recusa.
 
+- [Os nomes qualificados inline viraram import](tickets/054-nomes-qualificados-inline.md)
+  — `VideosResource` (`videos`) e `EspacoDeTrabalhoAdapter` (`extracao`) escreviam tipo,
+  anotação e utilitário por extenso (`java.net.URI`, `jakarta.ws.rs.DefaultValue`,
+  `java.util.function.Supplier`, `java.util.concurrent.CompletableFuture`) no meio do
+  código, destoando do resto dos próprios arquivos. Nenhum dos casos desambiguava tipo
+  homônimo, então todos viraram import comum; nada mais mudou.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -688,9 +695,6 @@ verificadas por teste, não são sugestão). Projeto original em
      passaria verde, mas o próprio 045 já registra isso como escolha barata deliberada, e
      reabrir seria refazer decisão registrada. -->
 
-- **[054](tickets/054-nomes-qualificados-inline.md) — nomes qualificados inline.** O recurso
-  HTTP do `videos` e o adapter de espaço de trabalho do `extracao` escrevem tipo e anotação por
-  extenso no meio de arquivos que importam normalmente. Cosmético. P3.
 - **[055](tickets/055-registrar-as-escolhas-fora-do-enunciado.md) — quatro escolhas sem
   registro.** Monitoramento ausente, skills de agente versionadas, devcontainer e o CSS que
   esconde um campo do Authorize: nenhuma é defeito, nenhuma tem uma frase que a explique onde a

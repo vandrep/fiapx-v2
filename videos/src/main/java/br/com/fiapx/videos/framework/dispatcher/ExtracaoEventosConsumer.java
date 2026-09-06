@@ -1,5 +1,6 @@
 package br.com.fiapx.videos.framework.dispatcher;
 
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.interfaces.controllers.ExtracaoEventosController;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -28,12 +29,10 @@ public class ExtracaoEventosConsumer {
 
     @Incoming("extracao-concluida")
     public Uni<Void> consumirConcluida(ExtracaoConcluida evento) {
-        return Uni.createFrom().completionStage(extracaoEventosController.processarConcluida(
-                evento.idVideo(),
-                evento.chavePacote(),
-                evento.quantidadeFrames(),
-                evento.tamanhoBytes(),
-                evento.concluidaEm()));
+        var resultado = new ResultadoExtracao(
+                evento.concluidaEm(), evento.chavePacote(), evento.quantidadeFrames(), evento.tamanhoBytes());
+        return Uni.createFrom().completionStage(
+                extracaoEventosController.processarConcluida(evento.idVideo(), resultado));
     }
 
     @Incoming("extracao-falhou")

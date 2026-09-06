@@ -3,6 +3,7 @@ package br.com.fiapx.videos.core.interfaces.gateway;
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.presenter.dto.Pagina;
 
@@ -54,11 +55,7 @@ public interface VideoGateway {
      * <b>ou</b> de PROCESSANDO, porque a {@code ExtracaoConcluida} pode chegar antes da
      * {@code ExtracaoIniciada} (ticket 027, ADR 0002).
      */
-    CompletableFuture<Boolean> marcarConcluida(UUID id,
-                                               Instant concluidaEm,
-                                               String chavePacote,
-                                               int quantidadeFrames,
-                                               long tamanhoPacoteBytes);
+    CompletableFuture<Boolean> marcarConcluida(UUID id, ResultadoExtracao resultado);
 
     /**
      * A guarda de unicidade do e-mail: {@code true} somente quando o {@code UPDATE} mudou a

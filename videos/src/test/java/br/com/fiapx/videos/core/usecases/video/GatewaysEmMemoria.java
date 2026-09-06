@@ -3,6 +3,7 @@ package br.com.fiapx.videos.core.usecases.video;
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
@@ -112,13 +113,8 @@ final class GatewaysEmMemoria {
         }
 
         @Override
-        public CompletableFuture<Boolean> marcarConcluida(UUID id,
-                                                          Instant concluidaEm,
-                                                          String chavePacote,
-                                                          int quantidadeFrames,
-                                                          long tamanhoPacoteBytes) {
-            return transicionar(id, linha -> linha.marcaComoConcluida(
-                    concluidaEm, chavePacote, quantidadeFrames, tamanhoPacoteBytes));
+        public CompletableFuture<Boolean> marcarConcluida(UUID id, ResultadoExtracao resultado) {
+            return transicionar(id, linha -> linha.marcaComoConcluida(resultado));
         }
 
         @Override

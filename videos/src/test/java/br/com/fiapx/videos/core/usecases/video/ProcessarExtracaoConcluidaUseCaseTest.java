@@ -2,6 +2,7 @@ package br.com.fiapx.videos.core.usecases.video;
 
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.entities.Video;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,7 @@ class ProcessarExtracaoConcluidaUseCaseTest {
     @Test
     void processandoViraConcluido() {
         var comando = new ProcessarExtracaoConcluidaUseCase.Command(
-                video.id(), Instant.now(), video.id() + ".zip", 1_200, 4_096L);
+                video.id(), new ResultadoExtracao(Instant.now(), video.id() + ".zip", 1_200, 4_096L));
 
         useCase.executar(comando).join();
 
@@ -52,7 +53,8 @@ class ProcessarExtracaoConcluidaUseCaseTest {
         assertEquals(EstadoVideo.RECEBIDO, recemRecebido.estado());
 
         useCase.executar(new ProcessarExtracaoConcluidaUseCase.Command(
-                recemRecebido.id(), Instant.now(), recemRecebido.id() + ".zip", 900, 2_048L)).join();
+                recemRecebido.id(),
+                new ResultadoExtracao(Instant.now(), recemRecebido.id() + ".zip", 900, 2_048L))).join();
 
         assertEquals(EstadoVideo.CONCLUIDO, recemRecebido.estado());
         assertEquals(recemRecebido.id() + ".zip", recemRecebido.chavePacote());
@@ -66,21 +68,24 @@ class ProcessarExtracaoConcluidaUseCaseTest {
         videos.outraEntregaVenceACorridaPara(video.id(), EstadoVideo.FALHOU);
 
         useCase.executar(new ProcessarExtracaoConcluidaUseCase.Command(
-                video.id(), Instant.now(), video.id() + ".zip", 1_200, 4_096L)).join();
+                video.id(),
+                new ResultadoExtracao(Instant.now(), video.id() + ".zip", 1_200, 4_096L))).join();
 
         var linha = videos.armazenados.get(video.id());
         assertEquals(EstadoVideo.FALHOU, linha.estado());
         assertNull(linha.chavePacote());
         // E a guarda diz nao: o use case descarta o booleano, entao a linha parada sozinha
         // nao distingue um UPDATE que reprovou de um que mentiu.
-        assertFalse(videos.marcarConcluida(video.id(), Instant.now(), video.id() + ".zip", 1_200, 4_096L).join());
+        assertFalse(videos.marcarConcluida(video.id(),
+                new ResultadoExtracao(Instant.now(), video.id() + ".zip", 1_200, 4_096L)).join());
     }
 
     @Test
     void aIniciadaAtrasadaNaoDesfazOConcluido() {
         var iniciada = new ProcessarExtracaoIniciadaUseCase(videos);
         useCase.executar(new ProcessarExtracaoConcluidaUseCase.Command(
-                video.id(), Instant.now(), video.id() + ".zip", 1_200, 4_096L)).join();
+                video.id(),
+                new ResultadoExtracao(Instant.now(), video.id() + ".zip", 1_200, 4_096L))).join();
 
         iniciada.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id())).join();
 
@@ -90,7 +95,7 @@ class ProcessarExtracaoConcluidaUseCaseTest {
     @Test
     void reentregaAposConcluidoNaoFalha() {
         var comando = new ProcessarExtracaoConcluidaUseCase.Command(
-                video.id(), Instant.now(), video.id() + ".zip", 1_200, 4_096L);
+                video.id(), new ResultadoExtracao(Instant.now(), video.id() + ".zip", 1_200, 4_096L));
         useCase.executar(comando).join();
 
         useCase.executar(comando).join();

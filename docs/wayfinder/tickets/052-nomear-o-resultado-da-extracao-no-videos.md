@@ -2,7 +2,7 @@
 
 - id: 052
 - label: wayfinder:task
-- status: aberto
+- status: fechado
 - assignee:
 - bloqueado-por:
 - prioridade: P2
@@ -26,16 +26,39 @@ de mensagem não muda.
 
 ## Condições de aceite
 
-- [ ] Os dados da conclusão passam a viajar como um conceito só pelas camadas onde hoje
+- [x] Os dados da conclusão passam a viajar como um conceito só pelas camadas onde hoje
   viajam soltos, respeitando as regras arquiteturais de cada camada.
-- [ ] Nenhum nome no caminho da conclusão fica ambíguo entre tamanho do Pacote e tamanho do
+- [x] Nenhum nome no caminho da conclusão fica ambíguo entre tamanho do Pacote e tamanho do
   vídeo, inclusive na fronteira de mensageria.
-- [ ] O contrato de mensagens permanece intacto: nomes e tipos dos campos publicados e
+- [x] O contrato de mensagens permanece intacto: nomes e tipos dos campos publicados e
   consumidos não mudam.
-- [ ] Verificar pela borda que um Vídeo concluído expõe instante, quantidade de frames e
+- [x] Verificar pela borda que um Vídeo concluído expõe instante, quantidade de frames e
   tamanho do Pacote com os mesmos valores de hoje.
-- [ ] Executar a suíte de testes a partir da raiz com a infraestrutura exigida pelo projeto.
+- [x] Executar a suíte de testes a partir da raiz com a infraestrutura exigida pelo projeto.
 
 ## Dependências
 
 Nenhuma. Pode começar imediatamente.
+
+## Resolução
+
+`ResultadoExtracao` (record: `concluidaEm`, `chavePacote`, `quantidadeFrames`,
+`tamanhoPacoteBytes`) entra em `videos/core/entities` e passa a viajar inteiro pelas cinco
+assinaturas que hoje carregavam os quatro dados soltos: `ExtracaoEventosConsumer` (monta o
+conceito a partir do evento desmontado, ainda na borda de mensageria — é aqui que
+`tamanhoBytes` do contrato vira `tamanhoPacoteBytes`), `ExtracaoEventosController`,
+`ProcessarExtracaoConcluidaUseCase.Command`, `Video.marcaComoConcluida` e
+`VideoGateway.marcarConcluida`/`VideoDataSourceAdapter`. O record do contrato
+(`framework.dispatcher.ExtracaoConcluida`) não muda: campo, tipo e nome continuam os mesmos
+de `docs/contratos/mensagens.md`.
+
+O nome escolhido é `ResultadoExtracao`, não `Extracao` — o 051 reservou essa disputa para
+aqui, mas o `videos` não tem (nem deveria ter) o tipo `Extracao` do `extracao`: são serviços
+diferentes, sem módulo compartilhado, e o vocabulário do `videos` é sobre o Vídeo que
+concluiu, não sobre a Extração em si.
+
+`./mvnw test` a partir da raiz, com Docker e ffmpeg no `PATH`: os três serviços passam
+(`videos` 24 classes de teste, incluindo `VideoDataSourceAdapterTest`,
+`ProcessarExtracaoConcluidaUseCaseTest` e `VideoTest` atualizados para o novo tipo).
+`VideoDataSourceAdapterTest#concluidaPersisteOsMesmosCamposQueAEntidade` verifica pela borda
+do banco que o Vídeo concluído grava os mesmos valores de hoje.

@@ -3,6 +3,7 @@ package br.com.fiapx.videos.framework.db;
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.core.interfaces.presenter.VideoPresenter;
@@ -80,9 +81,9 @@ class VideoDataSourceAdapterTest {
         carregarEsperado(asserter, id, esperado);
 
         asserter.execute(() -> {
-            esperado[0].marcaComoConcluida(concluidaEm, "pacotes/resultado.zip", 900, 2_048L);
-            return Uni.createFrom().completionStage(() -> adapter.marcarConcluida(
-                    id[0], concluidaEm, "pacotes/resultado.zip", 900, 2_048L));
+            var resultado = new ResultadoExtracao(concluidaEm, "pacotes/resultado.zip", 900, 2_048L);
+            esperado[0].marcaComoConcluida(resultado);
+            return Uni.createFrom().completionStage(() -> adapter.marcarConcluida(id[0], resultado));
         });
         asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
     }
@@ -352,8 +353,8 @@ class VideoDataSourceAdapterTest {
     }
 
     private Uni<Boolean> concluir(UUID id) {
-        return Uni.createFrom().completionStage(
-                () -> adapter.marcarConcluida(id, Instant.now(), id + ".zip", 900, 2_048L));
+        return Uni.createFrom().completionStage(() -> adapter.marcarConcluida(
+                id, new ResultadoExtracao(Instant.now(), id + ".zip", 900, 2_048L)));
     }
 
     private Uni<Boolean> falhar(UUID id) {

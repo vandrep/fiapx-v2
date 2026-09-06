@@ -3,6 +3,7 @@ package br.com.fiapx.videos.framework.db;
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
 import br.com.fiapx.videos.core.interfaces.presenter.dto.Pagina;
@@ -103,15 +104,12 @@ public class VideoDataSourceAdapter implements VideoGateway {
     }
 
     @Override
-    public CompletableFuture<Boolean> marcarConcluida(UUID id,
-                                                       Instant concluidaEm,
-                                                       String chavePacote,
-                                                       int quantidadeFrames,
-                                                       long tamanhoPacoteBytes) {
+    public CompletableFuture<Boolean> marcarConcluida(UUID id, ResultadoExtracao resultado) {
         return Panache.withTransaction(() -> VideoEntity.update(
                         "estado = ?1, finalizadoEm = ?2, chavePacote = ?3, quantidadeFrames = ?4,"
                                 + " tamanhoPacoteBytes = ?5 where id = ?6 and estado in ?7",
-                        EstadoVideo.CONCLUIDO, concluidaEm, chavePacote, quantidadeFrames, tamanhoPacoteBytes,
+                        EstadoVideo.CONCLUIDO, resultado.concluidaEm(), resultado.chavePacote(),
+                        resultado.quantidadeFrames(), resultado.tamanhoPacoteBytes(),
                         id, EstadoVideo.CONCLUIDO.predecessores())
                         .map(linhasAlteradas -> linhasAlteradas > 0))
                 .subscribeAsCompletionStage();

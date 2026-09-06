@@ -573,6 +573,18 @@ verificadas por teste, não são sugestão). Projeto original em
   primeira sondagem, a de duração. A revisão o pegou, e ele ganhou teste próprio contra
   `ffprobe` de verdade sobre um segundo de áudio sem vídeo nenhum.
 
+- [Os dados da conclusão viajam como um conceito só](tickets/052-nomear-o-resultado-da-extracao-no-videos.md)
+  — `ResultadoExtracao` (record: `concluidaEm`, `chavePacote`, `quantidadeFrames`,
+  `tamanhoPacoteBytes`) entra em `videos/core/entities` e passa a viajar inteiro pelas cinco
+  assinaturas que carregavam os quatro dados soltos, do `ExtracaoEventosConsumer` até o
+  `VideoDataSourceAdapter`. A desambiguação de `tamanhoBytes` acontece na própria borda de
+  mensageria — é onde o consumidor monta o conceito a partir do evento —, então nenhum nome
+  do caminho fica ambíguo entre o tamanho do Pacote e o do Vídeo. O contrato
+  (`framework.dispatcher.ExtracaoConcluida`) não mudou. O nome escolhido foi
+  `ResultadoExtracao`, não `Extracao`: o 051 reservou essa disputa para aqui, mas `videos` e
+  `extracao` são serviços diferentes sem módulo compartilhado, e o vocabulário do `videos` é
+  sobre o Vídeo que concluiu, não sobre a Extração em si — não havia disputa de fato.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -663,17 +675,14 @@ verificadas por teste, não são sugestão). Projeto original em
      próprios tickets. Oito tickets saíram daí, e a ordem entre eles é a ordem do risco: os
      dois P1 eram requisito do enunciado não exercido e ADR desmentido pelo código; os dois P2
      são janela de reconciliação assimétrica e vocabulário ambíguo atravessando fronteira; os
-     quatro P3 são manutenção e registro. O 048, o 049, o 050 e o 051 já fecharam (ver Decisões
-     até aqui). Dos quatro abaixo, só o 053 é bloqueado (pelo 052) — os outros três estão na fronteira. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
+     quatro P3 são manutenção e registro. O 048, o 049, o 050, o 051 e o 052 já fecharam (ver
+     Decisões até aqui). Dos três abaixo, nenhum é bloqueado. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
      passaria verde, mas o próprio 045 já registra isso como escolha barata deliberada, e
      reabrir seria refazer decisão registrada. -->
 
-- **[052](tickets/052-nomear-o-resultado-da-extracao-no-videos.md) — os dados da conclusão
-  viajam soltos.** Quatro campos atravessam cinco assinaturas juntos, e `tamanhoBytes` é o
-  Pacote no consumidor e o vídeo na entidade. O `extracao` já batizou metade do conceito. P2.
 - **[053](tickets/053-unificar-a-forma-dos-use-cases-de-extracao.md) — os três use cases de
-  evento repetem a mesma forma.** Busca, decide na entidade, curto-circuita, grava. Bloqueado
-  pelo 052: os dois reescrevem as mesmas assinaturas. P3.
+  evento repetem a mesma forma.** Busca, decide na entidade, curto-circuita, grava. O 052
+  fechou; as assinaturas que ele reescreveu estão estáveis. P3.
 - **[054](tickets/054-nomes-qualificados-inline.md) — nomes qualificados inline.** O recurso
   HTTP do `videos` e o adapter de espaço de trabalho do `extracao` escrevem tipo e anotação por
   extenso no meio de arquivos que importam normalmente. Cosmético. P3.

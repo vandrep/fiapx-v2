@@ -1,8 +1,8 @@
 package br.com.fiapx.videos.core.usecases.video;
 
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
 
-import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -22,21 +22,14 @@ public class ProcessarExtracaoConcluidaUseCase {
     public CompletableFuture<Void> executar(Command command) {
         return videoGateway.buscarPorId(command.idVideo())
                 .thenCompose(video -> {
-                    if (video.isEmpty() || !video.get().marcaComoConcluida(command.concluidaEm(),
-                            command.chavePacote(), command.quantidadeFrames(), command.tamanhoPacoteBytes())) {
+                    if (video.isEmpty() || !video.get().marcaComoConcluida(command.resultado())) {
                         return CompletableFuture.completedFuture(false);
                     }
-                    return videoGateway.marcarConcluida(
-                            command.idVideo(), command.concluidaEm(), command.chavePacote(),
-                            command.quantidadeFrames(), command.tamanhoPacoteBytes());
+                    return videoGateway.marcarConcluida(command.idVideo(), command.resultado());
                 })
                 .thenApply(mudou -> null);
     }
 
-    public record Command(UUID idVideo,
-                          Instant concluidaEm,
-                          String chavePacote,
-                          int quantidadeFrames,
-                          long tamanhoPacoteBytes) {
+    public record Command(UUID idVideo, ResultadoExtracao resultado) {
     }
 }

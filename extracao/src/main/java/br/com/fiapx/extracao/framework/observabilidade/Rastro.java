@@ -97,6 +97,7 @@ public class Rastro {
                     .setAttribute(ID_VIDEO, idVideo.toString())
                     .startSpan();
             if (!span.isRecording()) {
+                span.end();
                 return trabalho.get();
             }
             var escopo = span.makeCurrent();
@@ -120,6 +121,7 @@ public class Rastro {
     public <T> CompletableFuture<T> emTorno(String nome, Supplier<CompletableFuture<T>> trabalho) {
         var span = tracer.spanBuilder(nome).startSpan();
         if (!span.isRecording()) {
+            span.end();
             return trabalho.get();
         }
         var escopo = span.makeCurrent();

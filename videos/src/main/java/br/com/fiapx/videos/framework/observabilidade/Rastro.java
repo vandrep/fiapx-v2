@@ -96,6 +96,7 @@ public class Rastro {
                     .setAttribute(ID_VIDEO, idVideo.toString())
                     .startSpan();
             if (!span.isRecording()) {
+                span.end();
                 return trabalho.get();
             }
             var escopo = span.makeCurrent();
@@ -119,6 +120,7 @@ public class Rastro {
     public <T> CompletableFuture<T> emTorno(String nome, Supplier<CompletableFuture<T>> trabalho) {
         var span = tracer.spanBuilder(nome).startSpan();
         if (!span.isRecording()) {
+            span.end();
             return trabalho.get();
         }
         var escopo = span.makeCurrent();
@@ -128,6 +130,22 @@ public class Rastro {
             encerrar(span, escopo, erroSincrono);
             throw erroSincrono;
         }
+    }
+
+    /**
+     * Pendura o {@code idVideo} no span que ja esta corrente — o de servidor HTTP que a
+     * auto-instrumentacao abriu na borda. Mora aqui, e nao no {@code Resource}, porque o par
+     * <i>atributo de span + campo de MDC</i> e a definicao de "este registro fala deste Video",
+     * e ela precisa de um dono so: com a mesma dupla escrita em dois lugares, mudar a chave num
+     * deles quebraria a busca no outro em silencio.
+     *
+     * <p>Sem {@code remove}: o MDC do Quarkus vive no contexto duplicado do Vert.x, que morre com
+     * a requisicao. Nao ha ThreadLocal a limpar, e limpar cedo apagaria o campo dos logs
+     * assincronos emitidos depois do metodo de borda retornar.
+     */
+    public void marcar(UUID idVideo) {
+        Span.current().setAttribute(ID_VIDEO, idVideo.toString());
+        MDC.put(ID_VIDEO, idVideo.toString());
     }
 
     /**

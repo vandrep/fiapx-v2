@@ -169,9 +169,30 @@ patch às cegas, pelo mesmo critério do ticket 027: defeito medido vira ticket,
 palpite. **A configuração entregue — a demo, com o SDK ligado — não exibiu o sintoma em nenhuma
 execução.**
 
+**O que a revisão mudou.** Quatro correções, todas do revisor e nenhuma cosmética:
+
+- O passo 10 cobria só o Vídeo que **falhou** — largura da travessia, não profundidade. Ganhou
+  uma segunda checagem sobre o Vídeo **concluído**, cobrando o span `extracao.frames`, que é o
+  `ffmpeg` e o mesmo intervalo que a métrica cronometra. Ela reprovou ao ser escrita, por um
+  motivo que virou comentário no script: o span do `ffmpeg` **não** carrega `idVideo` — o adapter
+  não conhece o Vídeo, e não deve —, então a consulta precisa de **dois spansets** ligados por
+  `&&`, e não de duas condições dentro de um.
+- O span do caminho não-gravante nascia e era abandonado sem `end()`. Corrigido nas três cópias.
+- `VideosResource` reimplementava o par *atributo de span + campo de MDC* que é justamente o que
+  o `Rastro` sabe fazer, tomando dele só a constante. Virou `Rastro.marcar(idVideo)`: a dupla
+  passa a ter um dono só, e mudar a chave não quebra a busca do outro lado em silêncio.
+- A frase sobre o log do `ffmpeg` afirmava uma correlação que eu **nunca exercitei** — e estava
+  errada em mais de um sentido. Está reescrita abaixo como desconhecido.
+
 ## O que este ticket não entrega
 
 - **Painel montado no Grafana**: a exploração é pelo *Explore*, como o 058 já registrava.
-- **`idVideo` nos logs do pipeline de `ffmpeg`**: o adapter não conhece o `idVideo` (e não deve),
-  então o aviso de exit code do `ffmpeg` chega correlacionado pelo `trace_id`, não pelo `idVideo`.
+- **Correlação dos logs emitidos de dentro do pipeline de `ffmpeg`**: *não verificada*. O
+  `FfmpegExtracaoDeFramesAdapter` roda em `Infrastructure.getDefaultWorkerPool()`, fora do
+  contexto duplicado do Vert.x onde vivem o MDC e o contexto de trace, então o aviso de exit
+  code de lá provavelmente sai **sem `idVideo` e sem `trace_id`** — os dois, não só o primeiro.
+  Não dá para afirmar: os fixtures do repositório não alcançam aquela linha, porque o arquivo
+  inválido morre no `ffprobe`, antes de o `ffmpeg` rodar. Fica registrado como desconhecido em
+  vez de como garantia. O que **está** verificado é que as linhas emitidas dentro do escopo do
+  consumidor chegam ao Loki com os dois campos, nos três serviços.
 - **Causa raiz do [061](061-travamento-raro-com-o-sdk-desligado.md)**, pelo motivo acima.

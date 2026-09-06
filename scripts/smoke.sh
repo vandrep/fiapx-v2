@@ -289,6 +289,31 @@ for servico in fiapx-videos fiapx-extracao fiapx-notificacao; do
 done
 ok "os três serviços num único trace — o contexto atravessou o RabbitMQ por header AMQP"
 
+# O Vídeo que falhou prova a largura da travessia; ele não prova a profundidade. Quem carrega
+# `extracao.frames` — o span do `ffmpeg`, o único trecho que roda fora do JVM e o mesmo
+# intervalo que a métrica `fiapx.extracao.duracao` cronometra — é o Vídeo que CONCLUIU, porque
+# o inválido morre no ffprobe antes de extrair frame nenhum.
+#
+# Dois spansets ligados por `&&`, e não duas condições dentro de um: o span do `ffmpeg` **não**
+# carrega `idVideo` de propósito — o adapter não conhece o Vídeo, e não deve. A forma de um
+# spanset só exigiria os dois atributos no MESMO span e não casaria nunca, que foi como esta
+# verificação reprovou ao ser escrita.
+inicio=$SECONDS
+while :; do
+    trace_feliz="$(curl -sS -G "$tempo/api/search" \
+        --data-urlencode "q={ .idVideo = \"$id\" } && { name = \"extracao.frames\" }" \
+        --data-urlencode "start=$(( $(date +%s) - 3600 ))" \
+        --data-urlencode "end=$(date +%s)" \
+        --data-urlencode "limit=1" \
+        | jq -r '.traces[0].traceID // empty' || true)"
+    [[ -n "$trace_feliz" ]] && break
+    (( SECONDS - inicio > 90 )) \
+        && falha "nenhum span extracao.frames com idVideo=$id no Tempo em 90s"
+    printf '    ... aguardando a exportação\n'
+    sleep 5
+done
+ok "trace $trace_feliz traz o span do ffmpeg do Vídeo concluído"
+
 # ---------------------------------------------------------------------------------------
 passo "11. O ciclo do Vídeo sobrevive à observabilidade morta"
 

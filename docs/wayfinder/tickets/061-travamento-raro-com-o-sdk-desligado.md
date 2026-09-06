@@ -58,6 +58,19 @@ torna a hipótese insatisfatória e é exatamente por isso que este ticket exist
 patch às cegas. A alternativa é que o 059 apenas mudou o *tempo* do pipeline o bastante para
 expor uma corrida que já existia no conector.
 
+## Uma pista examinada e descartada, e um risco separado
+
+Numa revisão do 059 levantou-se o `Scope` do `Rastro` como candidato: `span.makeCurrent()` roda
+na thread que subscreve e `escopo.close()` no callback de término, que pode ser outra. **Não
+explica este defeito**: com o SDK desligado o span nasce sem gravar e o `Rastro` devolve a cadeia
+crua — nenhum escopo chega a ser aberto no caminho que trava.
+
+O risco, porém, é real no caminho **com** o SDK ligado, e vale investigar junto: quando
+`makeCurrent()` acontece fora de um contexto duplicado do Vert.x, o `QuarkusContextStorage` cai
+no armazenamento por `ThreadLocal`, e aí abrir numa thread e fechar em outra vaza o contexto na
+primeira e corrompe a segunda. Nas execuções do 059 isso não produziu sintoma — o caminho de
+Vídeo roda sobre contexto duplicado —, mas é a mesma família de problema e o mesmo código.
+
 ## O que entregar
 
 Causa raiz identificada e coberta por teste, ou — se a causa for anterior ao 059 — o registro

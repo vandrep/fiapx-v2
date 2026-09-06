@@ -154,11 +154,12 @@ final class GatewaysEmMemoria {
         }
 
         @Override
-        public CompletableFuture<List<Video>> buscarFalhasPendentes(int tamanhoDoLote) {
+        public CompletableFuture<List<Video>> buscarFalhasPendentes(Instant falhadosAntesDe, int tamanhoDoLote) {
             var pendentes = armazenados.values().stream()
                     .filter(video -> video.estado() == EstadoVideo.FALHOU)
                     .filter(video -> !falhaPublicadaEm.containsKey(video.id()))
-                    .sorted(Comparator.comparing(Video::recebidoEm))
+                    .filter(video -> video.finalizadoEm().isBefore(falhadosAntesDe))
+                    .sorted(Comparator.comparing(Video::finalizadoEm))
                     .limit(tamanhoDoLote)
                     .toList();
             return CompletableFuture.completedFuture(pendentes);

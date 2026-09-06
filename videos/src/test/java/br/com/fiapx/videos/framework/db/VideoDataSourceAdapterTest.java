@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -185,6 +186,42 @@ class VideoDataSourceAdapterTest {
         asserter.assertThat(() -> falhar(id[0]), segunda -> assertFalse(segunda));
         asserter.assertThat(() -> estadoDe(id[0]),
                 estado -> assertEquals(EstadoVideo.FALHOU, estado));
+    }
+
+    /**
+     * O predicado de folga da metade da falha e HQL sobre {@code finalizadoEm} (ticket 050),
+     * e nenhum teste do {@code core} o alcanca: la o filtro e um {@code Stream}. Aqui a
+     * mesma linha e julgada por dois cortes, contra Postgres de verdade.
+     *
+     * <p>O instante e fixo, e nao {@code Instant.now()}, porque {@code timestamptz} guarda
+     * microssegundos: um {@code now()} com nanos voltaria do banco truncado <b>para tras</b>
+     * do proprio corte, e o teste passaria ou nao conforme o relogio.
+     */
+    @Test
+    @RunOnVertxContext
+    void aFalhaRecemGravadaFicaForaDaVarreduraEAJaVelhaEntra(UniAsserter asserter) {
+        var id = new UUID[1];
+        var falhouEm = Instant.parse("2026-09-05T16:00:00Z");
+        gravarRecebido(asserter, id);
+        asserter.execute(() -> Uni.createFrom().completionStage(
+                () -> adapter.marcarFalha(id[0], falhouEm, MotivoFalha.ARQUIVO_INVALIDO)));
+
+        asserter.assertThat(() -> falhasPendentesAntesDe(falhouEm),
+                pendentes -> assertFalse(contem(pendentes, id[0]),
+                        "falha dentro da folga pode estar so aguardando o publish em voo"));
+        asserter.assertThat(() -> falhasPendentesAntesDe(falhouEm.plusSeconds(1)),
+                pendentes -> assertTrue(contem(pendentes, id[0]),
+                        "passada a folga, a falha perdida tem de voltar a ser alcancada"));
+    }
+
+    /** Lote largo de proposito: a tabela do teste acumula linhas de outros cenarios. */
+    private Uni<List<Video>> falhasPendentesAntesDe(Instant falhadosAntesDe) {
+        return Uni.createFrom().completionStage(
+                () -> adapter.buscarFalhasPendentes(falhadosAntesDe, 1_000));
+    }
+
+    private static boolean contem(List<Video> pendentes, UUID id) {
+        return pendentes.stream().anyMatch(video -> id.equals(video.id()));
     }
 
     /**

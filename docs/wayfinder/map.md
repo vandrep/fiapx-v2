@@ -540,6 +540,20 @@ verificadas por teste, não são sugestão). Projeto original em
   ensaio de persistência contavam saúde por linha de `docker compose ps` e esperariam até o
   timeout com duas réplicas; passaram a contar serviços distintos e containers não-saudáveis.
 
+- [A folga contra crash vale para as duas metades da varredura](tickets/050-folga-contra-crash-nas-falhas-pendentes.md)
+  — a reconciliação do ADR 0003 protegia comandos pendentes com um minuto de folga e falhas
+  pendentes com nenhuma, então uma passada que caísse sobre uma publicação de `VideoFalhou` em
+  voo republicava o evento e duplicava o e-mail. **Simetrizado**, e não registrado como
+  decisão: a janela entre gravar e publicar é a mesma dos dois lados, e documentar a ausência
+  seria inventar justificativa para um descuido. Um instante de corte por passada governa as
+  duas buscas, e o da falha é comparado com `finalizado_em`. O limite fica registrado no ADR:
+  `finalizado_em` é o instante do **evento**, não o da escrita, então sob backlog de fila a
+  folga efetiva encurta — no pior caso ela vira a de antes, zero, e o pior caso continua sendo
+  a duplicata que o ADR 0001 aceita; coluna nova pagaria migração por essa diferença. Sem
+  mudança de esquema: o índice parcial da falha já era `(finalizado_em)`. O teste que
+  reprovava antes é o gêmeo do que já existia para o comando, e o predicado novo, que é HQL e
+  nenhum dublê alcança, ganhou teste contra Postgres de verdade.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -630,15 +644,11 @@ verificadas por teste, não são sugestão). Projeto original em
      próprios tickets. Oito tickets saíram daí, e a ordem entre eles é a ordem do risco: os
      dois P1 eram requisito do enunciado não exercido e ADR desmentido pelo código; os dois P2
      são janela de reconciliação assimétrica e vocabulário ambíguo atravessando fronteira; os
-     quatro P3 são manutenção e registro. O 048 e o 049 já fecharam (ver Decisões até aqui).
-     Dos seis abaixo, só o 053 é bloqueado (pelo 052) — os outros cinco estão na fronteira. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
+     quatro P3 são manutenção e registro. O 048, o 049 e o 050 já fecharam (ver Decisões até
+     aqui). Dos cinco abaixo, só o 053 é bloqueado (pelo 052) — os outros quatro estão na fronteira. Um achado foi recusado: a cerca do 045 é sintática e `Uni.join`
      passaria verde, mas o próprio 045 já registra isso como escolha barata deliberada, e
      reabrir seria refazer decisão registrada. -->
 
-- **[050](tickets/050-folga-contra-crash-nas-falhas-pendentes.md) — a janela do ADR 0003 é
-  assimétrica.** A varredura protege comandos pendentes com folga de tempo e falhas pendentes
-  com nenhuma: cair sobre uma publicação de falha em voo duplica o e-mail. Não quebra o ADR
-  0001, que aceita ao menos uma vez — mas nenhum documento explica a assimetria. P2.
 - **[052](tickets/052-nomear-o-resultado-da-extracao-no-videos.md) — os dados da conclusão
   viajam soltos.** Quatro campos atravessam cinco assinaturas juntos, e `tamanhoBytes` é o
   Pacote no consumidor e o vídeo na entidade. O `extracao` já batizou metade do conceito. P2.

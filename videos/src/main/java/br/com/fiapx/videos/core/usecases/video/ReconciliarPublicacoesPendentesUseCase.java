@@ -21,6 +21,13 @@ import java.util.function.Function;
  * medicao jamais tinha observado agir — o que o 025 tentou e nao conseguiu. Quem imprime o
  * numero e o {@code @Scheduled} em {@code framework}; o {@code core} so o devolve.
  *
+ * <p><b>Uma folga so, para as duas metades</b> (ticket 050): a janela entre gravar e
+ * publicar e a mesma dos dois lados — INSERT -> publish do comando, UPDATE para FALHOU ->
+ * publish do evento —, entao o mesmo instante de corte governa as duas buscas. Sem folga na
+ * metade da falha, uma varredura que caisse sobre um {@code ProcessarExtracaoFalhouUseCase}
+ * em voo republicaria o {@code VideoFalhou} e duplicaria a notificacao — tolerado pelo
+ * ADR 0001, mas sem razao para acontecer.
+ *
  * <p>Duas replicas varrendo ao mesmo tempo republicam as duas: aceito, o consumo e
  * idempotente (ADR 0003). <b>Dentro de uma unica varredura</b>, porem, os republishes rodam
  * em <b>sequencia</b>, nao em paralelo: a sessao reativa do Hibernate que o
@@ -50,14 +57,14 @@ public class ReconciliarPublicacoesPendentesUseCase {
     }
 
     public CompletableFuture<Republicacoes> executar() {
-        var recebidosAntesDe = Instant.now().minus(FOLGA_CONTRA_CRASH_MINUTOS, ChronoUnit.MINUTES);
+        var antesDe = Instant.now().minus(FOLGA_CONTRA_CRASH_MINUTOS, ChronoUnit.MINUTES);
         var comandos = new int[1];
-        return videoGateway.buscarComandosPendentes(recebidosAntesDe, TAMANHO_DO_LOTE)
+        return videoGateway.buscarComandosPendentes(antesDe, TAMANHO_DO_LOTE)
                 .thenCompose(pendentes -> {
                     comandos[0] = pendentes.size();
                     return emSequencia(pendentes, publicarExtrairVideo::publicar);
                 })
-                .thenCompose(ignorado -> videoGateway.buscarFalhasPendentes(TAMANHO_DO_LOTE))
+                .thenCompose(ignorado -> videoGateway.buscarFalhasPendentes(antesDe, TAMANHO_DO_LOTE))
                 .thenCompose(pendentes -> emSequencia(pendentes, publicarVideoFalhou::publicar)
                         .thenApply(ignorado -> new Republicacoes(comandos[0], pendentes.size())));
     }

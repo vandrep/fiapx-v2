@@ -156,11 +156,11 @@ public class VideoDataSourceAdapter implements VideoGateway {
     }
 
     @Override
-    public CompletableFuture<List<Video>> buscarFalhasPendentes(int tamanhoDoLote) {
+    public CompletableFuture<List<Video>> buscarFalhasPendentes(Instant falhadosAntesDe, int tamanhoDoLote) {
         return Panache.withSession(() -> VideoEntity.<VideoEntity>find(
-                        "estado = ?1 and falhaPublicadaEm is null",
-                        Sort.by("recebidoEm"),
-                        EstadoVideo.FALHOU)
+                        "estado = ?1 and falhaPublicadaEm is null and finalizadoEm < ?2",
+                        Sort.by("finalizadoEm"),
+                        EstadoVideo.FALHOU, falhadosAntesDe)
                         .range(0, tamanhoDoLote - 1)
                         .list()
                         .map(entidades -> entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList()))

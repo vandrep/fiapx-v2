@@ -80,9 +80,12 @@ public interface VideoGateway {
     CompletableFuture<List<Video>> buscarComandosPendentes(Instant recebidosAntesDe, int tamanhoDoLote);
 
     /**
-     * Vídeos FALHOU cujo {@code VideoFalhou} nunca foi publicado. Sem folga de tempo: a
-     * transicao para FALHOU e a publicacao sao consecutivas no mesmo caminho, e o risco de
-     * corrida com uma varredura concorrente e tolerado (ADR 0003).
+     * Vídeos FALHOU cujo {@code VideoFalhou} nunca foi publicado, com a <b>mesma</b> folga de
+     * {@link #buscarComandosPendentes}, agora contra o crash entre a transicao para FALHOU e
+     * o publish: so entram aqui os que falharam antes de {@code falhadosAntesDe} (ADR 0003,
+     * ticket 050). O instante julgado e o {@code finalizadoEm}, que e onde o
+     * {@code marcarFalha} grava quando a linha virou FALHOU. Ordenado por
+     * {@code finalizadoEm}, lote limitado.
      */
-    CompletableFuture<List<Video>> buscarFalhasPendentes(int tamanhoDoLote);
+    CompletableFuture<List<Video>> buscarFalhasPendentes(Instant falhadosAntesDe, int tamanhoDoLote);
 }

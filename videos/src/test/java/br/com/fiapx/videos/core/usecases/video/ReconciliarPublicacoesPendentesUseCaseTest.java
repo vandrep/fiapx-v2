@@ -127,8 +127,8 @@ class ReconciliarPublicacoesPendentesUseCaseTest {
     }
 
     @Test
-    void umaFalhaPendenteERepublicadaEMarcadaSemFolgaDeTempo() {
-        var video = falhouAgora();
+    void umaFalhaPendenteEVelhaERepublicadaEMarcada() {
+        var video = falhouHa(2, ChronoUnit.MINUTES);
         videos.armazenados.put(video.id(), video);
 
         useCase.executar().join();
@@ -138,9 +138,26 @@ class ReconciliarPublicacoesPendentesUseCaseTest {
         assertNotNull(videos.falhaPublicadaEm.get(video.id()));
     }
 
+    /**
+     * A metade da falha respeita a mesma folga que a metade do comando (ticket 050): a
+     * janela entre gravar FALHOU e publicar VideoFalhou e a mesma janela do ADR 0003, e sem
+     * folga uma varredura que caisse sobre ela duplicaria a notificacao.
+     */
+    @Test
+    void umaFalhaPendenteMasRecenteNaoERepublicada() {
+        var video = falhouHa(10, ChronoUnit.SECONDS);
+        videos.armazenados.put(video.id(), video);
+
+        var passada = useCase.executar().join();
+
+        assertEquals(0, notificacao.idsEnviados.size());
+        assertEquals(0, passada.falhas());
+        assertNull(videos.falhaPublicadaEm.get(video.id()));
+    }
+
     @Test
     void umaFalhaJaMarcadaNaoETocada() {
-        var video = falhouAgora();
+        var video = falhouHa(2, ChronoUnit.MINUTES);
         videos.armazenados.put(video.id(), video);
         videos.falhaPublicadaEm.put(video.id(), Instant.now());
 
@@ -156,10 +173,16 @@ class ReconciliarPublicacoesPendentesUseCaseTest {
                 Instant.now().minus(quantidade, unidade), null, null, null, null, null);
     }
 
-    private static Video falhouAgora() {
+    /**
+     * O instante que a varredura julga e o {@code finalizadoEm} — a marca de quando a linha
+     * virou FALHOU —, e nao o {@code recebidoEm}.
+     */
+    private static Video falhouHa(long quantidade, ChronoUnit unidade) {
         var id = UUID.randomUUID();
+        var falhouEm = Instant.now().minus(quantidade, unidade);
         return Video.reconstituir(
                 id, "ferias.mp4", 1_024L, DONO, id + "/original.mp4", EstadoVideo.FALHOU,
-                Instant.now(), Instant.now(), null, null, null, MotivoFalha.ARQUIVO_INVALIDO);
+                falhouEm.minus(1, ChronoUnit.HOURS), falhouEm, null, null, null,
+                MotivoFalha.ARQUIVO_INVALIDO);
     }
 }

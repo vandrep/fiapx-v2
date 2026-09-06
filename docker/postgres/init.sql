@@ -91,7 +91,9 @@ CREATE INDEX ix_video_comando_pendente
     WHERE comando_publicado_em IS NULL;
 
 -- O `estado` no predicado nao e decoracao: toda linha nao-falhada tem `falha_publicada_em`
--- nula, entao sem ele este indice parcial indexaria a tabela inteira.
+-- nula, entao sem ele este indice parcial indexaria a tabela inteira. `finalizado_em` deixou
+-- de ser so ordenacao no ticket 050: a varredura da falha passou a ter a mesma folga contra o
+-- crash que a do comando, e o corte e um range sobre esta coluna.
 CREATE INDEX ix_video_falha_pendente
     ON video (finalizado_em)
     WHERE estado = 'FALHOU' AND falha_publicada_em IS NULL;

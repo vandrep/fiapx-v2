@@ -2,8 +2,8 @@
 
 - id: 056
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: resolvido
+- assignee: Codex
 - bloqueado-por:
 - prioridade: P1
 
@@ -31,20 +31,20 @@ necessário, por provisionamento prévio da topologia ou outra solução comprov
 
 ## Condições de aceite
 
-- [ ] Reproduzir a janela em ambiente isolado com broker sem topologia anterior e
+- [x] Reproduzir a janela em ambiente isolado com broker sem topologia anterior e
   inicialização deliberadamente atrasada dos consumidores, registrando o resultado antes
   da correção sem apagar volumes de trabalho existentes.
-- [ ] Garantir que publicações não sejam consideradas entregues com sucesso quando os
+- [x] Garantir que publicações não sejam consideradas entregues com sucesso quando os
   bindings necessários ainda não existem, cobrindo comandos e eventos do fluxo completo.
-- [ ] Enviar um Vídeo válido durante a inicialização atrasada e verificar pela borda
+- [x] Enviar um Vídeo válido durante a inicialização atrasada e verificar pela borda
   pública que todo envio aceito chega a `CONCLUIDO` e permite baixar um Pacote íntegro.
-- [ ] Exercitar um Vídeo que falha definitivamente com o `notificacao` atrasado e verificar
+- [x] Exercitar um Vídeo que falha definitivamente com o `notificacao` atrasado e verificar
   o estado `FALHOU` pela borda pública e o e-mail recebido pelo Dono.
-- [ ] Preservar filas duráveis, publisher confirms, tolerância a duplicatas e reconciliação,
+- [x] Preservar filas duráveis, publisher confirms, tolerância a duplicatas e reconciliação,
   sem introduzir dependências circulares de inicialização entre os serviços.
-- [ ] Tornar a regressão reexecutável e validar também a recriação da stack com dados
+- [x] Tornar a regressão reexecutável e validar também a recriação da stack com dados
   persistidos, sem perda de mensagens já enfileiradas.
-- [ ] Executar a suíte a partir da raiz, o smoke e a prova de concorrência caso a solução
+- [x] Executar a suíte a partir da raiz, o smoke e a prova de concorrência caso a solução
   altere o canal de entrada ou as réplicas do `extracao`; registrar resultados e limitações.
 
 ## Dependências

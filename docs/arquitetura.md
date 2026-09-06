@@ -502,7 +502,7 @@ Cada linha tem a discussão inteira no arquivo apontado.
 | **Outbox canônico** com tabela e payload | compraria *exatamente uma vez*, regime que o ADR 0001 já recusou; a tabela `video` com duas colunas marcadoras fecha as mesmas janelas sem tabela nova ([ADR 0003](adr/0003-reconciliacao-por-varredura.md)) |
 | **Kubernetes** | o enunciado aceita Compose *ou* Kubernetes; Compose garante que a demonstração roda na máquina de quem avalia, sem cluster |
 | **Módulo Maven `shared`** com os contratos | duplicar cinco records é mais honesto que acoplar três serviços por um jar; extrair depois, se doer |
-| **Painel curado no Grafana e canal de notificação de alerta** | a coleta dos três sinais entrou (tickets [058](wayfinder/tickets/058-piso-de-observabilidade.md) e [059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)) e os três alertas avaliam; o que sobra fora são as duas partes que continuam custando sem pagar nesta entrega. **Painel**: a exploração ad-hoc no *Explore* responde as mesmas perguntas sem manutenção, e um painel vazio na demo prova menos que uma busca por `idVideo`. **Canal**: entregar o alerta por e-mail é configuração de *contact point*, adiada conscientemente — e por isso a detecção não mudou, o que está escrito abaixo em vez de subentendido |
+| **Painel curado no Grafana e canal de notificação de alerta** | a coleta dos três sinais entrou (tickets 058 e 059) e os três alertas avaliam; o painel e o *contact point* continuam custando sem pagar nesta entrega, e por isso a detecção não mudou ([ADR 0004](adr/0004-camada-de-observabilidade.md), e a limitação abaixo) |
 | **E2E automatizado no CI** | Compose inteiro num runner (ffmpeg + MinIO + Keycloak + RabbitMQ) é fonte de instabilidade que não acrescenta garantia; `scripts/smoke.sh` faz a mesma verificação onde ela é confiável |
 
 ## Limitações conhecidas
@@ -588,9 +588,7 @@ O que eu não defendo — apenas aceitei.
   desse número para o regime de pico não foi feita. Há um segundo efeito: foi no caminho com o
   SDK desligado — o do overlay — que apareceu o travamento raro do
   [ticket 061](wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md), ainda sem causa
-  raiz; a configuração entregue não exibiu o sintoma em nenhuma execução. As decisões desta
-  camada estão no
-  [ADR 0004](adr/0004-camada-de-observabilidade.md).
+  raiz; a configuração entregue não exibiu o sintoma em nenhuma execução.
 - **O fluxo entre os três serviços não roda no CI.** `./mvnw verify` testa cada serviço
   isolado; que eles conversam é verificado por `scripts/smoke.sh`, que alguém precisa rodar.
 - **O caminho de tentativas esgotadas não é testado automaticamente.** Exigiria derrubar o

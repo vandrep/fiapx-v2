@@ -664,8 +664,8 @@ verificadas por teste, não são sugestão). Projeto original em
   o OTel emite fica como o OTel emite, o que é nosso usa o `CONTEXT.md`. O **`CONTEXT.md` não
   mudou, e é decisão**: trace, span e travessia são vocabulário de infraestrutura, e glossário é
   glossário. No roteiro, as 53 palavras que narravam a recusa viraram 16 de afirmação e o Bloco 2
-  ganhou o passo de trace dentro do take que já existia — 1.406 palavras, **9:41**, o mesmo teto
-  de antes. O único número novo é medido: três corridas de `smoke.sh` com a stack quente, 45/45/46 s.
+  ganhou o passo de trace dentro do take que já existia — 1.404 palavras, **9:41**, o mesmo teto
+  de antes. O único número novo é medido: três corridas de `smoke.sh` completo com a stack quente, 45/45/46 s.
 
 - [Uma Extração trava, raramente, com o SDK desligado](tickets/061-travamento-raro-com-o-sdk-desligado.md)
   — **aberto**. Achado ao medir o custo da instrumentação no 059: com

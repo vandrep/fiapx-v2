@@ -127,9 +127,9 @@ origens, e duas regras** — não misture:
 
 - **O que a auto-instrumentação emite fica como o OTel emite.** `http.route`,
   `messaging.destination.name`, os nomes de span do conector RabbitMQ e do SDK da AWS: são
-  contrato com a ferramenta. Traduzir para o vocabulário do projeto quebra consulta, receita
-  de ecossistema e qualquer painel que alguém venha a montar, e não compra nada em troca.
-  Isso vale inclusive quando o nome soa feio ao lado do resto do código.
+  contrato com a ferramenta. Traduzir para o vocabulário do projeto quebra consulta e receita
+  de ecossistema, e não compra nada em troca. Vale inclusive quando o nome soa feio ao lado
+  do resto do código.
 - **O que é nosso usa o vocabulário do [`CONTEXT.md`](CONTEXT.md).** A métrica própria é
   `fiapx.extracao.duracao`, com o atributo `resultado` em `concluida`/`falhou` — as palavras
   do glossário, não `success`/`error`. A mesma regra vale para atributo próprio de span e
@@ -139,9 +139,9 @@ Métrica nova precisa de justificativa igual à da primeira: existe uma só, e e
 mede um intervalo que roda fora do JVM e que nenhuma auto-instrumentação enxerga. O que já é
 respondível pela auto-instrumentação ou por um endpoint não vira métrica.
 
-Instrumentação vive **só em `framework`**, e o teste arquitetural cobra: `io.opentelemetry` e
-`io.micrometer` são import proibido em `core` e `interfaces`, e `WithSpan`, `SpanAttribute`,
-`AddingSpanAttributes`, `Counted` e `Timed` são anotação proibida. O porquê está no
+Instrumentação vive **só em `framework`**, e quem cobra isso é o `ArchitectureConstraintsTest`
+— a lista de imports e anotações proibidos está lá, que é a autoridade. O porquê de ela ter
+sido endurecida no ticket 059 está no
 [ADR 0004](docs/adr/0004-camada-de-observabilidade.md).
 
 ## BDD

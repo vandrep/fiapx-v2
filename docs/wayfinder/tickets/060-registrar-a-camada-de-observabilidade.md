@@ -121,17 +121,40 @@ glossário já define, e trace, span e travessia são vocabulário de infraestru
 afirmação. O Bloco 2 ganhou o passo de trace **dentro da tomada que já existia** — a do passo 9
 passou a cobrir 9 e 10, sem abrir tomada nova e sem filmar painel —, e a nota do bloco diz por que
 o passo 11 também fica fora. A contagem foi refeita palavra a palavra com o mesmo método do
-arquivo: **1.406 palavras, 9:41**, exatamente o teto de antes, com os quatro blocos e a tabela do
+arquivo: **1.404 palavras, 9:41**, exatamente o teto de antes, com os quatro blocos e a tabela do
 topo recontados. Sobrou orçamento e ele foi devolvido, não gasto.
 
 **Um número novo, medido**, porque o roteiro citava *"um minuto e oito segundos"* de antes do 058
 e do 059: três corridas de `scripts/smoke.sh` contra a stack de pé e quente deram **45, 45 e 46
-segundos** para os onze passos, todas verdes. A narração passou a citar esse número e a não
-compor à mão um total *do zero* que ninguém mediu.
+segundos** para os doze passos (0 a 11), todas verdes. A narração passou a citar as duas metades
+que **estão** medidas — a subida do Compose, que o 058 cronometrou em ~42 s mais 23 s da stack, e
+os 45 s da verificação — em vez do total composto de antes.
 
 **Uma linha em *Decisões até aqui*** para o 060; o 058 e o 059 já tinham a sua. *Fora de escopo* já
 havia sido reescrito para **painel curado e canal de notificação** quando o destino foi
 redesenhado, e continua coerente com a linha nova da tabela de recusados.
+
+## O que a revisão mudou
+
+Quatro correções, todas do revisor:
+
+- **Um fato errado no roteiro.** A narração nova dizia "os onze passos"; `scripts/smoke.sh`
+  numera de 0 a 11, que são **doze**. Além de errado, o número contradizia a própria nota do
+  bloco, que diz que a tomada mostra só os passos 2 a 10. A frase deixou de contar passos.
+- **A informação de partida a frio, que eu havia perdido.** Ao trocar o "um minuto e oito
+  segundos" obsoleto pelos 45 s medidos, sumiu o que aquela frase existia para dizer: quanto
+  custa subir do zero. Voltou, agora com as duas metades citadas separadamente, cada uma com
+  medição atrás.
+- **`AGENTS.md` repetia o que o teste arquitetural é autoridade sobre.** O arquivo declara, em
+  *Onde a verdade mora*, que "só carrega o que ele não consegue dizer", e o parágrafo novo
+  enumerava nominalmente os dois imports e as cinco anotações proibidas — uma terceira cópia de
+  uma lista que já tem dono executável. Virou ponteiro.
+- **A célula nova da tabela *O que foi recusado* trazia a discussão inteira inline**, contra o
+  preâmbulo da própria seção ("cada linha tem a discussão inteira no arquivo apontado") e contra
+  o "aponta, não repete" que o `AGENTS.md` atribui a esse arquivo. As outras cinco linhas são uma
+  frase; esta voltou a ser uma. O ponteiro circular no fim da quarta limitação saiu junto.
+
+A contagem do roteiro foi refeita depois das duas primeiras: **1.404 palavras, 9:41**.
 
 ## O que este ticket não entrega
 

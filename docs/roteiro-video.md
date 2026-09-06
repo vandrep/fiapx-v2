@@ -22,10 +22,10 @@ locução em português, ~145 palavras por minuto.
 | Bloco | Entra em | Duração | Palavras |
 |---|---|---|---|
 | 1. Abertura | 0:00 | 0:29 | 70 |
-| 2. Funcionando | 0:29 | 2:43 | 395 |
+| 2. Funcionando | 0:29 | 2:43 | 393 |
 | 3. Arquitetura | 3:12 | 4:10 | 605 |
 | 4. Fechamento | 7:22 | 2:19 | 336 |
-| **Total** | | **9:41** | **1.406** |
+| **Total** | | **9:41** | **1.404** |
 
 Os números acima são medidos, não estimados: são as palavras que estão de fato escritas
 abaixo. Se você editar a narração, remeça — o teto de dez minutos não perdoa.
@@ -74,7 +74,7 @@ projeto original antes dele — como *antes*, não como leitura de código.
 
 ---
 
-## Bloco 2 — O projeto funcionando (0:29–3:12, 395 palavras)
+## Bloco 2 — O projeto funcionando (0:29–3:12, 393 palavras)
 
 Um único take do `scripts/smoke.sh`, do passo 2 ao 10. Os passos 0 e 1 (dependências e
 Compose) não entram, e o 11 também não: derrubar a observabilidade para provar que o Vídeo
@@ -84,9 +84,9 @@ não depende dela é uma garantia que se afirma em uma frase e custaria meio min
 
 > O que você vai ver é o `scripts/smoke.sh`, versionado no repositório. Não é uma sequência
 > de comandos que eu digito na hora: é a verificação ponta a ponta do projeto, que qualquer
-> pessoa roda com um comando só. A stack já está de pé; com ela quente, os onze passos
-> levam quarenta e cinco segundos. As esperas estão aceleradas quatro vezes, e nada
-> foi cortado.
+> pessoa roda com um comando só. A stack já está de pé; do zero, ela sobe em pouco mais de um
+> minuto, e a verificação leva quarenta e cinco segundos. As esperas estão aceleradas quatro
+> vezes, e nada foi cortado.
 
 ### Tomada — passo 2, token no Keycloak
 
@@ -128,8 +128,8 @@ não depende dela é uma garantia que se afirma em uma frase e custaria meio min
 > informação.
 >
 > O último passo não pergunta à API, pergunta à observabilidade: pelo identificador do vídeo
-> que falhou, o script cobra os três serviços num rastro só. É a travessia que você viu,
-> por dentro — é assim que se descobre onde um vídeo parou.
+> que falhou, o script cobra os três serviços num rastro só. É assim que se descobre onde um
+> vídeo parou.
 
 ---
 

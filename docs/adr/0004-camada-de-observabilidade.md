@@ -1,22 +1,22 @@
 # A camada de observabilidade: onde ela entra, onde ela para
 
-A coleta dos três sinais chegou nos tickets
-[058](../wayfinder/tickets/058-piso-de-observabilidade.md) e
-[059](../wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md), depois que o CI/CD — o
-risco que sustentava a recusa original — foi entregue. O motivo é concreto: em 06/09/2026 as
-duas réplicas do `extracao` subiram com imagem defasada e morreram em laço de
-`PRECONDITION_FAILED`; por 14 minutos a fila teve mensagem e **zero consumidores**, e todo
-Vídeo enviado ficou em `RECEBIDO`. O dado existia (`docker ps` dizia `unhealthy`), mas nada o
-transformava numa pergunta respondível.
+Os três serviços exportam log, métrica e trace, e decidimos que essa camada **para na
+fronteira**: instrumentação só em `framework`, `core` sem span, contexto de trace no header e
+nunca no corpo da mensagem, e a configuração de medição de carga rodando **sem** ela. As três
+decisões são de recusa, não de adoção — o que a camada não faz é o que um leitor futuro
+questionaria, e é o que não tem outro lugar onde ser respondido.
 
-O que os dois tickets entregaram está descrito neles. Este ADR registra as três decisões que
-um leitor futuro questionaria e que não têm outro lugar onde ser respondidas: **por que o
-`core` não tem span**, **por que `idVideo` continua sendo a chave mesmo havendo `trace_id`**,
-e **por que a configuração medida desliga a observabilidade que a configuração entregue tem**.
+Decidido nos tickets [058](../wayfinder/tickets/058-piso-de-observabilidade.md) e
+[059](../wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md), registrado no
+[060](../wayfinder/tickets/060-registrar-a-camada-de-observabilidade.md). O que motivou a
+camada é concreto: em 06/09/2026 as duas réplicas do `extracao` subiram com imagem defasada e
+morreram em laço de `PRECONDITION_FAILED`; por 14 minutos a fila teve mensagem e **zero
+consumidores**, e todo Vídeo enviado ficou em `RECEBIDO`. O dado existia (`docker ps` dizia
+`unhealthy`), mas nada o transformava numa pergunta respondível.
 
-O que a camada deliberadamente não faz — sem canal de notificação, retenção efêmera, imagem
-de demonstração — está em
-[`docs/arquitetura.md` § Limitações conhecidas](../arquitetura.md#limitações-conhecidas), e é
+O que a camada deliberadamente não **entrega** — sem canal de notificação, retenção efêmera,
+imagem de demonstração — está em
+[`docs/arquitetura.md` § Limitações conhecidas](../arquitetura.md#limitações-conhecidas): é
 limitação, não decisão de desenho.
 
 ## O `core` fica sem span

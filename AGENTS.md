@@ -127,7 +127,10 @@ assíncrona, e aqui todas são, o interceptor monta `RememberEventLoop -> Thread
 **reagenda a invocação no contexto Vert.x do chamador** — e esse reagendamento pode nunca
 rodar. Nenhuma thread, nenhum socket, nenhuma retentativa, nenhuma linha de log, mensagem sem
 ack para sempre. A explicação que encaixa é a ordenação daquele contexto (a chamada fica atrás
-da cadeia que espera por ela); o que está *medido* é que a tarefa reagendada não roda. Medido: 4 travamentos em ~60 ciclos com o interceptor, 0 em 90 sem ele
+da cadeia que espera por ela); o que está *medido* é que a tarefa reagendada não roda. A
+medição é do `extracao`; nos outros dois a regra vale por analogia estrutural, e é global
+porque obedecê-la custa um operador do Mutiny e descobri-la por medição custa um travamento em
+produção. Medido: 4 travamentos em ~60 ciclos com o interceptor, 0 em 90 sem ele
 (`scripts/carga/travamento.sh`). O que substitui é `onFailure().retry()` do Mutiny, que
 retenta dentro da própria cadeia — a política do [ADR 0001](docs/adr/0001-politica-de-falhas.md)
 não mudou, só quem a implementa. A extensão saiu dos três `pom.xml` junto com a regra.

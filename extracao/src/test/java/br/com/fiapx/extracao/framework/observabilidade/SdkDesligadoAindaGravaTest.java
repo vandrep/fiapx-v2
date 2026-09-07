@@ -42,7 +42,7 @@ class SdkDesligadoAindaGravaTest {
     void aChaveQueDizDesligarOSdkNaoImpedeOSpanDeGravar() {
         assertTrue(sdkDesligado, "a suite tem de rodar com quarkus.otel.sdk.disabled=true");
 
-        var span = tracer.spanBuilder("t061.sonda").startSpan();
+        var span = tracer.spanBuilder("extracao.sonda-de-gravacao").startSpan();
         try {
             assertTrue(span.isRecording(),
                     "medido no ticket 061: com o SDK 'desligado' o span continua gravando."

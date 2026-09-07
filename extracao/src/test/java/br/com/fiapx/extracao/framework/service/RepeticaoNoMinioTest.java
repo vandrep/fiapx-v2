@@ -32,20 +32,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * do {@code @Retry} do SmallRye Fault Tolerance. O ticket 061 tirou aquele interceptor daqui —
  * ele reagendava a chamada no contexto Vert.x do consumidor e a prendia la para sempre —, e o
  * que precisa continuar travado e a <b>politica</b>, nao a anotacao que a implementava: o
- * numero de tentativas e o fato de a ultima falha chegar ao chamador.
+ * numero de repeticoes e o fato de a ultima falha chegar ao chamador.
  *
- * <p>Sem container de proposito: o bean tem um campo so, e monta-lo a mao deixa o teste rodar
- * em milissegundos de CPU — o que ele espera e a espera de 2 s do ADR 0001, nao boot.
+ * <p>Sem container de proposito: o bean tem um campo so, e monta-lo a mao dispensa o boot do
+ * Quarkus. O que sobra de relogio — cerca de 14 s somando os tres — e a espera de 2 s do
+ * ADR 0001 sendo cumprida de verdade, que e justamente o que esta sob julgamento.
+ *
+ * <p>O que ele <b>nao</b> cobre, e vale saber antes de confiar demais nele: o dublê falha
+ * <i>antes</i> de {@code prepare()}, entao nenhuma repeticao aqui encontra o arquivo de
+ * destino ja criado. O caminho "blip depois de a escrita comecar", em que
+ * {@code AsyncResponseTransformer.toFile} recusa o arquivo existente, fica de fora — e o
+ * {@code @Retry} anterior tinha exatamente o mesmo buraco (ver o javadoc de
+ * {@link ArquivoMinioClient}).
  */
-class RetentativaDoMinioTest {
+class RepeticaoNoMinioTest {
 
     private static final byte[] VIDEO = "conteudo de video para teste".getBytes();
 
-    /** O armazenamento que nao volta: falha em toda tentativa, nao so nas primeiras. */
+    /** O armazenamento que nao volta: falha em toda chamada, nao so nas primeiras. */
     private static final int SEMPRE = Integer.MAX_VALUE;
 
     @Test
-    void blipNoDownloadEAbsorvidoPelaRetentativa() throws Exception {
+    void blipNoDownloadEAbsorvidoPelaRepeticao() throws Exception {
         var s3 = new S3QueFalhaAsPrimeiras(2);
         var destino = Files.createTempDirectory("t061").resolve("original.mp4");
 
@@ -53,7 +61,7 @@ class RetentativaDoMinioTest {
 
         assertEquals(destino, baixado);
         assertTrue(Files.exists(destino), "o Video tinha de estar em disco depois do blip");
-        assertEquals(3, s3.tentativas(), "duas falhas mais a que sucedeu");
+        assertEquals(3, s3.chamadas(), "duas falhas mais a que sucedeu");
     }
 
     @Test
@@ -66,18 +74,18 @@ class RetentativaDoMinioTest {
 
         assertTrue(falha.getCause() instanceof SdkClientException,
                 "a ultima falha do MinIO tinha de chegar ao chamador, e chegou " + falha.getCause());
-        assertEquals(4, s3.tentativas(), "a primeira tentativa mais as tres retentativas do ADR 0001");
+        assertEquals(4, s3.chamadas(), "a primeira chamada mais as tres repeticoes do ADR 0001");
     }
 
     @Test
-    void blipNoUploadEAbsorvidoPelaRetentativa() throws Exception {
+    void blipNoUploadEAbsorvidoPelaRepeticao() throws Exception {
         var s3 = new S3QueFalhaAsPrimeiras(2);
         var origem = Files.createTempFile("t061", ".zip");
         Files.write(origem, VIDEO);
 
         clienteCom(s3).gravar("pacotes", "chave.zip", origem).toCompletableFuture().get();
 
-        assertEquals(3, s3.tentativas(), "duas falhas mais a que sucedeu");
+        assertEquals(3, s3.chamadas(), "duas falhas mais a que sucedeu");
     }
 
     private static ArquivoMinioClient clienteCom(S3AsyncClient s3) {
@@ -89,19 +97,20 @@ class RetentativaDoMinioTest {
     /**
      * O armazenamento instavel, no mesmo desenho do dublê que o `videos` ja usa: as
      * {@code falhasIniciais} primeiras chamadas falham como o SDK falha quando nao alcanca o
-     * endpoint, e as seguintes sucedem.
+     * endpoint, e as seguintes sucedem. Conta <b>chamadas</b>, e nao "tentativas": no
+     * {@code CONTEXT.md} tentativa e uma entrega da mensagem ao worker, e nao uma ida ao MinIO.
      */
     private static class S3QueFalhaAsPrimeiras implements S3AsyncClient {
 
         private final int falhasIniciais;
-        private final AtomicInteger tentativas = new AtomicInteger();
+        private final AtomicInteger chamadas = new AtomicInteger();
 
         private S3QueFalhaAsPrimeiras(int falhasIniciais) {
             this.falhasIniciais = falhasIniciais;
         }
 
-        private int tentativas() {
-            return tentativas.get();
+        private int chamadas() {
+            return chamadas.get();
         }
 
         @Override
@@ -128,11 +137,11 @@ class RetentativaDoMinioTest {
         }
 
         private boolean falharDestaVez() {
-            return tentativas.incrementAndGet() <= falhasIniciais;
+            return chamadas.incrementAndGet() <= falhasIniciais;
         }
 
         private static SdkClientException inalcancavel() {
-            return SdkClientException.create("MinIO inalcancavel nesta tentativa");
+            return SdkClientException.create("MinIO inalcancavel nesta chamada");
         }
 
         @Override

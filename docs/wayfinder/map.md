@@ -694,6 +694,13 @@ verificadas por teste, não são sugestão). Projeto original em
   corrigidos; o que falta é decidir o que o overlay deve fazer e se a comparação com os
   tickets 025–028 se sustenta.
 
+- [O `Scope` do `Rastro` abre numa thread e fecha noutra](tickets/063-escopo-do-rastro-atravessa-thread.md)
+  — **aberto**. O 061 mandava investigá-lo junto e não investigou: a causa apareceu antes, e
+  misturar as duas investigações custaria a clareza da medição. O que mudou é que a razão para
+  minimizá-lo caiu com o 062 — o escopo **é** aberto em todo perfil, porque o guarda por
+  `isRecording()` nunca dispara. Continua sem sintoma medido: nas sondas do 061 o caminho do
+  Vídeo sempre rodou sobre contexto duplicado, que é o caso seguro.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

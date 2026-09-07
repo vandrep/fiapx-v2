@@ -109,6 +109,13 @@ class ArchitectureConstraintsTest {
      * idas ao MinIO, 4 travamentos em ~60 ciclos de Video; sem eles, 0 em 90, no mesmo host e
      * pelo mesmo roteiro ({@code scripts/carga/travamento.sh}, ticket 061).
      *
+     * <p>O alcance da medicao, dito por inteiro: ela foi feita no {@code extracao}. Nos outros
+     * dois a regra vale por analogia estrutural — o {@code notificacao} chama de um consumidor
+     * {@code @Blocking}, que e a forma reproduzida, e o {@code videos} chama da borda HTTP, que
+     * roda sobre o mesmo tipo de contexto. Regra global porque o custo de obedece-la e um
+     * operador do Mutiny, e o de descobrir por medicao em cada servico e um travamento em
+     * producao.
+     *
      * <p>O que substitui: os operadores do Mutiny, {@code onFailure().retry()} a frente. Eles
      * retentam dentro da propria cadeia, sem reagendar nada em fila de ninguem — ver
      * {@code ArquivoMinioClient} e {@code MailerEmailClient}. A extensao saiu dos tres poms
@@ -116,7 +123,25 @@ class ArchitectureConstraintsTest {
      * mao — e esbarrar aqui.
      */
     private static final Pattern TOLERANCIA_A_FALHAS_POR_INTERCEPTOR = Pattern.compile(
-            "(?m)^import\\s+(org\\.eclipse\\.microprofile\\.faulttolerance|io\\.smallrye\\.faulttolerance)\\.");
+            "(?m)^import\\s+(static\\s+)?(org\\.eclipse\\.microprofile\\.faulttolerance|io\\.smallrye\\.faulttolerance)\\.");
+    private static final Pattern COMENTARIO_DE_BLOCO = Pattern.compile("(?s)/\\*.*?\\*/");
+    private static final Pattern COMENTARIO_DE_LINHA = Pattern.compile("(?m)//.*$");
+    /**
+     * A lista de import sozinha nao basta, pela mesma razao registrada em
+     * {@link #FORBIDDEN_FRAMEWORK_ANNOTATION}: anotacao alcanca o codigo tambem por nome
+     * totalmente qualificado. Esta e a lista fechada das anotacoes do MicroProfile Fault
+     * Tolerance e da extensao do SmallRye — o que nao esta nela passa, e e assim de proposito.
+     *
+     * <p>Casa contra o fonte <b>sem comentario</b> ({@link #semComentarios}), e isso nao e
+     * detalhe: os javadocs de {@code ArquivoMinioClient} e {@code MailerEmailClient} citam
+     * {@code @Retry} de proposito, para explicar por que ele saiu. Sem tirar o comentario
+     * antes de casar, esta regra reprovaria a propria explicacao dela.
+     */
+    private static final Pattern TOLERANCIA_A_FALHAS_ANOTACAO = Pattern.compile(
+            "@(?:[\\w.]+\\.)?(Retry|Asynchronous|AsynchronousNonBlocking|Timeout|Fallback"
+                    + "|CircuitBreaker|CircuitBreakerName|Bulkhead|ApplyGuard|ApplyFaultTolerance"
+                    + "|RetryWhen|BeforeRetry|ExponentialBackoff|FibonacciBackoff|CustomBackoff"
+                    + "|RateLimit|BlockingGuard|NonBlockingGuard)\\b");
     /**
      * Publicar sem publish-confirms perde mensagem em silencio: o send completa quando o byte
      * sai no socket, nao quando o broker aceita, entao uma recusa do broker vira ack do
@@ -411,7 +436,9 @@ class ArchitectureConstraintsTest {
         var violations = new ArrayList<String>();
 
         for (SourceFile source : javaSources()) {
-            if (TOLERANCIA_A_FALHAS_POR_INTERCEPTOR.matcher(source.content()).find()) {
+            var codigo = semComentarios(source.content());
+            if (TOLERANCIA_A_FALHAS_POR_INTERCEPTOR.matcher(codigo).find()
+                    || TOLERANCIA_A_FALHAS_ANOTACAO.matcher(codigo).find()) {
                 violations.add(source.relativePath()
                         + ": tolerancia a falhas por interceptor (@Retry, @Asynchronous*, @Timeout,"
                         + " @Fallback, @CircuitBreaker, @Bulkhead) reagenda a chamada no contexto Vert.x"
@@ -563,6 +590,16 @@ class ArchitectureConstraintsTest {
         if (pattern.matcher(source.content()).find()) {
             violations.add(source.relativePath() + ": " + message);
         }
+    }
+
+    /**
+     * O fonte sem javadoc, comentario de bloco e comentario de linha. Existe para as regras que
+     * julgam <b>anotacao</b>: uma anotacao citada num comentario e documentacao, e reprovar a
+     * documentacao que explica a regra e o oposto do que ela serve.
+     */
+    private static String semComentarios(String conteudo) {
+        return COMENTARIO_DE_LINHA.matcher(COMENTARIO_DE_BLOCO.matcher(conteudo).replaceAll(""))
+                .replaceAll("");
     }
 
     private static void assertNoViolations(List<String> violations) {

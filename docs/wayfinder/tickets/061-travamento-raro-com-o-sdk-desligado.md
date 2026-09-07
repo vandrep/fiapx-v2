@@ -149,15 +149,25 @@ mesma espera fixa (2 s), mesmo recorte (`Exception`, não `Error`). Nos três se
 construção era a mesma nos três: `ArquivoMinioClient` do `extracao` e do `videos`, e
 `MailerEmailClient` do `notificacao`. O `videos` chama da borda HTTP, que roda sobre o mesmo
 tipo de contexto; o `notificacao`, de um consumidor `@Blocking`, que é exatamente a forma
-reproduzida aqui.
+reproduzida aqui. **A medição é do `extracao`**, e nos outros dois a mudança vale por analogia
+estrutural — dito assim também na regra do teste e no `AGENTS.md`, para não passar por medido o
+que não foi.
 
 `quarkus-smallrye-fault-tolerance` saiu dos três `pom.xml`, e uma regra nova do
 `ArchitectureConstraintsTest` — nas três cópias — barra qualquer import de
 `org.eclipse.microprofile.faulttolerance` ou `io.smallrye.faulttolerance` em código de
 produção, com o mecanismo na mensagem. O `RetryComCompletionStageTest`, que travava o
-comportamento do interceptor, deu lugar ao `RetentativaDoMinioTest`, que trava a **política**:
-blip absorvido, armazenamento persistentemente fora falhando na quarta tentativa em vez de
+comportamento do interceptor, deu lugar ao `RepeticaoNoMinioTest`, e o `notificacao` — que não
+tinha nenhuma trava sobre essa política — ganhou o `RepeticaoNoSmtpTest`. Os dois travam a
+**política**: blip absorvido, recurso persistentemente fora falhando na quarta chamada em vez de
 insistir para sempre.
+
+Sobre "coberta por teste", o critério deste ticket, vale a franqueza: o que os testes travam é a
+política de repetição e a regra que barra o interceptor. **O mecanismo do travamento não tem
+teste**, e não pode ter — o efeito de observador acima diz por quê. A garantia contra a
+regressão é a regra arquitetural, que impede o construto de voltar; a garantia de que a
+substituição preserva o ADR 0001 são os dois testes novos; e a garantia de que o defeito sumiu é
+a medição, repetível por `scripts/carga/travamento.sh`.
 
 ### O achado colateral, e é o mais caro
 
@@ -173,8 +183,11 @@ ligado" mediram ruído.
 Isso também derruba a razão escrita aqui para excluir a pista do `Scope` aberto numa thread e
 fechado noutra. A conclusão continua valendo — não era ela —, mas o argumento (“com o SDK
 desligado o span nasce sem gravar, então nenhum escopo chega a ser aberto”) era falso: o escopo
-**é** aberto, inclusive no caminho que travava. O risco separado que a seção descreve, o de
-`makeCurrent()` fora de contexto duplicado, continua aberto e continua sem sintoma medido.
+**é** aberto, inclusive no caminho que travava. O risco separado que a seção descreve — o
+`makeCurrent()` fora de contexto duplicado — este ticket mandava investigar "junto", e ele
+**não foi investigado**: a causa apareceu antes, e misturar as duas investigações no mesmo
+commit custaria a clareza da medição. Ele virou o [ticket 063](063-escopo-do-rastro-atravessa-thread.md),
+com a premissa já corrigida.
 
 O achado também virou teste: `SdkDesligadoAindaGravaTest` mede, na própria suíte — que roda
 com `%test.quarkus.otel.sdk.disabled=true` —, que o span continua gravando. Ele não afirma que
@@ -191,8 +204,8 @@ tickets 025–028 se sustenta — virou o
 
 ### Validação
 
-- `./mvnw test` da raiz: **437 testes**, 0 falhas, 0 erros (138 em `videos`, 274 em `extracao`,
-  25 em `notificacao`).
+- `./mvnw test` da raiz: **442 testes**, 0 falhas, 0 erros (138 em `videos`, 277 em `extracao`,
+  27 em `notificacao`).
 - `scripts/carga/travamento.sh`, 6 rodadas de 15 ciclos com as imagens corrigidas: **90 ciclos,
   0 travamentos**.
 - `scripts/smoke.sh` completo contra o Compose, com as três imagens construídas desta correção:

@@ -48,10 +48,16 @@ import java.util.concurrent.CompletionStage;
  * retentativa do Mutiny, 0 em 90 ciclos, no mesmo host e com o mesmo roteiro
  * ({@code scripts/carga/travamento.sh}).
  *
- * <p>O que a troca preserva: mesma contagem (3 retentativas), mesma espera fixa (2 s), e
- * retentativa <b>so</b> em {@code Exception} — {@code Error} nao e retentado, como no
- * {@code @Retry}. O que ela remove e o desvio pelo contexto Vert.x: o {@code Uni} retenta na
- * propria cadeia, sem reagendar nada em fila de ninguem.
+ * <p>O que a troca preserva esta em {@link #comRepeticao}, numero por numero. O que ela
+ * remove e o desvio pelo contexto Vert.x: o {@code Uni} repete na propria cadeia, sem
+ * reagendar nada em fila de ninguem.
+ *
+ * <p>Um limite herdado, e que continua igual: em {@link #baixar}, cada resubscricao refaz o
+ * {@code AsyncResponseTransformer.toFile(destino)}, que recusa arquivo existente. Um blip que
+ * chegue <b>depois</b> de a escrita comecar queima as repeticoes com
+ * {@code FileAlreadyExistsException} em vez de baixar de novo. O {@code @Retry} reinvocava o
+ * metodo inteiro e fazia exatamente o mesmo; nao e regressao desta mudanca, e nao foi
+ * corrigido aqui para nao misturar duas coisas no mesmo commit.
  *
  * <p>O motivo original de este bean ser separado do adapter — self-invocation nao dispara
  * interceptor de CDI — morreu junto com o interceptor. A separacao fica porque continua
@@ -61,16 +67,17 @@ import java.util.concurrent.CompletionStage;
 @ApplicationScoped
 public class ArquivoMinioClient {
 
-    /** Os dois numeros do {@code @Retry} que este bean tinha ate o ticket 061 (ADR 0001). */
-    private static final int MAXIMO_DE_RETENTATIVAS = 3;
-    private static final Duration ESPERA_ENTRE_TENTATIVAS = Duration.ofSeconds(2);
+    private static final int MAXIMO_DE_REPETICOES = 3;
+    private static final Duration ESPERA_ENTRE_REPETICOES = Duration.ofSeconds(2);
+    /** Os 200 ms do default do {@code @Retry}, sobre os 2 s de espera: o Mutiny pede fracao. */
+    private static final double JITTER = 0.1;
 
     @Inject
     S3AsyncClient s3;
 
     public CompletionStage<Path> baixar(String bucket, String chave, Path destino) {
         var requisicao = GetObjectRequest.builder().bucket(bucket).key(chave).build();
-        return comRetentativa(Uni.createFrom()
+        return comRepeticao(Uni.createFrom()
                 .completionStage(() -> s3.getObject(requisicao, AsyncResponseTransformer.toFile(destino)))
                 .map(resposta -> destino))
                 .subscribeAsCompletionStage();
@@ -78,26 +85,33 @@ public class ArquivoMinioClient {
 
     public CompletionStage<Void> gravar(String bucket, String chave, Path origem) {
         var requisicao = PutObjectRequest.builder().bucket(bucket).key(chave).build();
-        return comRetentativa(Uni.createFrom()
+        return comRepeticao(Uni.createFrom()
                 .completionStage(() -> s3.putObject(requisicao, AsyncRequestBody.fromFile(origem)))
                 .replaceWithVoid())
                 .subscribeAsCompletionStage();
     }
 
     /**
-     * A espera e fixa, e nao exponencial: {@code withBackOff(x, x)} com {@code jitter} zero e
-     * como o Mutiny escreve "sempre 2 s". Um backoff crescente seria outra politica que a
-     * ADR 0001 nao pediu, e mudar a politica no mesmo commit que corrige o travamento tiraria
-     * o sentido da medicao.
+     * A repeticao do ADR 0001, com os mesmos numeros que o {@code @Retry} tinha ate o
+     * ticket 061: 3 repeticoes, 2 s de espera, jitter de 10% (que e os 200 ms sobre 2 s do
+     * default do MicroProfile) e so sobre {@code Exception} — {@code Error} nao e repetido.
+     * {@code withBackOff(x, x)} e como o Mutiny escreve espera constante; backoff crescente
+     * seria outra politica, que o ADR nao pediu.
      *
-     * <p>O {@code completionStage} dos chamadores recebe um {@link java.util.function.Supplier},
-     * e nao um estagio pronto: e o que faz cada resubscricao abrir uma requisicao S3 nova, do
-     * mesmo jeito que o {@code @Retry} reinvocava o metodo inteiro.
+     * <p><b>Repeticao, e nao "tentativa".</b> No {@code CONTEXT.md} tentativa e uma <i>entrega</i>
+     * da mensagem ao worker, e o limite dela tambem e 3 — os dois numeros coincidirem torna a
+     * confusao facil. Estes 3 aqui sao repeticoes de uma chamada de I/O dentro de <b>uma</b>
+     * tentativa.
+     *
+     * <p>O que <b>nao</b> veio junto: o {@code maxDuration} de 3 min do {@code @Retry}. Ele
+     * nunca chegou a limitar nada — 3 repeticoes de 2 s ficam duas ordens de grandeza abaixo —,
+     * e o caso que ele parecia cobrir, a chamada que nao volta, ele nao cobria: era o
+     * travamento deste ticket.
      */
-    private static <T> Uni<T> comRetentativa(Uni<T> chamada) {
+    private static <T> Uni<T> comRepeticao(Uni<T> chamada) {
         return chamada.onFailure(Exception.class::isInstance).retry()
-                .withBackOff(ESPERA_ENTRE_TENTATIVAS, ESPERA_ENTRE_TENTATIVAS)
-                .withJitter(0)
-                .atMost(MAXIMO_DE_RETENTATIVAS);
+                .withBackOff(ESPERA_ENTRE_REPETICOES, ESPERA_ENTRE_REPETICOES)
+                .withJitter(JITTER)
+                .atMost(MAXIMO_DE_REPETICOES);
     }
 }

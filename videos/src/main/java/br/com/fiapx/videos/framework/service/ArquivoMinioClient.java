@@ -42,15 +42,17 @@ import java.util.concurrent.Flow;
 @ApplicationScoped
 public class ArquivoMinioClient {
 
-    private static final int MAXIMO_DE_RETENTATIVAS = 3;
-    private static final Duration ESPERA_ENTRE_TENTATIVAS = Duration.ofSeconds(2);
+    private static final int MAXIMO_DE_REPETICOES = 3;
+    private static final Duration ESPERA_ENTRE_REPETICOES = Duration.ofSeconds(2);
+    /** Os 200 ms do default do {@code @Retry}, sobre os 2 s de espera: o Mutiny pede fracao. */
+    private static final double JITTER = 0.1;
 
     @Inject
     S3AsyncClient s3;
 
     public CompletionStage<Void> gravar(String bucket, String chave, Path arquivo) {
         var requisicao = PutObjectRequest.builder().bucket(bucket).key(chave).build();
-        return comRetentativa(Uni.createFrom()
+        return comRepeticao(Uni.createFrom()
                 .completionStage(() -> s3.putObject(requisicao, AsyncRequestBody.fromFile(arquivo)))
                 .replaceWithVoid())
                 .subscribeAsCompletionStage();
@@ -66,7 +68,7 @@ public class ArquivoMinioClient {
      */
     public CompletionStage<Optional<Flow.Publisher<ByteBuffer>>> abrirSeExistir(String bucket, String chave) {
         var requisicao = GetObjectRequest.builder().bucket(bucket).key(chave).build();
-        return comRetentativa(Uni.createFrom()
+        return comRepeticao(Uni.createFrom()
                 .completionStage(() -> s3.getObject(requisicao, AsyncResponseTransformer.toPublisher())
                         .<Optional<Flow.Publisher<ByteBuffer>>>thenApply(
                                 publicador -> Optional.of(FlowAdapters.toFlowPublisher(publicador)))
@@ -75,16 +77,27 @@ public class ArquivoMinioClient {
     }
 
     /**
-     * Os mesmos dois numeros que o {@code @Retry} declarava (ADR 0001): tres retentativas,
-     * espera fixa de 2 s. {@code withBackOff(x, x)} com {@code jitter} zero e como o Mutiny
-     * escreve espera fixa, e a retentativa cobre {@code Exception}, nao {@code Error} — o
-     * mesmo recorte do {@code @Retry}.
+     * A repeticao do ADR 0001, com os mesmos numeros que o {@code @Retry} tinha ate o
+     * ticket 061: 3 repeticoes, 2 s de espera, jitter de 10% (que e os 200 ms sobre 2 s do
+     * default do MicroProfile) e so sobre {@code Exception} — {@code Error} nao e repetido.
+     * {@code withBackOff(x, x)} e como o Mutiny escreve espera constante; backoff crescente
+     * seria outra politica, que o ADR nao pediu.
+     *
+     * <p><b>Repeticao, e nao "tentativa".</b> No {@code CONTEXT.md} tentativa e uma <i>entrega</i>
+     * da mensagem ao worker, e o limite dela tambem e 3 — os dois numeros coincidirem torna a
+     * confusao facil. Estes 3 aqui sao repeticoes de uma chamada de I/O dentro de <b>uma</b>
+     * tentativa.
+     *
+     * <p>O que <b>nao</b> veio junto: o {@code maxDuration} de 3 min do {@code @Retry}. Ele
+     * nunca chegou a limitar nada — 3 repeticoes de 2 s ficam duas ordens de grandeza abaixo —,
+     * e o caso que ele parecia cobrir, a chamada que nao volta, ele nao cobria: era o
+     * travamento deste ticket.
      */
-    private static <T> Uni<T> comRetentativa(Uni<T> chamada) {
+    private static <T> Uni<T> comRepeticao(Uni<T> chamada) {
         return chamada.onFailure(Exception.class::isInstance).retry()
-                .withBackOff(ESPERA_ENTRE_TENTATIVAS, ESPERA_ENTRE_TENTATIVAS)
-                .withJitter(0)
-                .atMost(MAXIMO_DE_RETENTATIVAS);
+                .withBackOff(ESPERA_ENTRE_REPETICOES, ESPERA_ENTRE_REPETICOES)
+                .withJitter(JITTER)
+                .atMost(MAXIMO_DE_REPETICOES);
     }
 
     /**

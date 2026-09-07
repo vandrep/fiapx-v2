@@ -706,12 +706,17 @@ verificadas por teste, não são sugestão). Projeto original em
   dois lados pagam —, e uma corrida do overlay só é comparável com outra corrida do overlay.
 
 - [O `Scope` do `Rastro` abre numa thread e fecha noutra](tickets/063-escopo-do-rastro-atravessa-thread.md)
-  — **aberto**. O 061 mandava investigá-lo junto e não investigou: a causa apareceu antes, e
-  misturar as duas investigações custaria a clareza da medição. O que mudou é que a razão para
-  minimizá-lo caiu com o 061 e segue caída depois do 062 — o escopo **é** aberto em todo perfil,
-  porque o guarda por `isRecording()` nunca dispara. Continua sem sintoma medido: nas sondas
-  do 061 o caminho do
-  Vídeo sempre rodou sobre contexto duplicado, que é o caso seguro.
+  — o risco era alcançável, e o "sem sintoma medido" do 061 era só sonda no lugar errado. Sondados
+  os dez pontos de instrumentação dos três serviços com a suíte inteira: oito abrem sobre contexto
+  duplicado, e dois não — `extracao.frames` (4 de 4 Extrações, fechando noutra thread nas 4, uma
+  delas a `InnocuousThread-1` do pool comum da JVM) e `extracao.gravar-pacote` (3 de 3, fechando na
+  mesma thread por acaso). Os dois chegam lá porque a cadeia segue na thread que completou o
+  download do MinIO; o `videos` escapa porque devolve a continuação ao contexto de chamada, e o
+  `@Scheduled` e o boot nem tocam no `Rastro`. Sintoma medido, não deduzido: `frames` e
+  `gravar-pacote` nasciam filhos de `extracao.baixar-video` — span **já encerrado**, corrente
+  porque o `close` de outra thread é ignorado em silêncio. A regra que fica: escopo só atravessa
+  fronteira assíncrona preso ao contexto duplicado do Vert.x; fora disso, abre e fecha na mesma
+  thread. Depois da troca, os dois nascem filhos de `extracao.extrair-video`.
 
 ## Ainda não especificado
 

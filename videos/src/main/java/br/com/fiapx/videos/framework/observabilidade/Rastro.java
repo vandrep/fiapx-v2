@@ -5,10 +5,12 @@ import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
+import io.smallrye.common.vertx.VertxContext;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.reactive.messaging.TracingMetadata;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.reactive.messaging.Message;
+import org.jboss.logging.Logger;
 import org.jboss.logging.MDC;
 
 import java.util.UUID;
@@ -38,10 +40,39 @@ import java.util.function.Supplier;
  * </ol>
  *
  * Por isso {@link #naMensagem} pendura um span proprio no contexto da mensagem e o mantem
- * <b>corrente durante todo o trabalho assincrono</b>. O {@code QuarkusContextStorage} guarda o
- * contexto no contexto duplicado do Vert.x, nao numa ThreadLocal, entao ele sobrevive aos
- * saltos de thread da cadeia (worker pool do {@code @Blocking}, thread do SDK da AWS,
- * scheduler do fault tolerance) — o mesmo mecanismo pelo qual o Panache acha a sessao.
+ * <b>corrente durante todo o trabalho assincrono</b>. Quem o carrega pelos saltos de thread da
+ * cadeia (worker pool do {@code @Blocking}, thread do SDK da AWS) e o contexto duplicado do
+ * Vert.x, onde o {@code QuarkusContextStorage} guarda o contexto do OpenTelemetry — o mesmo
+ * mecanismo pelo qual o Panache acha a sessao. Ele nao esta sempre la, e a secao seguinte e
+ * sobre isso.
+ *
+ * <h2>Onde o escopo pode atravessar thread, e onde nao (ticket 063)</h2>
+ *
+ * Um {@link Scope} aberto numa thread e fechado noutra so e seguro quando o armazenamento e o
+ * contexto duplicado do Vert.x: ali o par abre/fecha e <b>por contexto</b>, nao por thread. Sem
+ * contexto duplicado o armazenamento cai numa {@code ThreadLocal}, o {@code close} vindo de
+ * outra thread e ignorado em silencio, e a thread que abriu fica com o span, <b>ja encerrado</b>,
+ * como contexto corrente. O {@code extracao} tem dois pontos assim, e eles rodam em toda
+ * Extracao — a medicao, a regra e o que ela endireitou na arvore do trace estao no
+ * {@code docs/adr/0004-camada-de-observabilidade.md}, secao <i>O escopo so atravessa thread
+ * preso ao contexto duplicado do Vert.x</i>, que e o dono dela.
+ *
+ * <p>Dai as duas formas desta classe nao serem intercambiaveis:
+ *
+ * <ul>
+ *   <li>{@link #naMensagem} <b>precisa</b> do span corrente durante todo o trabalho — e o que faz
+ *       a publicacao seguinte ser filha dele —, entao mantem o escopo aberto atravessando thread,
+ *       e so quando ha contexto duplicado. Sem ele, degrada de proposito: nem escopo nem MDC, e um
+ *       WARN. Perder o encadeamento e ruim, e ainda assim e melhor que pendurar contexto numa
+ *       thread que ninguem limpa — e, pela medicao, o ramo nao e alcancado em servico nenhum.</li>
+ *   <li>{@link #emTorno} <b>nao precisa</b>. Quem le o contexto corrente e a instrumentacao que
+ *       monta a requisicao — MinIO, SMTP —, e ela roda no disparo; ja o {@code ffmpeg} nao tem
+ *       instrumentacao nenhuma dentro, entao ali o escopo aberto nao servia a ninguem. O escopo
+ *       abre e fecha na mesma thread, em volta do disparo, e o span segue vivo ate a conclusao.</li>
+ * </ul>
+ *
+ * <p>O que a regressao trava esta em {@code EscopoNaoAtravessaThreadTest}, no {@code extracao}
+ * — um so, no servico onde o caminho foi medido.
  *
  * <h2>idVideo</h2>
  *
@@ -86,6 +117,8 @@ import java.util.function.Supplier;
 @ApplicationScoped
 public class Rastro {
 
+    private static final Logger LOG = Logger.getLogger(Rastro.class);
+
     /** Nome do atributo de span e da chave de MDC. E o termo do contrato, nao um sinonimo. */
     public static final String ID_VIDEO = "idVideo";
 
@@ -114,16 +147,38 @@ public class Rastro {
                 span.end();
                 return trabalho.get();
             }
+            if (!VertxContext.isOnDuplicatedContext()) {
+                // Ticket 063: sem contexto duplicado, escopo e MDC cairiam numa ThreadLocal que so
+                // seria solta quando a cadeia terminasse — noutra thread —, e ninguem a soltaria.
+                // Este consumo perde o encadeamento do trace, e nao pendura contexto em thread
+                // alheia. Medido: nao acontece em consumo de mensagem em servico nenhum, entao a
+                // linha e sinal de mudanca, nao ruido de rotina.
+                LOG.warnf("%s fora de contexto duplicado do Vert.x: sem escopo corrente e sem MDC;"
+                        + " idVideo=%s", nome, idVideo);
+                return comEncerramento(span, () -> { }, trabalho);
+            }
             var escopo = span.makeCurrent();
             MDC.put(ID_VIDEO, idVideo.toString());
-            try {
-                return trabalho.get().onItemOrFailure().invoke((ignorado, falha) -> encerrar(span, escopo, falha));
-            } catch (RuntimeException erroSincrono) {
-                // O supplier pode estourar antes de existir cadeia onde pendurar o invoke.
-                encerrar(span, escopo, erroSincrono);
-                throw erroSincrono;
-            }
+            return comEncerramento(span, () -> soltar(escopo), trabalho);
         });
+    }
+
+    /**
+     * O desfecho unico da cadeia do consumo, com o que ela tem a soltar no fim — que pode ser
+     * nada, quando nada chegou a ser preso. O {@code catch} existe porque o supplier pode
+     * estourar antes de existir cadeia onde pendurar o {@code invoke}.
+     */
+    private static <T> Uni<T> comEncerramento(Span span, Runnable soltar, Supplier<Uni<T>> trabalho) {
+        try {
+            return trabalho.get().onItemOrFailure().invoke((ignorado, falha) -> {
+                soltar.run();
+                encerrar(span, falha);
+            });
+        } catch (RuntimeException erroSincrono) {
+            soltar.run();
+            encerrar(span, erroSincrono);
+            throw erroSincrono;
+        }
     }
 
     /**
@@ -138,13 +193,17 @@ public class Rastro {
             span.end();
             return trabalho.get();
         }
-        var escopo = span.makeCurrent();
-        try {
-            return trabalho.get().whenComplete((ignorado, falha) -> encerrar(span, escopo, falha));
+        CompletableFuture<T> emVoo;
+        // Ticket 063: o escopo abre e fecha na MESMA thread, em volta do disparo do I/O. Quem
+        // precisa do span corrente e a instrumentacao que monta a requisicao, e ela roda aqui
+        // dentro; o span continua vivo ate a conclusao, so o escopo e que nao viaja com ela.
+        try (var escopo = span.makeCurrent()) {
+            emVoo = trabalho.get();
         } catch (RuntimeException erroSincrono) {
-            encerrar(span, escopo, erroSincrono);
+            encerrar(span, erroSincrono);
             throw erroSincrono;
         }
+        return emVoo.whenComplete((ignorado, falha) -> encerrar(span, falha));
     }
 
     /**
@@ -174,13 +233,21 @@ public class Rastro {
                 .orElseGet(Context::current);
     }
 
-    private static void encerrar(Span span, Scope escopo, Throwable falha) {
+    private static void encerrar(Span span, Throwable falha) {
         if (falha != null) {
             span.recordException(falha);
             span.setStatus(StatusCode.ERROR, String.valueOf(falha.getMessage()));
         }
+        span.end();
+    }
+
+    /**
+     * Solta o que o consumo prendeu. Chega de qualquer thread, e e seguro justamente por isso:
+     * escopo e MDC so foram presos quando havia contexto duplicado do Vert.x, e ali os dois sao
+     * do contexto, nao da thread.
+     */
+    private static void soltar(Scope escopo) {
         MDC.remove(ID_VIDEO);
         escopo.close();
-        span.end();
     }
 }

@@ -6,6 +6,11 @@ nunca no corpo da mensagem, e a configuração de medição de carga rodando **s
 decisões são de recusa, não de adoção — o que a camada não faz é o que um leitor futuro
 questionaria, e é o que não tem outro lugar onde ser respondido.
 
+O [ticket 063](../wayfinder/tickets/063-escopo-do-rastro-atravessa-thread.md) acrescentou uma
+quarta seção, e ela não é de recusa: é a regra de onde o escopo do trace pode atravessar thread.
+Ela mora aqui porque este documento afirmava o contrário, e porque o defeito que ela remove foi
+medido.
+
 A terceira dizia "sem ela" até o [ticket 062](../wayfinder/tickets/062-a-chave-que-nao-desliga-o-sdk.md),
 e a diferença de palavra é a diferença entre o que a configuração de carga promete e o que ela
 entrega: nada é exportado, mas o span continua sendo gravado dentro do processo.
@@ -53,6 +58,43 @@ A consequência de aceitar: um trecho de `core` que um dia fique lento não apar
 por si. Ele aparece como duração inexplicada dentro do span de fronteira que o contém, e a
 resposta ali é perfil, não span — o que é o mesmo trade-off que o projeto já faz ao não medir
 tempo dentro de método.
+
+## O escopo só atravessa thread preso ao contexto duplicado do Vert.x
+
+O `Rastro` abre um `Scope` do OpenTelemetry para deixar o span corrente durante o trabalho, e
+esse trabalho é assíncrono: a cadeia que abre o escopo quase nunca é a que o fecha. Isso é
+seguro **exatamente enquanto** o `QuarkusContextStorage` estiver guardando o contexto no
+contexto duplicado do Vert.x, porque aí o par abre/fecha é por contexto, não por thread.
+Fora dele, o armazenamento é o `MDCEnabledContextStorage`, sobre uma `ThreadLocal`, e a
+mecânica muda de figura: o `ThreadLocalContextStorage` só restaura quando o contexto corrente é
+o mesmo que ele anexou, então um `close` vindo de outra thread é **ignorado em silêncio** — a
+thread que abriu fica com o span, já encerrado, como contexto corrente, e o MDC, que não tem
+essa guarda, é reescrito na thread errada.
+
+O [ticket 063](../wayfinder/tickets/063-escopo-do-rastro-atravessa-thread.md) mediu onde isso
+acontece, sondando os dez pontos de instrumentação dos três serviços com a suíte inteira. Oito
+abrem sobre contexto duplicado. Dois não, os dois no `extracao`: `extracao.frames`, em 4 de 4
+Extrações, fechando noutra thread nas 4 — uma delas a `InnocuousThread-1`, do pool comum da JVM
+—, e `extracao.gravar-pacote`, em 3 de 3, fechando na mesma thread por acaso. Os dois chegam lá
+pelo mesmo motivo: a cadeia segue na thread que completou o download do MinIO, que é do SDK da
+AWS. O `videos` não chega porque o `ArquivoMinioAdapter` de lá devolve a continuação ao contexto
+de chamada — por causa da sessão do Panache, não por causa do trace.
+
+**A regra que fica é uma:** escopo só atravessa fronteira assíncrona quando está preso ao
+contexto duplicado; fora disso, abre e fecha na mesma thread. As duas formas do `Rastro` a
+cumprem de jeitos diferentes, e a diferença é o que cada uma precisa:
+
+| | precisa do span corrente durante a espera? | como o escopo se comporta |
+|---|---|---|
+| `naMensagem` | **sim** — é ele que faz a publicação seguinte ser filha do consumo | atravessa thread, e só quando há contexto duplicado; sem ele, nada de escopo nem MDC, e um `WARN` |
+| `emTorno` | **não** — quem lê o contexto corrente é a instrumentação que monta a requisição, no disparo | abre e fecha na mesma thread, em volta do disparo; o span segue vivo até a conclusão |
+
+O sintoma que a correção removeu foi medido, e não deduzido: antes, `extracao.frames` e
+`extracao.gravar-pacote` nasciam filhos de `extracao.baixar-video`, um span já encerrado;
+depois, os dois nascem filhos de `extracao.extrair-video`. Corrigir o par abre/fecha endireitou
+a árvore do trace de tabela. O que reprova se isso regredir é o
+`EscopoNaoAtravessaThreadTest`, no `extracao` — uma cópia só, no serviço onde o caminho foi
+medido, ao contrário do `Rastro`, que existe em três.
 
 ## `idVideo` é a chave que o humano digita; `trace_id` identifica a travessia
 
@@ -263,9 +305,12 @@ overlay de carga nem chega à stack, já que o overlay a desliga.
 - **A costura é uma classe por serviço, `framework/observabilidade/Rastro.java`.** Não há módulo
   compartilhado ([ticket 007](../wayfinder/tickets/007-contrato-mensagens.md)), então são três
   cópias, com a mesma disciplina das três cópias do teste arquitetural. Ela sobrevive aos saltos
-  de thread porque o `QuarkusContextStorage` guarda o contexto no contexto duplicado do Vert.x,
-  o mesmo mecanismo pelo qual o Panache acha a sessão — e é também por isso que o log emitido de
-  dentro do pool de worker do `ffmpeg` fica **fora** dele.
+  de thread **quando** há contexto duplicado do Vert.x, que é onde o `QuarkusContextStorage`
+  guarda o contexto — o mesmo mecanismo pelo qual o Panache acha a sessão, e também o motivo de
+  o log emitido de dentro do pool de worker do `ffmpeg` ficar **fora** dele. Nem sempre há: o
+  [ticket 063](../wayfinder/tickets/063-escopo-do-rastro-atravessa-thread.md) mediu dois pontos
+  do `extracao` que rodam sem contexto duplicado nenhum, e a regra que saiu daí está em
+  *O escopo só atravessa thread preso ao contexto duplicado do Vert.x*, acima.
 - **Uma métrica própria, e só uma.** `fiapx.extracao.duracao`, em segundos, com o atributo
   `resultado` (`concluida`/`falhou`). Ela existe porque é o único intervalo que nenhuma
   auto-instrumentação enxerga — processo externo —, e o atributo não a torna duas métricas: sem

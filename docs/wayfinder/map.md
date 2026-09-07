@@ -743,6 +743,15 @@ verificadas por teste, não são sugestão). Projeto original em
   em `framework.configuration`; só o `videos`, que expõe a borda pública, mantém
   `framework.web`. Uma guarda idêntica nos três serviços proíbe o pacote web em qualquer worker.
 
+- [A duplicação de implementação entre serviços é deliberada](tickets/070-duplicacao-entre-modulos-nao-registrada.md)
+  — `Rastro`, `JsonObjectPayloadConverter`, `comRepeticao` e `MotivoFalha.doCodigo` continuam
+  locais aos serviços: um módulo `shared` trocaria coincidência de implementação por acoplamento
+  de build e evolução. Não há guarda de divergência, inclusive para o `Rastro`: diferenças por
+  serviço são legítimas, e comparar só a região comum daria garantia parcial. Quem altera uma
+  regra comum inspeciona todas as cópias; os testes de cada serviço guardam o comportamento. A
+  comparação byte a byte segue exclusiva do `ArchitectureConstraintsTest`, cuja identidade é
+  invariante declarado.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

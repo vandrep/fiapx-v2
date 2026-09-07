@@ -135,6 +135,24 @@ produção. Medido: 4 travamentos em ~60 ciclos com o interceptor, 0 em 90 sem e
 retenta dentro da própria cadeia — a política do [ADR 0001](docs/adr/0001-politica-de-falhas.md)
 não mudou, só quem a implementa. A extensão saiu dos três `pom.xml` junto com a regra.
 
+## As cópias deliberadas entre serviços
+
+Além dos records do contrato de mensagens, quatro implementações se repetem entre serviços:
+`Rastro` e `JsonObjectPayloadConverter` nos três, `comRepeticao` nos três clientes de I/O e
+`MotivoFalha.doCodigo` em `videos` e `notificacao`. As cópias são deliberadas. Cada serviço
+continua dono do próprio código e do próprio artefato; um módulo `shared` transformaria
+coincidência de implementação em acoplamento de build e de evolução entre os três serviços.
+
+Ao mudar a parte comum de uma dessas implementações, inspecione todas as cópias e aplique em
+cada uma somente o que preserva o mesmo contrato. Não as force a convergir: o `Rastro`, por
+exemplo, documenta recursos externos diferentes e só o de `videos` oferece `marcar`.
+
+Não há guarda automática de divergência para essas quatro famílias. Nenhuma delas tem
+identidade byte a byte como invariante, e uma comparação parcial confundiria diferença local
+legítima com esquecimento. Os testes de cada serviço guardam o comportamento; a revisão
+coordenada guarda a parte comum. O `ArchitectureConstraintsTest` é a exceção explícita porque
+suas três cópias foram desenhadas para ser idênticas, e por isso têm a guarda do agregador.
+
 ## Nomes na observabilidade
 
 Os três serviços exportam log, métrica e trace por OTLP (ticket 059). Os nomes têm **duas

@@ -2,8 +2,8 @@
 
 - id: 070
 - label: ready-for-human
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
 - prioridade: P2
 
@@ -57,6 +57,27 @@ Uma decisão explícita de **não** guardar fecha o ticket igualmente.
 
 ## Critérios de aceite
 
-- [ ] AGENTS.md diz, sem o leitor precisar deduzir, que as cópias são deliberadas e por quê
-- [ ] A pergunta da guarda do `Rastro` tem resposta escrita, seja qual for
-- [ ] Uma linha em "Decisões até aqui" no mapa
+- [x] AGENTS.md diz, sem o leitor precisar deduzir, que as cópias são deliberadas e por quê
+- [x] A pergunta da guarda do `Rastro` tem resposta escrita, seja qual for
+- [x] Uma linha em "Decisões até aqui" no mapa
+
+## Resolução
+
+**As cópias continuam locais e não ganham guarda de divergência.** O `AGENTS.md` agora nomeia
+as quatro famílias e registra a razão: compartilhar implementação acoplaria o build e a
+evolução de serviços que são donos dos próprios artefatos. A semelhança atual não cria uma
+abstração comum por si só.
+
+O `Rastro` torna visível por que uma guarda seria o invariante errado. Os três arquivos
+compartilham a mecânica de escopo, MDC e encerramento de span, mas já carregam diferenças
+legítimas: cada javadoc descreve os recursos externos do serviço, e somente `videos` precisa
+de `marcar` na borda HTTP. Normalizar pacote e trechos específicos para comparar apenas o
+restante daria uma garantia parcial: a guarda poderia ficar verde justamente quando uma
+mudança semântica esquecesse uma cópia fora da região comparada.
+
+A obrigação que fica é de revisão coordenada: quem mudar uma regra comum de `Rastro`,
+`JsonObjectPayloadConverter`, `comRepeticao` ou `MotivoFalha.doCodigo` inspeciona todas as
+cópias e leva a cada serviço somente o que preserva o mesmo contrato. Os testes locais
+protegem comportamento. A guarda byte a byte permanece exclusiva das três cópias do
+`ArchitectureConstraintsTest`, cuja identidade, ao contrário destas quatro famílias, é um
+invariante declarado.

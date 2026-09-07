@@ -156,15 +156,23 @@ diferente:
   `Tracer` e `Meter`, e o `Rastro` e o `DuracaoDaExtracao` reprovam com
   `UnsatisfiedResolutionException`. Medido: `./mvnw -pl extracao package -Dquarkus.otel.enabled=false`
   falha no `ArcProcessor#validate`.
-- **`otel.sdk.disabled` como propriedade do autoconfigure** não acrescenta nada: o
-  `OpenTelemetryRecorder` já traduz `quarkus.otel.sdk.disabled` para `otel.sdk.disabled` no
-  `propertiesSupplier`, e de todo modo o desvio dele acontece **antes**, no `if (sdkDisabled())`.
-  É a configuração que já está de pé, com outro nome.
-- **Sampler `always_off`** funciona — e é a única coisa que faria o span parar de gravar —, mas
-  `quarkus.otel.traces.sampler` também é fixado no build. Medido: subir o `extracao` empacotado
-  com `-Dquarkus.otel.traces.sampler=always_off` produz
+- **`otel.sdk.disabled` como propriedade do autoconfigure** não acrescenta nada, e a razão que
+  decide é anterior à do ticket: o desvio do recorder acontece **antes** de o autoconfigure
+  existir, no `if (sdkDisabled())` — quem lê essa chave é o `OTelRuntimeConfig` do Quarkus, e o
+  `QUARKUS_OTEL_SDK_DISABLED` do overlay já a alcança porque ela é propriedade **declarada** da
+  config mapping. É a configuração que já está de pé, com outro nome. (A ressalva do ticket
+  sobre `getPropertyNames()` continua de pé para uma variável `OTEL_SDK_DISABLED` crua, que não
+  tem chave pontuada declarada — mas ela é irrelevante aqui, porque nem chegaria a ser lida.)
+- **Sampler `always_off`** é a única coisa que faria o span parar de gravar, e esbarra em
+  **dois** bloqueios independentes. O primeiro: com `sdkDisabled()` verdadeiro o `SamplerCustomizer`
+  do Quarkus não roda e o `configureSdk` é pulado, então o sampler configurado **não é consultado
+  em configuração nenhuma do overlay** — o span grava pelo sampler *default* do SDK, e não pelo
+  `always_on` do `application.properties`. Ligar o SDK de volta só para poder desligar o sampler
+  devolveria o exportador, que é o custo que o overlay existe para tirar. O segundo, medido:
+  `quarkus.otel.traces.sampler` é fixado no build, e subir o `extracao` empacotado com
+  `-Dquarkus.otel.traces.sampler=always_off` produz
   `WARN: Build time property cannot be changed at runtime: quarkus.otel.traces.sampler is set to
-  'always_off' but it is build time fixed to 'always_on'`, e a corrida usa `always_on`.
+  'always_off' but it is build time fixed to 'always_on'` — a corrida usa `always_on`.
 
 Sobra a única forma que funciona, e ela é o que se recusa: **uma segunda leva de imagens**,
 construída com `-Dquarkus.otel.traces.sampler=always_off` e os três `*.exporter=none` (isso
@@ -188,16 +196,21 @@ remove o bean `Meter` e derruba o build do `extracao`, pela mesma
   quatro números. A diferença entre as duas configurações é o custo de gravar span sem exportar,
   e ele **não está medido**.
 - **O número do 059 foi reetiquetado, não remedido.** Os ~5% no ciclo do Vídeo e os ~160 MiB
-  somando os três serviços comparam *com coletor e exportador* contra *sem coletor e sem
-  exportador* — é o custo de **exportar os três sinais**, não o custo de instrumentar. Remedir
-  "com instrumentação" contra "sem" exigiria justamente a segunda leva de imagens recusada
-  acima, e o número responderia uma pergunta que nenhum requisito faz. Extrapolar qualquer um dos
-  dois para o regime de pico continua sendo conta que ninguém fez.
+  somando os três serviços comparam duas configurações que a tabela acima descreve com precisão:
+  de um lado tudo ligado; do outro, métrica e log **realmente desligados** e o trace gravando sem
+  sair. O delta é, então, **exportar os três sinais mais gravar métrica e espelhar log** — e o
+  que ele **não** contém é a gravação de span, que os dois lados pagam igual. Não é "o custo da
+  instrumentação", que é como o 059 e o mapa o rotulam. Remedir "com instrumentação" contra
+  "sem" exigiria justamente a segunda leva de imagens recusada acima, e responderia uma pergunta
+  que nenhum requisito faz. Extrapolar qualquer um dos dois para o regime de pico continua sendo
+  conta que ninguém fez.
 - **O guarda por `isRecording()` do `Rastro` não dispara em nenhuma configuração deste
   repositório**, e isso segue sendo verdade depois desta decisão — inclusive em `%test` e `%dev`.
   O `SdkDesligadoAindaGravaTest` existe para que a afirmação não envelheça em silêncio: se um
   upgrade do Quarkus fizer a chave desligar de verdade, ele reprova, e aí esta seção precisa ser
-  reescrita.
+  reescrita. Ele vive **só no `extracao`**, e nos outros dois a afirmação vale por analogia —
+  os três têm o mesmo bloco de configuração e a mesma extensão, e um teste por serviço para uma
+  propriedade da extensão pagaria três cópias pelo mesmo sinal.
 - **O travamento raro que o 061 carregava não vinha do SDK**: a causa raiz é a tolerância a
   falhas por interceptor nos adapters de I/O, que reagendava a chamada no contexto Vert.x do
   próprio consumidor. Está fechado, e o rótulo "com o SDK desligado" no título daquele ticket

@@ -142,18 +142,26 @@ Compose puxa `latest` do GHCR e o `latest` não tinha o código):
 - **Métrica**: `fiapx_extracao_duracao_seconds_count` e `_sum` no Prometheus, com as duas séries
   de `resultado`, uma por réplica do `extracao`.
 
-**O custo da instrumentação, que o 058 deixou por medir.** Fixture de controle, ciclo completo
+**O custo da observabilidade, que o 058 deixou por medir.** Fixture de controle, ciclo completo
 `POST /videos` → `CONCLUIDO`, JVMs quentes, seis medições de cada lado no mesmo host:
 
 | | Ciclo do Vídeo | RAM dos três serviços |
 |---|---|---|
-| Com instrumentação | 0,56 – 0,59 s | 1.014 MiB |
-| Sem (`QUARKUS_OTEL_SDK_DISABLED=true`) | 0,53 – 0,56 s | 852 MiB |
+| Tudo ligado, exportando para a stack | 0,56 – 0,59 s | 1.014 MiB |
+| `QUARKUS_OTEL_SDK_DISABLED=true` | 0,53 – 0,56 s | 852 MiB |
 
 **Cerca de 30 ms num ciclo de 550 ms — ~5% — e ~160 MiB somando os três serviços** (quatro
 JVMs, contando as duas réplicas do `extracao`). A amostragem é 100%, como o ticket exige, e este
 é o preço dela no fixture de controle. O número de RAM é aproximado: as JVMs foram medidas com
 histórias de uso parecidas, mas não idênticas.
+
+> **Reetiquetado pelo [ticket 062](062-a-chave-que-nao-desliga-o-sdk.md).** As duas linhas acima
+> diziam "Com instrumentação" e "Sem instrumentação", e não era isso que elas comparavam.
+> `QUARKUS_OTEL_SDK_DISABLED=true` desliga métrica e log de verdade, mas **não** desliga o
+> trace: o span continua sendo gravado dos dois lados. O delta destas medições é, portanto,
+> *exportar os três sinais + gravar métrica + espelhar log*, e **não** inclui o custo de gravar
+> span. O número não foi remedido — medir "com instrumentação" contra "sem" exigiria uma segunda
+> leva de imagens, recusada no [ADR 0004](../../adr/0004-camada-de-observabilidade.md).
 
 **Um defeito medido, e não corrigido de propósito: [ticket 061](061-travamento-raro-com-o-sdk-desligado.md).**
 Ao medir o lado "sem instrumentação" apareceu um travamento raro: com

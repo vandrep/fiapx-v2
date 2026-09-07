@@ -61,22 +61,17 @@ import java.util.function.Supplier;
  * {@code quarkus.otel.sdk.disabled=true} produz esse caso. <b>Nao produz.</b> Medido no
  * Quarkus 3.31.3, com a propriedade ligada por variavel de ambiente e por
  * {@code -D} de sistema, {@code isRecording()} continua {@code true} e o span e um
- * {@code SdkSpan} de verdade: o {@code OpenTelemetryRecorder} pula os customizadores de
- * exportador, mas o SDK que ele monta continua gravando. A chave suprime a <b>exportacao</b>,
- * nao a instrumentacao. Logo o caminho cru e, na pratica, morto — em teste, em dev e no
- * overlay de carga o codigo roda pelo caminho que abre escopo.
- *
- * <p>O ticket 062 foi ler o mecanismo, e ele e mais estreito que "a chave suprime a
- * exportacao": dos tres providers que o SDK monta no default, o meter sem reader e o logger sem
- * processor viram no-op de verdade — metrica e log ficam mesmo desligados —, mas o
- * {@code SdkTracerProvider} nao tem esse atalho, e quem decide se o span grava e o sampler, que
- * nasce amostrando. So o trace sobrevive, e e por isso que este guarda nunca dispara.
+ * {@code SdkSpan} de verdade: o {@code OpenTelemetryRecorder} pula os customizadores, mas o SDK
+ * que ele monta continua gravando. O ticket 062 estreitou o recorte: a chave desliga
+ * <b>metrica e log</b> de verdade, e falha so no <b>trace</b>, porque o
+ * {@code SdkTracerProvider} e o unico dos tres providers sem o atalho "sem processador, vira
+ * no-op". Logo o caminho cru e, na pratica, morto — em teste, em dev e no overlay de carga o
+ * codigo roda pelo caminho que abre escopo.
  *
  * <p>Isso importa alem da precisao do comentario: o ticket 061 descartou uma hipotese inteira
- * por acreditar na frase antiga. E a decisao que faltava esta tomada: o overlay de carga fica
- * como esta e passa a declarar que mede um sistema instrumentado sem coletor, porque nenhuma
- * chave que pararia o span alcanca um overlay de Compose (ticket 062,
- * {@code docs/adr/0004-camada-de-observabilidade.md}).
+ * por acreditar na frase antiga. A decisao que faltava esta tomada — o overlay de carga fica
+ * como esta e passa a declarar que mede um sistema instrumentado sem coletor —, e o mecanismo
+ * inteiro mora em {@code docs/adr/0004-camada-de-observabilidade.md}, nao aqui.
  *
  * <h2>Onde {@link #emTorno} vale a pena, e onde nao</h2>
  *

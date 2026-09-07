@@ -56,13 +56,19 @@ services:
   #
   # Por que fica assim, medido no 062 e nao suposto: `QUARKUS_OTEL_SDK_DISABLED=true` desliga
   # metrica e log de verdade (sem reader, o meter vira no-op; sem processor, o logger tambem),
-  # mas NAO desliga trace — o SdkTracerProvider nao tem esse atalho, e quem decide e o sampler,
-  # que nasce amostrando. E nenhuma chave que pararia o span alcanca um overlay de Compose:
-  # `quarkus.otel.enabled=false` e `quarkus.otel.traces.sampler=always_off` sao fixadas no
-  # build (a segunda reclama em voz alta ao ser passada em runtime), e a primeira nem compila
-  # aqui — sem os beans Tracer e Meter, Rastro e DuracaoDaExtracao ficam sem injecao. O que
-  # funcionaria e uma segunda leva de imagens so para o experimento, e o ADR 0004 recusa o
-  # preco. Ver docs/adr/0004-camada-de-observabilidade.md.
+  # mas NAO desliga trace — o SdkTracerProvider nao tem esse atalho, e o span acaba gravando
+  # pelo sampler DEFAULT do SDK, que amostra. Note que nesta configuracao o sampler configurado
+  # no application.properties nem e consultado: com o SDK desligado o recorder pula os
+  # customizadores e o autoconfigure pula o configureSdk inteiro.
+  #
+  # E nenhuma chave que pararia o span alcanca um overlay de Compose, que so sabe passar
+  # variavel de ambiente. `quarkus.otel.enabled=false` e fixada no build e aqui nem compila —
+  # sem os beans Tracer e Meter, Rastro e DuracaoDaExtracao ficam sem injecao. O sampler
+  # `always_off` esbarra em dois bloqueios: ele so teria efeito com o SDK LIGADO (que devolveria
+  # o exportador, o custo que este bloco existe para tirar), e a propriedade tambem e fixada no
+  # build — passada em runtime, o Quarkus recusa em voz alta. O que funcionaria e uma segunda
+  # leva de imagens so para o experimento, e o ADR 0004 recusa o preco.
+  # Ver docs/adr/0004-camada-de-observabilidade.md.
   #
   # `QUARKUS_OTEL_SDK_DISABLED`, e nao um override de canal ou de perfil: e a chave que o
   # proprio Quarkus expoe para calar os tres sinais de uma vez.

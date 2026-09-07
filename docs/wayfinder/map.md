@@ -631,7 +631,8 @@ verificadas por teste, não são sugestão). Projeto original em
   **fila com mensagem e zero consumidores** foi validado reproduzindo o incidente de 06/09.
   O overlay de carga desliga a stack com `replicas: 0` — o que o 062 depois mostrou preservar
   menos do método dos tickets 025–028 do que se supunha, porque desligar a stack e os
-  exportadores não desliga a instrumentação. Sem canal de notificação: os alertas existem, **a detecção não mudou**.
+  exportadores não desliga a instrumentação. Sem canal de notificação: os alertas existem,
+  **a detecção não mudou**.
 
 - [Os três sinais saem dos três serviços, costurados pelo idVideo](tickets/059-tres-sinais-nos-tres-servicos.md)
   — buscar um `idVideo` devolve **um** trace com `fiapx-videos`, `fiapx-extracao` e
@@ -643,8 +644,11 @@ verificadas por teste, não são sugestão). Projeto original em
   extensão da AWS, que monta o `AwsSdkTelemetry` sozinha, **não emitiu nenhum span de S3** — eu
   havia removido os spans próprios de MinIO por causa dela e tive de devolvê-los. Uma métrica
   própria só: `fiapx.extracao.duracao`, os 98,2% do tempo de serviço que rodam fora do JVM.
-  **Custo da instrumentação, que o 058 deixou por medir: ~5% no ciclo do Vídeo (0,56–0,59 s
-  contra 0,53–0,56 s) e ~160 MiB somando os três serviços**, com amostragem em 100%. O
+  **Custo da observabilidade, que o 058 deixou por medir: ~5% no ciclo do Vídeo (0,56–0,59 s
+  contra 0,53–0,56 s) e ~160 MiB somando os três serviços**, com amostragem em 100% — o
+  [062](tickets/062-a-chave-que-nao-desliga-o-sdk.md) reetiquetou o que esse delta contém
+  (exportar os três sinais, gravar métrica e espelhar log; **não** gravar span, que os dois
+  lados pagam). O
   `smoke.sh` ganhou os passos 10 e 11 — o 10 é a única prova de correlação ponta a ponta que
   existe no repositório, e reprovou de verdade antes de a busca ser ancorada no serviço certo.
   Deixou um defeito medido em aberto, [061](tickets/061-travamento-raro-com-o-sdk-desligado.md).
@@ -697,15 +701,16 @@ verificadas por teste, não são sugestão). Projeto original em
   custa um artefato paralelo à demo e **ainda assim não devolveria** a comparabilidade com os
   025–028, porque aquele código mudou desde então. O mecanismo ficou mais estreito de quebra: a
   chave desliga métrica e log de verdade, e falha só no trace, porque o `SdkTracerProvider` não
-  tem o atalho "sem processador, vira no-op". Consequências escritas: os ~5% do 059 medem o
-  custo de **exportar**, não o de instrumentar, e uma corrida do overlay só é comparável com
-  outra corrida do overlay.
+  tem o atalho "sem processador, vira no-op". Consequências escritas: os ~5% do 059 medem
+  exportar os três sinais, gravar métrica e espelhar log — **não** a gravação de span, que os
+  dois lados pagam —, e uma corrida do overlay só é comparável com outra corrida do overlay.
 
 - [O `Scope` do `Rastro` abre numa thread e fecha noutra](tickets/063-escopo-do-rastro-atravessa-thread.md)
   — **aberto**. O 061 mandava investigá-lo junto e não investigou: a causa apareceu antes, e
   misturar as duas investigações custaria a clareza da medição. O que mudou é que a razão para
   minimizá-lo caiu com o 061 e segue caída depois do 062 — o escopo **é** aberto em todo perfil,
-  porque o guarda por `isRecording()` nunca dispara. Continua sem sintoma medido: nas sondas do 061 o caminho do
+  porque o guarda por `isRecording()` nunca dispara. Continua sem sintoma medido: nas sondas
+  do 061 o caminho do
   Vídeo sempre rodou sobre contexto duplicado, que é o caso seguro.
 
 ## Ainda não especificado

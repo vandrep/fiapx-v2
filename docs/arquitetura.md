@@ -587,9 +587,10 @@ O que eu não defendo — apenas aceitei.
   deste documento vêm das imagens pré-059, que não instrumentavam nada, então **uma corrida
   futura do overlay é comparável com outra corrida do overlay, e não com eles**; a diferença
   entre as duas configurações não está medida. Os ~5% no ciclo do Vídeo e os ~160 MiB somando os
-  três serviços ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)) medem o
-  custo de **exportar** os três sinais, não o de instrumentar, e extrapolá-los para o regime de
-  pico continua sendo conta que ninguém fez. O 062 decidiu escrever isso em vez de corrigir:
+  três serviços ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)) medem
+  **exportar os três sinais, gravar métrica e espelhar log** — e não a gravação de span, que os
+  dois lados daquela medição pagam igual. Extrapolá-los para o regime de pico continua sendo
+  conta que ninguém fez. O 062 decidiu escrever isso em vez de corrigir:
   nenhuma chave que pararia o span alcança um overlay de Compose, e a única forma que
   funcionaria — uma segunda leva de imagens construída só para o experimento — está recusada no
   [ADR 0004](adr/0004-camada-de-observabilidade.md).

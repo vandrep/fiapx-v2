@@ -1,9 +1,9 @@
-# `quarkus.otel.sdk.disabled` desliga a exportação, não a instrumentação
+# `quarkus.otel.sdk.disabled` cala a exportação, e não desliga o trace
 
 - id: 062
 - label: ready-for-agent
 - status: fechado
-- assignee:
+- assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
 - prioridade: P2
 
@@ -103,9 +103,21 @@ Nenhum deles alcança um overlay de Compose, que só sabe passar variável de am
 
 | Candidato | Verdicto | Como foi verificado |
 |---|---|---|
-| `quarkus.otel.enabled=false` | `BUILD_AND_RUN_TIME_FIXED`, **e não compila aqui** | `./mvnw -pl extracao package -Dquarkus.otel.enabled=false` reprova no `ArcProcessor#validate`: sem os build steps do OTel somem os beans `Tracer` e `Meter`, e o `Rastro` e o `DuracaoDaExtracao` ficam com `UnsatisfiedResolutionException` |
-| `otel.sdk.disabled` pelo autoconfigure | não acrescenta nada | o recorder já traduz `quarkus.otel.sdk.disabled` para `otel.sdk.disabled` no `propertiesSupplier`, e o desvio dele acontece antes, no `if (sdkDisabled())`. É a configuração que já está de pé, com outro nome |
-| sampler `always_off` | funciona, mas é fixado no build | subir o `extracao` empacotado com `-Dquarkus.otel.traces.sampler=always_off` produz `WARN: Build time property cannot be changed at runtime: ... is set to 'always_off' but it is build time fixed to 'always_on'`, e a corrida usa `always_on` |
+| `quarkus.otel.enabled=false` | fixado no build, **e não compila aqui** | `./mvnw -pl extracao package -DskipTests -Dquarkus.otel.enabled=false` reprova no `ArcProcessor#validate`: sem os build steps do OTel somem os beans `Tracer` e `Meter`, e o `Rastro` e o `DuracaoDaExtracao` ficam com `UnsatisfiedResolutionException` |
+| `otel.sdk.disabled` pelo autoconfigure | não acrescenta nada | o desvio do recorder acontece **antes** de o autoconfigure existir, no `if (sdkDisabled())`, e quem lê a chave é o `OTelRuntimeConfig`. É a configuração que já está de pé, com outro nome |
+| sampler `always_off` | **dois** bloqueios | (1) com o SDK desligado o `SamplerCustomizer` não roda e o `configureSdk` é pulado — o sampler configurado não é consultado, e o span grava pelo *default* do SDK; (2) a propriedade é fixada no build: subir o `extracao` empacotado com `-Dquarkus.otel.traces.sampler=always_off` produz `WARN: Build time property cannot be changed at runtime: quarkus.otel.traces.sampler is set to 'always_off' but it is build time fixed to 'always_on'` |
+
+Sobre o candidato 2, a ressalva que este ticket levantou — variável de ambiente sem chave
+pontuada correspondente não aparece em `getPropertyNames()` — continua de pé para um
+`OTEL_SDK_DISABLED` cru, e é **irrelevante aqui**: `quarkus.otel.sdk.disabled` é propriedade
+declarada da config mapping, então o `QUARKUS_OTEL_SDK_DISABLED` do overlay a alcança, e mesmo
+que não alcançasse o desvio do recorder acontece antes de o autoconfigure ler qualquer coisa.
+
+As três medições são repetíveis com os comandos acima, mais o do build que **passa**
+(`-Dquarkus.otel.traces.sampler=always_off -Dquarkus.otel.traces.exporter=none
+-Dquarkus.otel.metrics.exporter=none -Dquarkus.otel.logs.exporter=none`). Elas não deixaram
+artefato no repositório de propósito: são fatos sobre a **versão da extensão**, não sobre este
+código, e o que precisa reprovar quando o Quarkus mudar já é o `SdkDesligadoAindaGravaTest`.
 
 A única forma que funciona é **uma segunda leva de imagens**, construída com
 `-Dquarkus.otel.traces.sampler=always_off` e os três `*.exporter=none` — isso compila, foi
@@ -120,12 +132,16 @@ Uma imagem permanente por uma comparação que continua quebrada é troca ruim.
 
 ### O número do 059: reetiquetado, não remedido
 
-Os ~5% no ciclo do Vídeo e os ~160 MiB comparam *com coletor e exportador* contra *sem coletor e
-sem exportador*: é o custo de **exportar** os três sinais, não o de instrumentar. Fica com esse
-rótulo. Remedir "com instrumentação" contra "sem" exigiria a segunda leva de imagens recusada
-acima, e responderia uma pergunta que nenhum requisito faz; o resíduo — o custo de gravar span
-sem exportar — fica declarado como **não medido**, que é mais honesto que um número colhido
-noutro código.
+Os ~5% no ciclo do Vídeo e os ~160 MiB comparam *tudo ligado e exportando* contra *métrica e log
+realmente desligados, trace gravando sem sair*. O delta é, então, **exportar os três sinais,
+gravar métrica e espelhar log** — e o que ele **não** contém é a gravação de span, que os dois
+lados pagam igual. "Custo da instrumentação", como o 059 e o mapa rotulavam, é errado nos dois
+sentidos: inclui exportação, e exclui a única instrumentação que sobrevive à chave. O rótulo foi
+trocado onde o número mora (ticket 059 e `map.md`), com um bloco de citação no 059 dizendo o que
+mudou e por quê. Remedir "com instrumentação" contra "sem" exigiria a segunda leva de imagens
+recusada acima, e responderia uma pergunta que nenhum requisito faz; o resíduo — o custo de
+gravar span sem exportar — fica declarado como **não medido**, que é mais honesto que um número
+colhido noutro código.
 
 A consequência que sobra escrita: uma corrida futura do overlay é comparável com **outra corrida
 do overlay**, e não com os quatro números de escala do mapa.
@@ -138,13 +154,17 @@ do overlay**, e não com os quatro números de escala do mapa.
 - `docker-compose.carga.yml`: o bloco do SDK diz o que o overlay mede, e por que fica assim.
 - `docs/arquitetura.md` § *Limitações conhecidas*: a limitação agora separa "configuração medida
   ≠ configuração entregue" de "configuração medida ≠ configuração dos números de escala".
-- Os três `Rastro.java` e os três `application.properties`: o mecanismo estreito, e o ponteiro
-  para a decisão em vez de para uma pergunta aberta. O comentário do sampler dizia que o overlay
-  "desliga o SDK dos tres servicos" — agora diz que cala os exportadores e que o span continua
-  sendo gravado, e registra que esta é a propriedade que o runtime não alcança.
+- [Ticket 059](059-tres-sinais-nos-tres-servicos.md) e `docs/wayfinder/map.md`: o rótulo do
+  número, trocado onde ele mora — é a reetiquetagem, e ela não valeria nada só no ADR.
+- Os três `Rastro.java` e os três `application.properties`: o recorte estreito em uma frase e o
+  ponteiro para o ADR, que é onde o mecanismo mora. O comentário do sampler dizia que o overlay
+  "desliga o SDK dos tres servicos" — agora diz que ele cala os exportadores, sem afirmar nada
+  sobre o sampler, que nessa configuração nem chega a ser consultado.
 - `SdkDesligadoAindaGravaTest`: o javadoc deixou de anunciar uma decisão pendente e passou a
   dizer que a decisão do 062 se apoia neste comportamento. Se ele reprovar num upgrade, é o 062
-  que reabre.
+  que reabre. Ele vive **só no `extracao`**, e nos outros dois a afirmação vale por analogia: os
+  três têm o mesmo bloco de configuração e a mesma extensão, e três cópias pagariam três vezes
+  pelo mesmo sinal.
 
 **Nada mudou em configuração**, e isso é a decisão, não uma omissão: `QUARKUS_OTEL_SDK_DISABLED`
 continua no overlay, porque cala mesmo os três exportadores — e, agora que se sabe, desliga

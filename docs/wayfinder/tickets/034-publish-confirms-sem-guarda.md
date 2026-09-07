@@ -51,7 +51,7 @@ vez não precise de outra sessão de grilling para aparecer. Achado na revisão 
 própria implementação do 029, em 2026-09-04 — não faz parte da rodada de arquitetura que
 abriu os tickets 029–033 (ver `docs/wayfinder/map.md` § *Ainda não especificado*).
 
-## Como ficou
+## Resolução
 
 Quinta regra no `ArchitectureConstraintsTest`, das três opções abertas acima. O mecanismo do
 primeiro item — ler os `.properties` — dentro do arquivo do segundo, porque o teste arquitetural
@@ -78,7 +78,7 @@ sem canal de saída — o `notificacao` de hoje — não casa nenhuma linha e pa
 não-vazio, de propósito: a regra fica de pé para o dia em que ele publicar, que é o que o corpo
 do ticket pediu.
 
-## Limite conhecido
+### Limite conhecido
 
 A regra lê `application.properties`. Canal ou override que chegue por variável de ambiente
 (`MP_MESSAGING_OUTGOING_*`) passa por fora — o `docker-compose.carga.yml` já usa esse caminho
@@ -87,7 +87,7 @@ override de Compose é deliberado e revisado junto do arquivo que o declara, e o
 ticket persegue é o canal esquecido no `.properties`, não o canal ajustado de propósito no
 deploy.
 
-## Evidência
+### Evidência
 
 Vermelho, apagando `mp.messaging.outgoing.extracao-falhou.publish-confirms=true` do `extracao`
 e rodando `./mvnw -pl extracao test -Dtest=ArchitectureConstraintsTest`:

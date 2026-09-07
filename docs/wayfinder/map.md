@@ -497,11 +497,134 @@ verificadas por teste, não são sugestão). Projeto original em
   módulos. Não vinha da rodada de arquitetura dos 029–033: saiu da revisão de código da
   implementação do 029, na mesma sessão.
 
+- [A decisão de transição roda em Java, no caminho de produção](tickets/031-decisao-de-transicao-em-java.md)
+  — `transitaPara` e os `marcaComo*` tinham zero chamadores em `src/main`: a suíte de use case
+  inteira validava uma implementação que não embarcava. Os três use cases de processamento
+  passaram a carregar o Vídeo, perguntar à entidade e só então rodar o `UPDATE ... where estado
+  in predecessores()`, que continua sendo quem autoriza publicar — a entidade decide, o `WHERE`
+  confirma. `VideoGateway` ganhou `buscarPorId(UUID)` para o caminho de mensageria, que não tem
+  Dono a informar, e o teste arquitetural das três cópias proíbe `Resource` e controller HTTP de
+  chamá-lo: a guarda de posse do [009](tickets/009-modelo-dominio-videos.md) desceu de estrutural
+  para verificada, e isso é preço, não detalhe. As três transições passaram a devolver `boolean`,
+  e `Optional<Video>` saiu de `marcarFalha`. O ADR 0002 foi emendado no ponto que importa:
+  terminal→terminal deixa de ser bug e vira corrida de rede, que devolve `false` com log e nunca
+  exceção — levantar mandaria uma corrida de rede para a DLQ do `videos`. Custo aceito: um
+  `SELECT` a mais por evento nos três desfechos.
+
+- [O ciclo da Extração mora no `extracao`, não dentro do adapter de ffmpeg](tickets/032-ciclo-da-extracao-no-extracao.md)
+  — a regra permanente contra transitória vivia num adapter de 280 linhas sem teste: eram duas
+  máquinas de estado e só uma estava modelada. A costura ficou onde estava e a **decisão**
+  atravessou: `Extracao.classificarFalhaDoFfmpeg(SinaisDoFfmpeg)` em `core/entities` recebe exit
+  code e stderr e devolve `MotivoFalha` permanente ou transitória, e a tolerância na contagem de
+  frames e o teto de duração foram junto. As tabelas de `docs/pesquisa/ffmpeg-extracao.md` e de
+  `docs/contratos/mensagens.md` § motivos deixaram de ser prosa e viraram teste tabelado, que
+  roda sem ffmpeg no classpath. O ffmpeg continua necessário para a mecânica — `ProcessBuilder`,
+  timeouts, ZIP `STORED`, `-threads` — e deixou de ser necessário para a regra.
+
+- [O `iniciadaEm` sai do caminho interno em vez de ganhar coluna](tickets/033-iniciada-em-morto.md)
+  — o instante atravessava três camadas do `videos` sem destino, e era exatamente a coluna que
+  faltaria para varrer `PROCESSANDO` preso. Das duas saídas, a escolhida foi remover: controller,
+  command, gateway e adapter carregam só o identificador necessário para aplicar a transição. O
+  campo permanece no record de mensageria dos dois serviços, porque tirá-lo seria mudança
+  incompatível de contrato — o consumidor tolerant reader desserializa e descarta na borda. Nada
+  de coluna nem de varredura nova: o [029](tickets/029-terminal-na-dlq-do-extracao.md) fechou a
+  perda silenciosa que motivava a precaução e tornou a falha residual visível no Estacionamento,
+  mas não trouxe medição que justifique reabrir o esquema, e sem esse número persistir o instante
+  criaria estado e recuperação especulativos.
+
+- [A Extração em voo é drenada antes do `SIGTERM`](tickets/035-drenar-extracao-antes-do-sigterm.md)
+  — nasceu do 030, na mesma sessão que o fechou: a leitura do código-fonte do conector e do
+  `quarkus-arc` desmentiu a premissa de que `stop_grace_period` bastasse. O observador CDI
+  cancela a assinatura `extrair-video` antes de esperar o ack, mantendo canal e publicadores
+  abertos. A ponte usa campos privados do SmallRye e **rejeita no boot** versões diferentes da
+  4.32.1; atualizar exige repetir o ensaio. Duas réplicas, 12 Vídeos de dois minutos: 12
+  concluídos, zero reentregas novas, redeploy em 4 s; antes da correção a mesma carga gastou uma
+  reentrega. Cancelamento e espera dividem os 420 s do dreno, abaixo dos 480 s do Docker. SIGKILL
+  e falhas de rede continuam fora.
+
+- [Boot corrigido e `mata-publicacao` medido pela primeira vez](tickets/038-override-de-canal-por-variavel-quebra-o-boot.md)
+  — a **presença** de `MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_*`, mesmo com os valores default,
+  derrubava o `extracao`: o traço de `extracao-falhou` volta da variável de ambiente como ponto,
+  e a enumeração do SmallRye deduzia daí um canal `extracao` sem `connector`. A saída foi
+  variáveis próprias `FIAPX_*` resolvidas por expressão no `.properties`, que preserva o nome do
+  canal sem inventar canal na enumeração — em vez de renomear o canal ou sobrescrever o
+  entrypoint da imagem. Override direto `MP_MESSAGING_OUTGOING_*` continua sujeito à ambiguidade,
+  e isso fica declarado. Com o boot de pé, o harness julgou os três critérios de verdade: quatro
+  réplicas, três envios aceitos e três Vídeos em `PROCESSANDO` (critérios 1 e 2 aprovados),
+  critério 3 **reprovado** — zero mensagens novas no estacionamento em 241 s, limite 240 s. A
+  garantia do [029](tickets/029-terminal-na-dlq-do-extracao.md) permanece pendente de
+  diagnóstico; o aceite deste ticket era chegar ao veredito, não obter três aprovações.
+
+- [O dublê de `VideoGateway` volta a guardar](tickets/039-dubles-de-transicao-nao-guardam.md)
+  — as três guardas em memória aplicam a transição do domínio à linha armazenada, e `buscarPorId`
+  devolve **cópia**: sem ela o use case movia o próprio objeto do mapa e a guarda chegava sem
+  nada para julgar, que era a raiz do defeito. O flag `proximaTransicaoMudaLinha` saiu; a corrida
+  perdida se arma por id, no instante da leitura, que é onde ela acontece de verdade — entre o
+  `SELECT` e o `UPDATE`. As três transições ganharam teste de corrida; antes só `falha` tinha, e
+  nenhum reprovava. A unicidade do e-mail do ADR 0001 volta a ser provada pela suíte unitária, e
+  não por um dublê que concordava consigo mesmo.
+
+- [O Vídeo está visível antes de o comando de Extração ser publicado](tickets/040-confirmar-video-antes-de-publicar-extracao.md)
+  — `VideoDataSourceAdapter.adicionar` abre sua própria transação e `VideosResource` não mantém
+  mais uma transação englobando a publicação: concluir a persistência passou a significar commit,
+  não flush. A corrida foi reproduzida com um consumidor lendo por **conexão própria do pool** —
+  dentro de uma transação ambiente ele conta zero linhas, sem ela conta uma —, e a sincronização
+  é o encadeamento da própria transação, sem sleep. Como `Panache.withTransaction` se **junta** a
+  uma transação ambiente, devolver `@WithTransaction` à borda reabriria o buraco sem nada ficar
+  vermelho: daí a cerca `BordaDoEnvioSemTransacaoTest`, medida por mutação. A janela oposta do
+  ADR 0003 — commit feito, publicação interrompida — ganhou prova com Postgres, MinIO e broker
+  reais, com a folga vencida envelhecendo `recebido_em` por SQL em vez de esperando.
+
+- [O scratch passou a ser por tentativa, não por Vídeo](tickets/041-isolar-espaco-por-tentativa-de-extracao.md)
+  — `prepararNovo` abre `{idVideo}-{sufixo}` atômico e `limpar` recebe o **caminho** daquela
+  tentativa, não o id: com o nome derivado só do Vídeo, "limpar a minha tentativa" e "limpar a da
+  outra réplica" eram o mesmo comando, e duas réplicas com o comando duplicado apagavam os frames
+  uma da outra sobre o volume compartilhado. Medido no Compose com duas réplicas: antes, o h264
+  válido terminou em `FALHOU`/`ARQUIVO_INVALIDO` com os dois desfechos publicados para o mesmo
+  Vídeo; depois, `CONCLUIDO` e Pacote íntegro pela borda pública, sem sobra no volume. O ensaio
+  virou `scripts/carga/duplicata-em-replicas.sh`. A varredura de órfãos do 027 ganhou precisão de
+  graça — julga tentativa, não Vídeo — e ganhou gatilho periódico (`@Scheduled`, 15 min): sem o
+  apaga-e-recria, o boot sozinho não alcança o órfão da réplica que morreu e voltou, o que foi
+  medido no volume depois do ensaio de conservação.
+
+- [Os dois workers são exercitados pela borda que têm: o RabbitMQ](tickets/042-bdd-dos-workers-pelo-rabbitmq.md)
+  — cada worker ganhou uma `BordaDeMensageria` no classpath de teste, cliente AMQP puro no papel
+  que o RestAssured cumpre nos steps do `videos`. Os cenários publicam na routing key real do
+  contrato, então roteamento, `JsonObjectPayloadConverter` e consumidor de verdade rodam em todo
+  cenário; nenhum step toca controller, use case ou gateway para disparar o comportamento sob
+  teste. Provado por mutação: apontar a routing key de entrada para o lugar errado reprova os
+  quatro cenários, e com a configuração antiga as duas quebras passariam despercebidas. Duas
+  armadilhas ficaram registradas porque o próximo autor de step erraria as duas — a corrida de
+  boot (exchange `topic` sem binding descarta em silêncio, daí o `queueDeclarePassive` antes de
+  publicar) e a fila exclusiva (o RabbitMQ 4.x barra fila transiente não exclusiva). `AGENTS.md`
+  § BDD passou a distinguir as duas bordas por serviço e a proibir endpoint criado só para teste.
+
+- [O `500` do contrato passou a existir também no OpenAPI](tickets/043-documentar-erro-interno-no-openapi.md)
+  — as quatro operações de `VideosResource` declaram `@APIResponse(responseCode = "500")` com a
+  descrição que repete, palavra por palavra, o `detail` que o `ProblemDetailMappers.ErroInterno`
+  já emitia em runtime: parafraseá-la seria a mesma dívida de tradução dupla que o contrato
+  recusa em `motivo`. O gerador só declara o caminho feliz, então status de erro só chega ao
+  Swagger por anotação. Mudança puramente aditiva. O aceite virou teste sobre o **documento
+  gerado** — `GET /q/openapi` procurando `responses.'500'` nas quatro operações —, e não sobre as
+  anotações do recurso: quem lê a API lê o Swagger, não o mapper.
+
 - [Mensagens e identidades sobrevivem à recriação da stack](tickets/044-preservar-mensagens-ao-recriar-rabbitmq.md)
   — RabbitMQ ganhou volume nomeado e hostname estável; Keycloak ganhou volume para manter
   o `sub` do dono dos Vídeos. O ensaio isolado `scripts/persistencia-rabbitmq.sh` exige
   comandos confirmados e marcas no Postgres antes do `down`, preservação da topologia
   sem os serviços ligados e conclusão dos mesmos Vídeos pela API após o `up`.
+
+- [As duas consultas da listagem são encadeadas, não combinadas](tickets/045-serializar-consultas-da-listagem.md)
+  — `listarPorDono` deixou de combinar página e contagem num `Uni.combine().all()` e passou a
+  encadeá-las por `flatMap`, uma de cada vez na mesma sessão. O contrato HTTP não mudou. **A
+  reprodução do defeito falhou, e isso está registrado no teste**: com o `Uni.combine()` original
+  a rajada de 40 requisições simultâneas passou, e também uma sonda temporária de 150 sobre 40
+  Vídeos — a corrida é *dentro* de uma requisição e cada requisição tem sessão própria, então
+  simultaneidade entre elas não abre a janela. Ou o Hibernate Reactive serializa por baixo nesta
+  versão, ou a janela não se abre por carga. Como nenhuma asserção de resultado distingue a
+  versão certa da errada, a cerca é sintática: um teste lê o `.java` do adapter e reprova
+  `Uni.combine` dentro do método. Ele guarda a forma, não a semântica — `Uni.join` passaria —, e
+  é escolha barata deliberada contra a reintrodução literal.
 
 - [O estado após a expiração é verificado pela borda](tickets/046-verificar-estado-apos-expiracao-pela-borda.md)
   — o cenário do Pacote expirado parou de ler a `VideoEntity` para afirmar que o Vídeo
@@ -621,6 +744,30 @@ verificadas por teste, não são sugestão). Projeto original em
   *Revertido em parte pelo [ticket 074](tickets/074-remover-o-ferramental-de-agente-versionado.md):
   a metade das skills saiu do rastreamento — ver Fora de escopo. A do `.devcontainer/` vale.*
 
+- [A topologia durável existe antes do primeiro serviço subir](tickets/056-garantir-roteamento-no-primeiro-boot.md)
+  — com o broker limpo, os exchanges eram criados pelo primeiro serviço que declarasse um canal,
+  e o `videos` só dependia da saúde do RabbitMQ: uma publicação confirmada num exchange sem
+  binding podia completar sem entregar a mensagem. O Compose passou a importar no RabbitMQ a
+  topologia completa — exchanges, dead-letter exchanges, filas quorum, DLQs, argumentos de
+  entrega e todos os bindings do contrato — antes de iniciar os serviços de negócio. As
+  propriedades dos serviços continuam declarando a mesma topologia, de forma idempotente, porque
+  os Dev Services sobem um broker limpo e não leem o arquivo do Compose. O ensaio reexecutável é
+  `scripts/primeiro-boot-roteamento.sh`, que sobe broker e `videos` com os workers desligados,
+  comprova destinos e bindings pela API de management, envia um Vídeo e só então libera os
+  workers. `publish-confirms`, filas duráveis, tolerância a duplicatas e reconciliação ficaram
+  inalterados.
+
+- [O acesso ao Postgres absorve a falha transitória](tickets/057-retry-transitorio-no-postgres.md)
+  — todas as leituras, escritas, transições e consultas da reconciliação do
+  `VideoDataSourceAdapter` passam por `PostgresRetry`: três retentativas, espera de 2 s, e só
+  para falha de conexão, timeout, lock/transação abortada ou SQLSTATE transitório (`08`, `40`,
+  `53`, `57P01`). Violação permanente como `23505` vai direto ao chamador. O `Supplier<Uni<T>>` é
+  reassinado a cada tentativa, então `withSession`/`withTransaction` criam contexto novo em vez
+  de reusar a sessão que falhou — sem isso a retentativa herdaria a transação abortada.
+  `adicionar` ficou idempotente pelo UUID: confirmação incerta na primeira inserção não vira
+  Vídeo duplicado. As guardas de unicidade dos ADRs 0001/0002 e a reconciliação do ADR 0003
+  continuam onde estavam.
+
 - [O piso de observabilidade entrou, medido](tickets/058-piso-de-observabilidade.md)
   — primeiro ticket do destino redesenhado de 06/09/2026. `grafana/otel-lgtm:0.32.1` num
   container só, no Compose principal, fora do caminho de boot e sem volume. **Custa 365 MiB
@@ -699,6 +846,14 @@ verificadas por teste, não são sugestão). Projeto original em
   arquitetural agora alcança também o `application.properties` dos três serviços e barra
   chaves do MicroProfile e o namespace `quarkus.fault-tolerance`.
 
+- [O último nome qualificado inline saiu, e a regra fica sem guarda de build](tickets/065-ultimo-nome-qualificado-inline.md)
+  — `CompletionException` e `ExecutionException` passaram a ser importadas em `PostgresRetry`,
+  como os demais tipos do arquivo. A regra continua sendo convenção de revisão, de propósito: um
+  teste baseado só na presença de nome qualificado inline daria falso positivo quando dois tipos
+  homônimos de pacotes diferentes precisassem coexistir no mesmo arquivo, e distinguir esse caso
+  legítimo exigiria resolução semântica completa — complexidade permanente no teste arquitetural
+  em troca de uma preferência de legibilidade, sem efeito de comportamento ou arquitetura.
+
 - [O adapter de ffmpeg não esconde diferença atrás de Middle Man nem bandeira](tickets/066-middle-man-e-bandeira-no-adapter-de-ffmpeg.md)
   — `falhaPermanente(...)` saiu e todos os pontos constroem a exceção diretamente. Os dois
   wrappers de execução e `capturarStdout` também saíram: um único `executar(...)` redireciona,
@@ -743,6 +898,12 @@ verificadas por teste, não são sugestão). Projeto original em
   em `framework.configuration`; só o `videos`, que expõe a borda pública, mantém
   `framework.web`. Uma guarda idêntica nos três serviços proíbe o pacote web em qualquer worker.
 
+- [A contagem da reconciliação percorre a cadeia em vez de uma célula mutável](tickets/069-celula-mutavel-na-reconciliacao.md)
+  — o `new int[1]` saiu: depois de publicar os comandos em sequência, o estágio produz o tamanho
+  da lista e o entrega ao estágio que busca e publica as falhas, e o valor compõe o mesmo
+  `Republicacoes` que o log do scheduler já consumia. Ordem, instante de corte e tamanho de lote
+  ficaram idênticos — é troca de forma, não de comportamento.
+
 - [A duplicação de implementação entre serviços é deliberada](tickets/070-duplicacao-entre-modulos-nao-registrada.md)
   — `Rastro`, `JsonObjectPayloadConverter`, `comRepeticao` e `MotivoFalha.doCodigo` continuam
   locais aos serviços: um módulo `shared` trocaria coincidência de implementação por acoplamento
@@ -751,6 +912,46 @@ verificadas por teste, não são sugestão). Projeto original em
   regra comum inspeciona todas as cópias; os testes de cada serviço guardam o comportamento. A
   comparação byte a byte segue exclusiva do `ArchitectureConstraintsTest`, cuja identidade é
   invariante declarado.
+
+- [O rastreador voltou a obedecer à própria convenção](tickets/072-rastreador-contradiz-a-propria-convencao.md)
+  — as duas consultas do `TRACKER.md` se apoiam no campo `status`, e seis tickets em
+  `status: resolvido` — valor que a convenção não tem — não casavam nem a fronteira nem o
+  resolvido: sumiam das duas, invisíveis tanto para quem pergunta "o que falta?" quanto para quem
+  pergunta "o que já foi feito?". Os seis viraram `fechado` depois de conferidos contra o código,
+  um a um. A varredura foi maior do que o ticket previa, porque o levantamento dele contou por
+  amostra: eram 10 `fechado` sem `## Resolução`, não 1, e 17 sem linha aqui, não 6 — seguir a
+  lista teria fechado o ticket deixando a própria condição de aceite falsa. Sete dessas linhas já
+  existiam como texto, mas em **"Ainda não especificado"**: a fronteira anunciava como pergunta
+  aberta um trabalho já fechado (031, 032, 033, 035, 038, 039, 041). O 074 é o único `fechado`
+  cuja decisão pertence a Fora de escopo — ele foi quem pôs o ferramental de agente para fora —,
+  e ganhou linha aqui apontando para lá em vez de `label: wayfinder:fora-de-escopo`, que diria
+  que ele próprio estava fora. Fica a lição de método: a auditoria que fecha um ticket de
+  consistência tem de ser mecânica sobre os 74 arquivos, não sobre os que saltam à vista.
+
+- [O ferramental de agente sai do repositório de entrega](tickets/074-remover-o-ferramental-de-agente-versionado.md)
+  — a execução da saída que o [071](tickets/071-agents-versionado-sem-justificativa.md) deixou
+  decidida, e a única decisão desta lista cujo conteúdo mora em **Fora de escopo**, porque é lá
+  que ela pertence. `git rm -r --cached` tirou 138 caminhos do índice — `.agents/`,
+  `.claude/skills/` e `skills-lock.json` —, que entraram no `.gitignore` num bloco próprio com o
+  comentário dizendo por quê; os arquivos continuam no disco de quem trabalha aqui. No `README`,
+  "Ferramental de agente versionado" virou "Por que o `.devcontainer/` está versionado": o título
+  antigo prometia duas coisas e só uma se sustenta, e um segundo parágrafo registra o caminho
+  oposto, para que a ausência fique tão explicada quanto a presença estava. A entrada do
+  [055](tickets/055-registrar-as-escolhas-fora-do-enunciado.md) não foi apagada — ganhou a frase
+  que aponta para a reversão, porque mapa que registra decisão antiga sem dizer que ela caiu é o
+  defeito deste ticket.
+
+- [`.agents/` era intencional, e mesmo assim sai do rastreamento](tickets/071-agents-versionado-sem-justificativa.md)
+  — as três perguntas foram respondidas antes de o
+  [074](tickets/074-remover-o-ferramental-de-agente-versionado.md) executar a saída. O diretório
+  não era espelho nem artefato órfão: os 37 caminhos sob `.claude/skills/` eram symlinks (modo
+  `120000`) para `../../.agents/skills/`, e os dois entraram no mesmo commit. O ticket tratava
+  como dois conjuntos o que era um só com duas fachadas, e por isso sua opção "Sai" estava mal
+  formulada — mandar só `.agents/` para o `.gitignore` deixaria os symlinks apontando para o
+  vazio. O mantenedor removeu as 37, não só as 8 inaplicáveis: o valor estava na instalação
+  global, não no repositório de entrega. O que o ticket pedia — que nada versionado ali ficasse
+  sem explicação — foi atendido pela via oposta à que ele previa: em vez de explicar os 138
+  arquivos, a entrega deixou de rastreá-los.
 
 ## Ainda não especificado
 
@@ -768,63 +969,11 @@ verificadas por teste, não são sugestão). Projeto original em
      achou não foi vazão: foi o ADR 0002 descrevendo um desenho de duas perguntas das quais
      só uma rodava, e dois pontos sem fundo no caminho de recuperação quando o `extracao`
      cai. Os cinco tickets desta rodada saem daí, e a ordem entre eles é a ordem do risco:
-     decidir e medir a recuperação primeiro, mexer no código do `videos` depois. O 029 e o 030
-     já fecharam (ver Decisões até aqui); dos três que continuam abaixo, um ainda é decisão
-     (033), um é código testado sem chamador em produção (031) e um é código sem teste (032).
-     O 030 virou o 035, que continua a pergunta contra fonte primária: o que a sessão fechou
-     foi que a premissa original do 030 estava errada, não que o buraco fechou. -->
-
-- **[031](tickets/031-decisao-de-transicao-em-java.md) — a decisão de transição roda em Java.**
-  `transitaPara` e os `marcaComo*` têm zero chamadores em `src/main`: a suíte de use case inteira
-  valida uma implementação que não embarca. Emenda o ADR 0002 em duas frentes — a entidade entra
-  no caminho de produção, e terminal→terminal deixa de ser bug para ser corrida de rede.
-- **[032](tickets/032-ciclo-da-extracao-no-extracao.md) — o ciclo da Extração mora no
-  `extracao`.** A regra permanente contra transitória está dentro de um adapter de 280 linhas
-  sem teste. São duas máquinas de estado e só uma está modelada.
-- **[033](tickets/033-iniciada-em-morto.md) — o `iniciadaEm` descartado.** Atravessa três
-  camadas sem destino, e é exatamente a coluna que faltaria para varrer `PROCESSANDO` preso.
-  Espera o 029 para saber se o cenário sobrevive à configuração.
-
-<!-- 035 nasceu do 030, na mesma sessão de 2026-09-04 que o fechou: a leitura do código-fonte
-     do conector e do `quarkus-arc` desmentiu a premissa de que `stop_grace_period` bastasse. -->
-
-- **[035](tickets/035-drenar-extracao-antes-do-sigterm.md) — drenar a Extração em voo antes
-  do `SIGTERM`.** Concluído: o observador CDI cancela a assinatura `extrair-video` antes de
-  esperar o ack, mantendo o canal e os publicadores abertos. A ponte usa campos privados do
-  SmallRye e rejeita no boot versões diferentes da 4.32.1; atualizar exige repetir o ensaio.
-  Duas réplicas, 12 Vídeos de dois minutos: 12 concluídos, zero reentregas novas, redeploy em
-  4s; antes da correção, a mesma carga gastou uma reentrega. Cancelamento e espera dividem
-  os 420s do dreno, abaixo dos 480s do Docker. SIGKILL e falhas de rede continuam fora.
-
-- **[038](tickets/038-override-de-canal-por-variavel-quebra-o-boot.md) — boot corrigido e
-  `mata-publicacao` medido.** Overrides por variáveis próprias `FIAPX_*`, resolvidas no
-  `.properties`, preservam `extracao-falhou` sem inventar canal na enumeração do SmallRye.
-  Quatro réplicas subiram; três envios aceitos e três Vídeos em `PROCESSANDO`: critérios
-  1 e 2 aprovados. Critério 3 reprovado: zero mensagens novas no estacionamento em 241s
-  (limite 240s). A garantia do 029 permanece pendente de diagnóstico; o 038 resolve o boot
-  e permite ao harness julgar os três critérios de verdade.
-
-- **[039](tickets/039-dubles-de-transicao-nao-guardam.md) — o dublê de `VideoGateway` volta a
-  guardar.** As três guardas em memória aplicam a transição do domínio à linha armazenada, e
-  `buscarPorId` devolve cópia: sem ela o use case movia o próprio objeto do mapa e a guarda
-  chegava sem nada para julgar. O flag `proximaTransicaoMudaLinha` saiu; a corrida perdida se
-  arma por id, no instante da leitura. As três transições ganharam teste de corrida — antes só
-  `falha` tinha, e nenhum reprovava. A unicidade do e-mail do ADR 0001 volta a ser provada
-  pela suíte unitária.
-
-
-- **[041](tickets/041-isolar-espaco-por-tentativa-de-extracao.md) — o scratch passou a ser por
-  tentativa, não por Vídeo.** `prepararNovo` abre `{idVideo}-{sufixo}` atômico e `limpar`
-  recebe o caminho daquela tentativa, não o id: com o nome derivado só do Vídeo, duas réplicas
-  com o mesmo comando duplicado apagavam os frames uma da outra sobre o volume compartilhado.
-  Medido no Compose com duas réplicas: antes, o h264 válido terminou em `FALHOU`
-  /`ARQUIVO_INVALIDO` com os dois desfechos publicados para o mesmo Vídeo; depois, `CONCLUIDO`
-  e Pacote íntegro pela borda pública, sem sobra no volume. O ensaio virou script
-  (`scripts/carga/duplicata-em-replicas.sh`). A varredura de órfãos do 027 ganhou precisão de
-  graça — passa a julgar tentativa, não Vídeo — e ganhou um gatilho periódico (`@Scheduled`,
-  15 min): sem o apaga-e-recria, o boot sozinho não alcança o órfão da réplica que morreu e
-  voltou, o que foi medido no volume depois do ensaio de conservação.
-
+     decidir e medir a recuperação primeiro, mexer no código do `videos` depois. Os cinco já
+     fecharam, e as decisões estão acima: 029, 030, 031, 032 e 033. O 030 virou o 035, que
+     continuou a pergunta contra fonte primária: o que aquela sessão fechou foi que a premissa
+     original do 030 estava errada, não que o buraco fechou. O 035 fechou o dreno de verdade —
+     a entrada dele acima diz como. Esta rodada não deixou pergunta sharp em aberto. -->
 
 <!-- Recusadas nesta rodada, com o motivo, para a recusa não virar esquecimento: **banco no
      `extracao`** (tentativa como entidade durável) — reverte o `AGENTS.md`, e o Dono lê o estado

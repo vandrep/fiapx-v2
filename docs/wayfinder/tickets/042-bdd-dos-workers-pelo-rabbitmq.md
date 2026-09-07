@@ -2,7 +2,7 @@
 
 - id: 042
 - label: wayfinder:bug
-- status: resolvido
+- status: fechado
 - assignee:
 - bloqueado-por:
 - prioridade: P2

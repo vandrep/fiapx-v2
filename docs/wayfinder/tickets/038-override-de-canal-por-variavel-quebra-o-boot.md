@@ -2,7 +2,7 @@
 
 - id: 038
 - label: wayfinder:bug
-- status: resolvido
+- status: fechado
 - assignee:
 - bloqueado-por:
 
@@ -67,7 +67,7 @@ variáveis, e a presença delas é o defeito. Consertá-lo exige escolher um cam
 `scripts/carga/conservacao.sh mata-publicacao` sobe o stack e chega ao veredito, com os três
 critérios que ele imprime antes de rodar julgados de verdade — pela primeira vez.
 
-## Solução
+## Resolução
 
 O canal conserva o nome `extracao-falhou`. As duas propriedades de exchange passam a
 resolver expressões com variáveis próprias `FIAPX_EXTRACAO_FALHOU_EXCHANGE_NAME` e
@@ -79,7 +79,7 @@ sobrescrever o entrypoint da imagem.
 Overrides diretos `MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_*` continuam sujeitos à ambiguidade
 do SmallRye; o caminho suportado para estas duas propriedades é o par `FIAPX_*` acima.
 
-## Validação
+### Validação
 
 - Reprodução antes da correção: `docker compose run --rm --no-deps` com as duas variáveis
   antigas e valores default encerrou com código 1 e `SRMSG00071`, canal `extracao` sem

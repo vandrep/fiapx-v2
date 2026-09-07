@@ -22,7 +22,7 @@ Vale tambem decidir se as alternativas recusadas com registro (presigned URL, ou
 canonico, JavaCV, Kubernetes) entram, e em que profundidade: elas sao o que separa
 "escolhemos X" de "sabemos por que nao Y".
 
-## Resolucao
+## Resolução
 
 Entregue: [`docs/arquitetura.md`](../../arquitetura.md), 341 linhas, cinco diagramas Mermaid.
 

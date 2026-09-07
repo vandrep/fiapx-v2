@@ -2,7 +2,7 @@
 
 - id: 056
 - label: ready-for-agent
-- status: resolvido
+- status: fechado
 - assignee: Codex
 - bloqueado-por:
 - prioridade: P1

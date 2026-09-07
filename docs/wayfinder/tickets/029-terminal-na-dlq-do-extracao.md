@@ -209,3 +209,25 @@ Protege o mecanismo do qual todos os outros tickets desta rodada dependem. Fazer
 [031](031-decisao-de-transicao-em-java.md) antes seria melhorar a leitura de uma regra cuja rede
 de segurança tem um buraco — e, agora que se sabe que o buraco é perda silenciosa e não loop, um
 buraco que nenhuma medição existente detectaria.
+
+## Resolução
+
+A topologia decidida acima está no `application.properties` do `extracao`: o canal
+`extrair-video-dlq` tem `failure-strategy=reject` e DLQ própria, e o `reject` leva o comando à
+`extracao.extrair.estacionamento` — fila quorum, sem consumidor. O `ExtracaoDlqConsumer` loga o
+`idVideo` antes de propagar a falha, para que operação saiba *qual* Vídeo parou. Fora do
+`extracao`: o ADR 0001 registra que a DLQ do `extracao` deixou de ser terminal e ganhou fundo
+próprio, `docs/contratos/mensagens.md` § Dead-letter queues ganhou a terceira linha, e o
+`CONTEXT.md` ganhou o verbete **Estacionamento**, separando terminal de fila de terminal de
+Vídeo.
+
+Das duas partes do aceite, a primeira fechou aqui: `ExtracaoEstacionamentoTest` prova a
+topologia contra RabbitMQ real e roda a cada `./mvnw test`. Ele reprovou por um defeito que não
+era de topologia — publicação em exchange inexistente fecha o canal e deixa a promessa de
+confirmação pendente para sempre —, e essa correção virou o
+[037](037-estacionamento-nao-recebe-falha-da-dlq.md). A segunda parte, o modo `mata-publicacao`
+do `conservacao.sh`, só conseguiu subir depois do
+[038](038-override-de-canal-por-variavel-quebra-o-boot.md), e chegou ao veredito com o critério
+do estacionamento **reprovado** por prazo: zero mensagens novas em 241 s, limite de 240 s. A
+garantia deste ticket, portanto, está construída e provada em teste, mas **não confirmada sob
+carga**; o 038 registra o número e o diagnóstico pendente.

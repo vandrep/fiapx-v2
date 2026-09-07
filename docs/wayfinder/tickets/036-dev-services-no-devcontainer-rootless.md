@@ -56,7 +56,7 @@ daemon publica.
 Corrigir falhas funcionais que a suíte revele depois que os Dev Services estiverem acessíveis.
 Elas ganham tickets próprios: este termina quando o ambiente deixa os testes chegarem ao código.
 
-## Resultado
+## Resolução
 
 O devcontainer foi reconstruído em 2026-09-04. O comando efetivo trouxe `--network=host`,
 `TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1` e

@@ -25,7 +25,7 @@ conectividade de Dev Services investigada no 036.
 - [x] Fazer `ExtracaoEstacionamentoTest` passar contra RabbitMQ real.
 - [x] Executar `./mvnw test` da raiz sem falhas.
 
-## Diagnóstico e correção
+## Resolução
 
 Reproduzido em 2026-09-05 com SmallRye Reactive Messaging 4.32.1, Vert.x 4.5.24 e
 RabbitMQ 4.3.5. O comando abaixo chegou ao consumidor e falhou após 45 segundos, com

@@ -991,6 +991,15 @@ verificadas por teste, não são sugestão). Projeto original em
   O critério de aceite do 064 que motivava o truque foi reformulado nele mesmo, para restringir
   a busca a código, config e pom em vez de excluir caminho por caminho.
 
+- [`AckManual` é a quinta cópia deliberada, e ganha guarda como o
+  `ArchitectureConstraintsTest`](tickets/077-ackmanual-fora-do-registro-de-copias.md)
+  — as três cópias de `AckManual` são idênticas byte a byte fora do `package`, ao contrário das
+  outras quatro famílias do § *As cópias deliberadas entre serviços*, que têm divergência local
+  legítima e por isso ficam sem guarda. `AGENTS.md` passa a listar cinco famílias e nomeia
+  `AckManual` como a segunda exceção com verificação automática. A guarda
+  (`scripts/verifica-ackmanual.sh`) roda no agregador, ao lado do
+  `verifica-testes-arquiteturais.sh`, e reprova o build quando uma cópia diverge.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

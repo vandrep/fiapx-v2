@@ -2,8 +2,8 @@
 
 - id: 077
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
 - prioridade: P2
 
@@ -52,7 +52,27 @@ não é invariante.
 
 ## Critérios de aceite
 
-- [ ] A seção não diz mais "quatro" quando são cinco
-- [ ] A decisão sobre guarda está escrita, com o motivo, seja qual for o lado
-- [ ] Se houver guarda, ela reprova o build quando uma das três cópias diverge
-- [ ] `./mvnw test` verde a partir da raiz
+- [x] A seção não diz mais "quatro" quando são cinco
+- [x] A decisão sobre guarda está escrita, com o motivo, seja qual for o lado
+- [x] Se houver guarda, ela reprova o build quando uma das três cópias diverge
+- [x] `./mvnw test` verde a partir da raiz
+
+## Resolução
+
+Confirmado antes de decidir: as três cópias de `AckManual` são idênticas byte a byte fora da
+linha `package` (`diff` normalizado nas três, sem saída). A diferença que justifica ausência de
+guarda nas outras quatro famílias — divergência local legítima — não existe aqui, então
+`AckManual` vira a segunda exceção explícita, ao lado do `ArchitectureConstraintsTest`.
+
+`AGENTS.md` § *As cópias deliberadas entre serviços* agora lista as cinco famílias, atribui a
+ausência de guarda só às quatro que a têm por razão válida (`Rastro`,
+`JsonObjectPayloadConverter`, `comRepeticao`, `MotivoFalha.doCodigo`) e nomeia as duas exceções
+com guarda, com o motivo.
+
+Guarda entra em `scripts/verifica-ackmanual.sh`, ao lado do
+`verifica-testes-arquiteturais.sh` — não dentro dele, para manter cada script testando um
+invariante — e ganha execução própria no mesmo `exec-maven-plugin` do agregador
+(`pom.xml`, fase `validate`, `inherited=false`), então roda no `./mvnw` da raiz e é pulada por
+`mvn -f <servico>/pom.xml`, como o `AGENTS.md` já registra para o irmão. Testado nos dois
+sentidos: com uma linha extra numa cópia o script reprova e aponta o serviço divergente; restaurado
+o arquivo, passa. `./mvnw test` a partir da raiz fechou verde (BUILD SUCCESS, 4 módulos).

@@ -137,21 +137,30 @@ não mudou, só quem a implementa. A extensão saiu dos três `pom.xml` junto co
 
 ## As cópias deliberadas entre serviços
 
-Além dos records do contrato de mensagens, quatro implementações se repetem entre serviços:
-`Rastro` e `JsonObjectPayloadConverter` nos três, `comRepeticao` nos três clientes de I/O e
-`MotivoFalha.doCodigo` em `videos` e `notificacao`. As cópias são deliberadas. Cada serviço
-continua dono do próprio código e do próprio artefato; um módulo `shared` transformaria
-coincidência de implementação em acoplamento de build e de evolução entre os três serviços.
+Além dos records do contrato de mensagens, cinco implementações se repetem entre serviços:
+`Rastro` e `JsonObjectPayloadConverter` nos três, `comRepeticao` nos três clientes de I/O,
+`MotivoFalha.doCodigo` em `videos` e `notificacao`, e `AckManual` nos três
+(`framework/dispatcher/`). As cópias são deliberadas. Cada serviço continua dono do próprio
+código e do próprio artefato; um módulo `shared` transformaria coincidência de implementação
+em acoplamento de build e de evolução entre os três serviços.
 
 Ao mudar a parte comum de uma dessas implementações, inspecione todas as cópias e aplique em
 cada uma somente o que preserva o mesmo contrato. Não as force a convergir: o `Rastro`, por
 exemplo, documenta recursos externos diferentes e só o de `videos` oferece `marcar`.
 
-Não há guarda automática de divergência para essas quatro famílias. Nenhuma delas tem
+Não há guarda automática de divergência para quatro dessas cinco famílias — `Rastro`,
+`JsonObjectPayloadConverter`, `comRepeticao` e `MotivoFalha.doCodigo`. Nenhuma delas tem
 identidade byte a byte como invariante, e uma comparação parcial confundiria diferença local
 legítima com esquecimento. Os testes de cada serviço guardam o comportamento; a revisão
-coordenada guarda a parte comum. O `ArchitectureConstraintsTest` é a exceção explícita porque
-suas três cópias foram desenhadas para ser idênticas, e por isso têm a guarda do agregador.
+coordenada guarda a parte comum.
+
+`ArchitectureConstraintsTest` e `AckManual` são as exceções explícitas: nada no desenho de
+nenhum dos dois sugere divergência local legítima, e por isso têm guarda do agregador. As três
+cópias de `ArchitectureConstraintsTest` são byte a byte idênticas — inclusive
+`MODULO_DO_SERVICO`, que é derivado em runtime do nome do diretório do módulo, não fixado por
+cópia —, e a guarda em `scripts/verifica-testes-arquiteturais.sh` compara sem normalização. As
+três cópias de `AckManual` diferem só na linha `package`, que carrega o nome do serviço; a
+guarda em `scripts/verifica-ackmanual.sh` normaliza essa linha antes de comparar o resto.
 
 ## Nomes na observabilidade
 

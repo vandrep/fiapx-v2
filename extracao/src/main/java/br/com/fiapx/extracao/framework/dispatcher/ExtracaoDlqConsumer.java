@@ -11,6 +11,8 @@ import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.logging.Logger;
 
+import static br.com.fiapx.extracao.framework.dispatcher.AckManual.comAckManual;
+
 /**
  * Consumidor da propria DLQ {@code extracao.extrair.dlq} (docs/contratos/mensagens.md §
  * Dead-letter queues) — sem ele o Video trava em PROCESSANDO para sempre. A mensagem aqui e
@@ -40,7 +42,8 @@ public class ExtracaoDlqConsumer {
     @Acknowledgment(Acknowledgment.Strategy.MANUAL)
     public Uni<Void> consumir(Message<ExtrairVideo> mensagem) {
         ExtrairVideo comandoEsgotado = mensagem.getPayload();
-        return rastro.naMensagem("extracao.tentativas-esgotadas", comandoEsgotado.idVideo(), mensagem, () -> {
+        return comAckManual(mensagem,
+                rastro.naMensagem("extracao.tentativas-esgotadas", comandoEsgotado.idVideo(), mensagem, () -> {
                     // Dentro do rastro, e nao antes dele: e assim que este aviso — o unico que
                     // nomeia o Video preso — chega ao Loki pendurado no span do proprio Video.
                     // O log do conector (log.nackedIgnoreMessage) diz que um nack aconteceu no
@@ -50,8 +53,6 @@ public class ExtracaoDlqConsumer {
                             comandoEsgotado.idVideo());
                     return Uni.createFrom().completionStage(extracaoController.processarTentativasEsgotadas(
                             comandoEsgotado.idVideo(), "x-delivery-limit=3 esgotado para extracao.extrair"));
-                })
-                .onItemOrFailure().transformToUni((ignorado, falha) -> Uni.createFrom().completionStage(
-                        falha == null ? mensagem.ack() : mensagem.nack(falha)));
+                }));
     }
 }

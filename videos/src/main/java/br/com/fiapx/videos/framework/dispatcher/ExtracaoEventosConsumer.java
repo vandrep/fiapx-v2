@@ -11,6 +11,8 @@ import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.logging.Logger;
 
+import static br.com.fiapx.videos.framework.dispatcher.AckManual.comAckManual;
+
 /**
  * Monta command e chama o controller, sem regra propria (docs/contratos/mensagens.md §
  * Camadas). {@code failure-strategy=requeue} nos tres canais: {@code fail} derrubaria o
@@ -71,10 +73,5 @@ public class ExtracaoEventosConsumer {
             return Uni.createFrom().completionStage(extracaoEventosController.processarFalhou(
                     evento.idVideo(), evento.codigoMotivo(), evento.ocorridoEm()));
         }));
-    }
-
-    private static Uni<Void> comAckManual(Message<?> mensagem, Uni<Void> trabalho) {
-        return trabalho.onItemOrFailure().transformToUni((ignorado, falha) -> Uni.createFrom().completionStage(
-                falha == null ? mensagem.ack() : mensagem.nack(falha)));
     }
 }

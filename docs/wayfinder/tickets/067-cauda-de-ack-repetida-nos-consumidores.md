@@ -2,8 +2,8 @@
 
 - id: 067
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
 - prioridade: P3
 
@@ -41,6 +41,20 @@ tem que sair idêntico, não "equivalente".
 
 ## Critérios de aceite
 
-- [ ] Os quatro consumidores usam uma forma nomeada para a cauda de ack, uma por serviço
-- [ ] Nenhum módulo novo, nenhuma dependência entre serviços
-- [ ] `./mvnw test` verde a partir da raiz, com os cenários BDD dos dois workers passando pelo RabbitMQ real
+- [x] Os quatro consumidores usam uma forma nomeada para a cauda de ack, uma por serviço
+- [x] Nenhum módulo novo, nenhuma dependência entre serviços
+- [x] `./mvnw test` verde a partir da raiz, com os cenários BDD dos dois workers passando pelo RabbitMQ real
+
+## Resolução
+
+Cada serviço ganhou seu próprio `AckManual`, package-private no `framework.dispatcher`, com
+uma única implementação de `comAckManual`. Os quatro consumidores passam o trabalho e a
+mensagem por essa forma nomeada; no `extracao`, os dois consumidores compartilham a mesma
+cópia local ao serviço.
+
+A expressão de encerramento foi movida sem alteração: sucesso chama `mensagem.ack()` e falha
+chama `mensagem.nack(falha)`. Isso preserva inclusive o `failure-strategy=reject` do
+`ExtracaoDlqConsumer`, que continua enviando ao Estacionamento em vez de reentregar.
+
+Não foi criado módulo nem adicionada dependência. A suíte pela raiz passou com os cenários BDD
+dos dois workers entrando pelo RabbitMQ real.

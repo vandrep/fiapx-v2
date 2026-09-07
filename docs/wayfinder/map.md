@@ -732,6 +732,12 @@ verificadas por teste, não são sugestão). Projeto original em
   fronteira assíncrona preso ao contexto duplicado do Vert.x; fora disso, abre e fecha na mesma
   thread. Depois da troca, os dois nascem filhos de `extracao.extrair-video`.
 
+- [A cauda de ack manual tem nome local em cada serviço](tickets/067-cauda-de-ack-repetida-nos-consumidores.md)
+  — os quatro consumidores encerram o trabalho pela mesma forma nomeada: sucesso chama `ack()` e
+  falha chama `nack(falha)`. Cada serviço mantém sua própria cópia package-private em `framework`,
+  sem módulo compartilhado; no `extracao`, a mesma cópia atende o consumo normal e o da DLQ,
+  preservando o `failure-strategy=reject` que envia tentativas esgotadas ao Estacionamento.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

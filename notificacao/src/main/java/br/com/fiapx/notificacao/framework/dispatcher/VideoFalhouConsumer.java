@@ -10,6 +10,8 @@ import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.logging.Logger;
 
+import static br.com.fiapx.notificacao.framework.dispatcher.AckManual.comAckManual;
+
 /**
  * Monta command e chama o controller, sem regra propria (docs/contratos/mensagens.md §
  * Camadas). Sem {@code @Blocking}: o envio de e-mail do quarkus-mailer e reativo ponta a
@@ -43,13 +45,11 @@ public class VideoFalhouConsumer {
     @Acknowledgment(Acknowledgment.Strategy.MANUAL)
     public Uni<Void> consumir(Message<VideoFalhou> mensagem) {
         var evento = mensagem.getPayload();
-        return rastro.naMensagem("notificacao.video-falhou", evento.idVideo(), mensagem, () -> {
+        return comAckManual(mensagem, rastro.naMensagem("notificacao.video-falhou", evento.idVideo(), mensagem, () -> {
                     LOG.infof("notificando falha do video %s (dono=%s)", evento.idVideo(), evento.donoSub());
                     return Uni.createFrom().completionStage(notificacaoController.notificarFalha(
                             evento.idVideo(), evento.emailDono(), evento.nomeArquivoOriginal(),
                             evento.codigoMotivo(), evento.ocorridoEm()));
-                })
-                .onItemOrFailure().transformToUni((ignorado, falha) -> Uni.createFrom().completionStage(
-                        falha == null ? mensagem.ack() : mensagem.nack(falha)));
+                }));
     }
 }

@@ -13,6 +13,8 @@ import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.logging.Logger;
 
+import static br.com.fiapx.extracao.framework.dispatcher.AckManual.comAckManual;
+
 /**
  * Monta command e chama o controller, sem regra propria (docs/contratos/mensagens.md §
  * Camadas). {@code failure-strategy=requeue} no canal: um {@link
@@ -88,12 +90,10 @@ public class ExtrairVideoConsumer {
         // controller escaparia antes de existir cadeia onde pendurar o eventually, e o sair()
         // nunca aconteceria — deixando emVoo em 1 para sempre e fazendo todo desligamento
         // seguinte desta replica esperar o teto inteiro por uma Extracao que nao existe.
-        return rastro.naMensagem("extracao.extrair-video", comando.idVideo(), mensagem,
+        return comAckManual(mensagem, rastro.naMensagem("extracao.extrair-video", comando.idVideo(), mensagem,
                         () -> Uni.createFrom().deferred(() -> Uni.createFrom().completionStage(
                                 extracaoController.processarExtrairVideo(
-                                        comando.idVideo(), comando.chaveVideo(), comando.chaveDestinoPacote()))))
-                .onItemOrFailure().transformToUni((ignorado, falha) -> Uni.createFrom().completionStage(
-                        falha == null ? mensagem.ack() : mensagem.nack(falha)))
+                                        comando.idVideo(), comando.chaveVideo(), comando.chaveDestinoPacote())))))
                 .eventually(dreno::sair);
     }
 }

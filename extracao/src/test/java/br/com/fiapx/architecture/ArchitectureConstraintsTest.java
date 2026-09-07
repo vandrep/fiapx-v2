@@ -95,6 +95,29 @@ class ArchitectureConstraintsTest {
      */
     private static final Pattern PROCESSO_EXTERNO = Pattern.compile("\\bnew\\s+ProcessBuilder\\b");
     /**
+     * Interceptor de tolerancia a falhas (MicroProfile Fault Tolerance e a extensao do
+     * SmallRye) nao entra em codigo de producao aqui (ticket 061). Nao e preferencia de estilo:
+     * numa operacao verdadeiramente assincrona — e todo metodo destes tres servicos que
+     * devolve {@code CompletionStage} ou {@code Uni} e uma —, o interceptor monta
+     * {@code RememberEventLoop -> ThreadOffload} e <b>reagenda a invocacao no contexto Vert.x
+     * corrente</b>, que e o mesmo contexto em que a cadeia do chamador ja esta rodando. Quando
+     * essa cadeia so completa depois da chamada guardada, o reagendamento entra atras de quem
+     * espera por ele e nunca roda: nenhuma thread trabalha, nenhum socket abre, nenhuma
+     * retentativa dispara, nada e logado, e a mensagem fica sem ack para sempre.
+     *
+     * <p>Foi medido, e nao deduzido: com {@code @Retry} + {@code @AsynchronousNonBlocking} nas
+     * idas ao MinIO, 4 travamentos em ~60 ciclos de Video; sem eles, 0 em 90, no mesmo host e
+     * pelo mesmo roteiro ({@code scripts/carga/travamento.sh}, ticket 061).
+     *
+     * <p>O que substitui: os operadores do Mutiny, {@code onFailure().retry()} a frente. Eles
+     * retentam dentro da propria cadeia, sem reagendar nada em fila de ninguem — ver
+     * {@code ArquivoMinioClient} e {@code MailerEmailClient}. A extensao saiu dos tres poms
+     * junto com esta regra, entao voltar a usar as anotacoes exige reintroduzi-la de propria
+     * mao — e esbarrar aqui.
+     */
+    private static final Pattern TOLERANCIA_A_FALHAS_POR_INTERCEPTOR = Pattern.compile(
+            "(?m)^import\\s+(org\\.eclipse\\.microprofile\\.faulttolerance|io\\.smallrye\\.faulttolerance)\\.");
+    /**
      * Publicar sem publish-confirms perde mensagem em silencio: o send completa quando o byte
      * sai no socket, nao quando o broker aceita, entao uma recusa do broker vira ack do
      * consumidor e a mensagem some, e a varredura do ADR 0003 nao alcanca o Video perdido
@@ -377,6 +400,23 @@ class ArchitectureConstraintsTest {
             }
             if (PROCESSO_EXTERNO.matcher(source.content()).find()) {
                 violations.add(source.relativePath() + ": ProcessBuilder so pode aparecer em framework");
+            }
+        }
+
+        assertNoViolations(violations);
+    }
+
+    @Test
+    void toleranciaAFalhasNaoPodeVirDeInterceptor() {
+        var violations = new ArrayList<String>();
+
+        for (SourceFile source : javaSources()) {
+            if (TOLERANCIA_A_FALHAS_POR_INTERCEPTOR.matcher(source.content()).find()) {
+                violations.add(source.relativePath()
+                        + ": tolerancia a falhas por interceptor (@Retry, @Asynchronous*, @Timeout,"
+                        + " @Fallback, @CircuitBreaker, @Bulkhead) reagenda a chamada no contexto Vert.x"
+                        + " do chamador e pode prende-la para sempre (ticket 061); use"
+                        + " onFailure().retry() do Mutiny");
             }
         }
 

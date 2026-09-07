@@ -585,10 +585,12 @@ O que eu não defendo — apenas aceitei.
   observabilidade, e a demo tem uma.** O custo dela foi medido à parte, sobre o fixture de
   controle — ~5% no ciclo do Vídeo e ~160 MiB somando os três serviços
   ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)) —, e a extrapolação
-  desse número para o regime de pico não foi feita. Há um segundo efeito: foi no caminho com o
-  SDK desligado — o do overlay — que apareceu o travamento raro do
-  [ticket 061](wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md), ainda sem causa
-  raiz; a configuração entregue não exibiu o sintoma em nenhuma execução.
+  desse número para o regime de pico não foi feita. Uma ressalva chegou com o
+  [ticket 061](wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md): a chave
+  `QUARKUS_OTEL_SDK_DISABLED` suprime a **exportação**, não a instrumentação — o span continua
+  gravando —, então "sem observabilidade" aqui quer dizer "sem coletor e sem exportador", e as
+  duas configurações comparadas diferem menos do que se supôs
+  ([ticket 062](wayfinder/tickets/062-a-chave-que-nao-desliga-o-sdk.md)).
 - **O fluxo entre os três serviços não roda no CI.** `./mvnw verify` testa cada serviço
   isolado; que eles conversam é verificado por `scripts/smoke.sh`, que alguém precisa rodar.
 - **O caminho de tentativas esgotadas não é testado automaticamente.** Exigiria derrubar o

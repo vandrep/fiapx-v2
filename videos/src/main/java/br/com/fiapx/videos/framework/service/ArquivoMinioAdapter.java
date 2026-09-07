@@ -28,14 +28,15 @@ import java.util.concurrent.Flow;
  * <p>Streaming ponta a ponta, sem {@code toBytes}/{@code fromBytes} (ticket 005): um Video
  * pode ter 200 MB e um Pacote 1,5 GB.
  *
- * <p>A ida ao MinIO em si vive em {@link ArquivoMinioClient}, com o {@code @Retry} do
- * ADR 0001 — separado porque {@code @Retry} exige {@code CompletionStage} e nao dispara em
- * chamada de dentro do proprio bean (ver javadoc la, ticket 048).
+ * <p>A ida ao MinIO em si vive em {@link ArquivoMinioClient}, junto da retentativa do
+ * ADR 0001 (ticket 048). Desde o ticket 061 essa retentativa e do Mutiny, e nao do
+ * {@code @Retry}: o interceptor reagendava a chamada no contexto Vert.x do chamador e podia
+ * prende-la la para sempre — ver o javadoc de la.
  *
  * <p>As duas idas ao MinIO ganham span (ticket 059): a extensao da AWS traz a instrumentacao do
  * SDK, mas nenhum span de S3 chegou ao Tempo num ciclo completo de Video, e sem estes dois o
  * upload de um Video de 200 MB era um vao mudo dentro do span do POST. O span cobre a operacao
- * inteira, retentativas do {@code @Retry} incluidas — que e o que interessa a quem investiga.
+ * inteira, retentativas incluidas — que e o que interessa a quem investiga.
  */
 @ApplicationScoped
 public class ArquivoMinioAdapter implements ArquivoGateway {

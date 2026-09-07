@@ -17,9 +17,10 @@ import java.util.concurrent.CompletionException;
  * (ticket 011, docs/contratos/mensagens.md).
  *
  * <p>Streaming ponta a ponta com arquivo real em disco, nunca bytes em memoria (ticket 005 e
- * 011). O retry de fato (ADR 0001) vive em {@link ArquivoMinioClient} — separado porque
- * {@code @Retry} exige {@code CompletionStage} e nao pode ser chamado do mesmo bean (ver
- * javadoc la).
+ * 011). A retentativa de fato (ADR 0001) vive em {@link ArquivoMinioClient}, junto da chamada
+ * que ela protege — e desde o ticket 061 ela e do Mutiny, e nao do {@code @Retry} (ver
+ * javadoc la: o interceptor reagendava a chamada no contexto Vert.x do proprio consumidor e
+ * travava a Extracao para sempre).
  *
  * <p>Os dois metodos ganham span (ticket 059) porque o MinIO nao aparece sozinho: a extensao da
  * AWS traz a instrumentacao do SDK, mas nenhum span de S3 chegou ao Tempo num ciclo completo de

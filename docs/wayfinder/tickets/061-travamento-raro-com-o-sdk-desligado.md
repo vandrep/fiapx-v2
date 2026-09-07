@@ -2,7 +2,7 @@
 
 - id: 061
 - label: ready-for-agent
-- status: aberto
+- status: fechado
 - assignee:
 - bloqueado-por:
 - prioridade: P1
@@ -81,3 +81,120 @@ o sintoma é raro o suficiente para um patch errado parecer que funcionou.
 
 Nenhuma. O 059 está fechado; este ticket carrega o defeito que a medição dele encontrou, no
 mesmo espírito do ticket 027.
+
+## Resolução
+
+A causa raiz **não é o SDK de observabilidade**, e o título deste ticket é o nome de uma
+correlação que a medição desfez. É a tolerância a falhas por interceptor nos adapters de I/O.
+
+### Como foi encontrada
+
+1. **Reproduzido.** `scripts/carga/travamento.sh` (novo neste ticket) repete ciclos
+   `POST /videos` → `CONCLUIDO` com teto por ciclo e, no primeiro que estoura, coleta filas,
+   consumidores, o *scratch* de cada réplica, um thread dump por `SIGQUIT` e o estado do Vídeo
+   — tudo enquanto a réplica ainda está presa, que é o único momento em que a evidência existe.
+   O travamento apareceu no ciclo 9 da primeira rodada, com o sintoma exatamente como descrito
+   acima: `messages_unacknowledged=1`, thread dump só com event loops ociosas, zero linhas de
+   log.
+
+2. **Localizado pelo disco, antes de tocar em código.** O diretório da tentativa existia e
+   estava **vazio**. Isso já elimina metade do pipeline: `ExtracaoIniciada` foi publicado *e
+   confirmado*, `prepararNovo` completou, e o download do MinIO nunca produziu arquivo. O
+   `/proc/net/tcp6` das duas réplicas confirmou: nenhuma conexão com o MinIO aberta — a
+   requisição não estava em voo, estava *ausente*.
+
+3. **Localizado ao nível da linha, com sondas.** Uma imagem com log em cada fronteira
+   assíncrona travou de novo e disse onde: a última linha é `baixarVideo entrada`, no
+   `ArquivoMinioAdapter`. A **primeira linha do corpo** de `ArquivoMinioClient.baixar` nunca
+   sai. Entre as duas só existem o `Rastro.emTorno` e o interceptor do fault tolerance — e nos
+   ciclos que passam essa mesma travessia **troca de thread** (`executor-thread-1` →
+   `executor-thread-2`), o que só o interceptor faz.
+
+4. **Mecanismo, lido no fonte do SmallRye 6.10.0.** Numa operação verdadeiramente assíncrona —
+   e todo método que devolve `CompletionStage` aqui é uma —, o interceptor monta
+   `RememberEventLoop -> ThreadOffload`. O `RememberEventLoop` lê o contexto Vert.x corrente
+   (a sonda confirmou: `isOnVertxThread=true`, contexto não nulo) e o guarda; o `ThreadOffload`,
+   vendo esse `Executor`, deixa de invocar o método na thread do chamador e o **reagenda no
+   mesmo contexto Vert.x** em que a cadeia do consumidor já está rodando — o `VertxExecutor`
+   despacha por `runOnContext`/`executeBlocking` daquele contexto. É esse reagendamento que
+   nunca acontece.
+
+   **O que está medido e o que é leitura.** Medido: o reagendamento existe (a troca de thread),
+   o alvo é o contexto do chamador (a sonda), e a tarefa reagendada nunca roda (nenhuma linha,
+   nenhum socket, nenhuma retentativa, threads do pool ociosas no dump). Leitura, e a única que
+   encaixa nos três: a tarefa fica atrás da própria cadeia que espera por ela na ordenação
+   daquele contexto — a cadeia do consumidor `@Blocking` só termina quando este download
+   terminar. O passo final não foi observado diretamente porque **não pode ser**: qualquer log
+   dentro da janela faz o defeito sumir (ver o efeito de observador em 5). A confirmação veio
+   de A/B causal, que é o instrumento certo quando a sonda destrói o fenômeno.
+
+5. **Confirmado causalmente, não por dedução.** A/B no mesmo host, mesmo roteiro:
+
+   | Variante | Ciclos | Travamentos |
+   |---|---|---|
+   | Imagens publicadas, com `@Retry` + `@AsynchronousNonBlocking` | ~60 | **4** |
+   | Mesmo código sem as duas anotações | 90 | 0 |
+   | Correção entregue (retentativa do Mutiny) | 90 | 0 |
+
+   Vale registrar um efeito de observador que quase custou o diagnóstico: **acrescentar uma
+   linha de log dentro da janela suspeita faz o defeito sumir** (90, 90 e 90 ciclos limpos em
+   três variantes instrumentadas). Foi por isso que a confirmação veio de A/B causal, e não de
+   um log que provasse o passo final.
+
+### A correção
+
+A retentativa do [ADR 0001](../../adr/0001-politica-de-falhas.md) deixou de vir do interceptor
+e passou a ser `onFailure().retry()` do Mutiny, dentro da própria cadeia — mesma contagem (3),
+mesma espera fixa (2 s), mesmo recorte (`Exception`, não `Error`). Nos três serviços, porque a
+construção era a mesma nos três: `ArquivoMinioClient` do `extracao` e do `videos`, e
+`MailerEmailClient` do `notificacao`. O `videos` chama da borda HTTP, que roda sobre o mesmo
+tipo de contexto; o `notificacao`, de um consumidor `@Blocking`, que é exatamente a forma
+reproduzida aqui.
+
+`quarkus-smallrye-fault-tolerance` saiu dos três `pom.xml`, e uma regra nova do
+`ArchitectureConstraintsTest` — nas três cópias — barra qualquer import de
+`org.eclipse.microprofile.faulttolerance` ou `io.smallrye.faulttolerance` em código de
+produção, com o mecanismo na mensagem. O `RetryComCompletionStageTest`, que travava o
+comportamento do interceptor, deu lugar ao `RetentativaDoMinioTest`, que trava a **política**:
+blip absorvido, armazenamento persistentemente fora falhando na quarta tentativa em vez de
+insistir para sempre.
+
+### O achado colateral, e é o mais caro
+
+**`QUARKUS_OTEL_SDK_DISABLED=true` não desliga a instrumentação — desliga a exportação.** Com a
+chave ligada (por variável de ambiente *e* por propriedade de sistema, Quarkus 3.31.3) o span
+continua sendo um `SdkSpan` que grava, e o `Rastro` continua abrindo escopo e escrevendo o
+`idVideo` no MDC. Ou seja: o guarda por `isRecording()` **nunca dispara**, e a frase deste
+ticket — "o único trecho de código que se comporta diferente com o SDK desligado é o guarda por
+`Span#isRecording()`" — descrevia uma diferença que não existe. As duas pernas do A/B do 059
+eram, no código, a mesma perna; os 3 travamentos "com o SDK desligado" contra 0 "com o SDK
+ligado" mediram ruído.
+
+Isso também derruba a razão escrita aqui para excluir a pista do `Scope` aberto numa thread e
+fechado noutra. A conclusão continua valendo — não era ela —, mas o argumento (“com o SDK
+desligado o span nasce sem gravar, então nenhum escopo chega a ser aberto”) era falso: o escopo
+**é** aberto, inclusive no caminho que travava. O risco separado que a seção descreve, o de
+`makeCurrent()` fora de contexto duplicado, continua aberto e continua sem sintoma medido.
+
+O achado também virou teste: `SdkDesligadoAindaGravaTest` mede, na própria suíte — que roda
+com `%test.quarkus.otel.sdk.disabled=true` —, que o span continua gravando. Ele não afirma que
+isso é desejável; afirma que é o comportamento atual e que ele não pode mudar em silêncio. Se um
+upgrade do Quarkus fizer a chave desligar de verdade, o teste reprova e manda reabrir o 062 em
+vez de deixar a próxima investigação repetir este beco sem saída.
+
+Os comentários que afirmavam o contrário foram corrigidos onde estavam: os três `Rastro.java`,
+os três `application.properties`, o `docker-compose.carga.yml`, o
+[ADR 0004](../../adr/0004-camada-de-observabilidade.md) e o `docs/arquitetura.md`. O que **não**
+foi decidido aqui — o que o overlay de carga deve fazer agora, e se a comparação com os
+tickets 025–028 se sustenta — virou o
+[ticket 062](062-a-chave-que-nao-desliga-o-sdk.md).
+
+### Validação
+
+- `./mvnw test` da raiz: **437 testes**, 0 falhas, 0 erros (138 em `videos`, 274 em `extracao`,
+  25 em `notificacao`).
+- `scripts/carga/travamento.sh`, 6 rodadas de 15 ciclos com as imagens corrigidas: **90 ciclos,
+  0 travamentos**.
+- `scripts/smoke.sh` completo contra o Compose, com as três imagens construídas desta correção:
+  passou nos 11 passos, incluindo o rastro correlacionado dos três serviços e o ciclo do Vídeo
+  com a observabilidade derrubada.

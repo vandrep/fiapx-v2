@@ -19,6 +19,16 @@ varredura a alcance. Por isso aquela DLQ deixa de ser terminal e ganha fundo pr�
 `extracao.extrair.estacionamento` — ver *A DLQ do `extracao` tem consumidor* nas
 Consequences, abaixo, e o ticket 029 para o desenho completo.
 
+Emendado de novo no [ticket 061](../wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md):
+a retentativa nos *adapters* de I/O continua sendo a mesma política — três tentativas, espera
+de 2 s, só sobre `Exception` —, mas **deixou de ser o `@Retry`**. O interceptor do
+MicroProfile Fault Tolerance, numa operação verdadeiramente assíncrona, reagenda a chamada no
+contexto Vert.x do chamador; quando esse contexto só é liberado depois da própria chamada, o
+reagendamento nunca roda e a Extração trava para sempre, sem thread, sem log e sem ack. Foi
+medido: 4 travamentos em ~60 ciclos com o interceptor, 0 em 90 sem ele. Onde este ADR diz
+`@Retry`, leia `onFailure().retry()` do Mutiny — e o `ArchitectureConstraintsTest` agora
+reprova o build que traga o interceptor de volta.
+
 ## Considered Options
 
 **Backoff durável via TTL + dead-letter-exchange manual** foi rejeitado. É o único caminho

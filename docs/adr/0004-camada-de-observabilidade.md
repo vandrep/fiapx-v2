@@ -116,12 +116,19 @@ O preço, que fica escrito em vez de tácito:
   no fixture de controle é ~5% no ciclo do Vídeo e ~160 MiB somando os três serviços
   ([ticket 059](../wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)); **extrapolar isso
   para o regime de pico é conta que ninguém fez.**
-- O caminho com o SDK desligado é o do overlay de carga (e o do `%test`/`%dev` dos três
-  `application.properties`), e foi nele que apareceu o travamento raro do
-  [ticket 061](../wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md), medido em A/B
-  e ainda sem causa raiz. Enquanto ele estiver aberto, o overlay de carga carrega um defeito
-  conhecido que a configuração entregue — a demo, com o SDK ligado — não exibiu em nenhuma
-  execução.
+- `QUARKUS_OTEL_SDK_DISABLED=true` **não desliga a instrumentação**, e este parágrafo dizia
+  que sim. O [ticket 061](../wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md)
+  mediu, no Quarkus 3.31.3: com a chave ligada por variável de ambiente ou por propriedade de
+  sistema, o span continua sendo um `SdkSpan` que grava, e o `Rastro` continua abrindo escopo e
+  MDC. O que ela suprime é a **exportação**. Logo o overlay de carga não roda "sem
+  instrumentação": ele roda instrumentado, sem exportador. Os ~5% de custo medidos no ticket
+  059 comparam duas configurações que diferem menos do que se supôs, e o que fazer a respeito —
+  inclusive se a comparação com os tickets 025–028 ainda se sustenta — está no
+  [ticket 062](../wayfinder/tickets/062-a-chave-que-nao-desliga-o-sdk.md).
+- O travamento raro que o 061 carregava **não vinha do SDK**: a causa raiz é a tolerância a
+  falhas por interceptor nos adapters de I/O, que reagendava a chamada no contexto Vert.x do
+  próprio consumidor. Está fechado, e o rótulo "com o SDK desligado" no título daquele ticket
+  é o nome de uma correlação que a medição desfez.
 
 ## Considered Options
 

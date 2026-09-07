@@ -120,6 +120,18 @@ de canal com traço (ticket 038). Overrides de Compose são deliberados e revisa
 junto do arquivo que os declara; o defeito que este teste persegue é o canal esquecido no
 `.properties`.
 
+Uma sexta chegou no ticket 061: **nada de tolerância a falhas por interceptor** em código de
+produção — nenhum import de `org.eclipse.microprofile.faulttolerance` nem de
+`io.smallrye.faulttolerance`. Não é preferência de estilo. Numa operação verdadeiramente
+assíncrona, e aqui todas são, o interceptor monta `RememberEventLoop -> ThreadOffload` e
+**reagenda a invocação no contexto Vert.x do chamador** — e esse reagendamento pode nunca
+rodar. Nenhuma thread, nenhum socket, nenhuma retentativa, nenhuma linha de log, mensagem sem
+ack para sempre. A explicação que encaixa é a ordenação daquele contexto (a chamada fica atrás
+da cadeia que espera por ela); o que está *medido* é que a tarefa reagendada não roda. Medido: 4 travamentos em ~60 ciclos com o interceptor, 0 em 90 sem ele
+(`scripts/carga/travamento.sh`). O que substitui é `onFailure().retry()` do Mutiny, que
+retenta dentro da própria cadeia — a política do [ADR 0001](docs/adr/0001-politica-de-falhas.md)
+não mudou, só quem a implementa. A extensão saiu dos três `pom.xml` junto com a regra.
+
 ## Nomes na observabilidade
 
 Os três serviços exportam log, métrica e trace por OTLP (ticket 059). Os nomes têm **duas
@@ -212,6 +224,14 @@ em vez do fluxo: manda uma rajada de oito Vídeos contra o Compose padrão e rep
 listagem nunca mostrar dois em `PROCESSANDO` ao mesmo tempo. Rode-o quando mexer em réplica,
 prefetch ou canal de entrada do `extracao` — é ele que segura a regressão do ticket 049, onde
 a demo processava um vídeo por vez enquanto a documentação dava o requisito como atendido.
+
+`scripts/carga/travamento.sh` persegue outro tipo de defeito: o que não aparece em uma
+execução. Ele repete ciclos `POST /videos` → `CONCLUIDO` contra o Compose com teto por ciclo e,
+no primeiro que estoura, coleta filas, *scratch* e thread dump **enquanto a réplica ainda está
+presa** — que é o único momento em que a evidência existe. Rode-o quando mexer no consumidor de
+`extracao.extrair`, nos adapters de I/O do `extracao` ou em qualquer coisa que reagende
+trabalho entre threads. Foi ele que mediu o ticket 061, onde um travamento de 1 em ~15
+Extrações passava por todos os outros scripts sem deixar uma linha de log.
 
 `scripts/carga/conservacao.sh` é o outro degrau: rajada de centenas de envios contra o Compose
 com falha injetada (`docker kill` no `extracao` ou no `videos`), julgada por critérios fixados

@@ -51,12 +51,24 @@ import java.util.function.Supplier;
  * span certo. E o {@code idVideo} do contrato de mensagens, o mesmo que um humano digita — o
  * {@code trace_id} identifica a travessia, que e outra coisa.
  *
- * <h2>Com o SDK desligado</h2>
+ * <h2>O guarda por {@link Span#isRecording()}, e o que ele NAO cobre</h2>
  *
- * Em teste e em dev o SDK esta desligado e o span nasce sem gravar. O guarda por
- * {@link Span#isRecording()} devolve o trabalho cru nesse caso: nada de escopo aberto, nada de
- * MDC. Sem ele, fechar um escopo no-op a partir da thread que completou a cadeia so produziria
- * ruido de log numa suite que nao exporta nada.
+ * O guarda devolve o trabalho cru quando o span nasce sem gravar: nada de escopo aberto, nada
+ * de MDC. Ele existe para o caso de o {@code Tracer} injetado ser no-op — fechar um escopo
+ * no-op a partir da thread que completou a cadeia so produziria ruido de log.
+ *
+ * <p>O que este javadoc afirmava ate o ticket 061, e era falso: que
+ * {@code quarkus.otel.sdk.disabled=true} produz esse caso. <b>Nao produz.</b> Medido no
+ * Quarkus 3.31.3, com a propriedade ligada por variavel de ambiente e por
+ * {@code -D} de sistema, {@code isRecording()} continua {@code true} e o span e um
+ * {@code SdkSpan} de verdade: o {@code OpenTelemetryRecorder} pula os customizadores de
+ * exportador, mas o SDK que ele monta continua gravando. A chave suprime a <b>exportacao</b>,
+ * nao a instrumentacao. Logo o caminho cru e, na pratica, morto — em teste, em dev e no
+ * overlay de carga o codigo roda pelo caminho que abre escopo.
+ *
+ * <p>Isso importa alem da precisao do comentario: o ticket 061 descartou uma hipotese inteira
+ * por acreditar nesta frase. O que fazer com a descoberta — inclusive se o overlay de carga
+ * ainda mede o que diz medir — esta no ticket 062.
  *
  * <h2>Onde {@link #emTorno} vale a pena, e onde nao</h2>
  *

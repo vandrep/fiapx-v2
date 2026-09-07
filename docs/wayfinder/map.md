@@ -668,13 +668,31 @@ verificadas por teste, não são sugestão). Projeto original em
   de antes. O único número novo é medido: três corridas de `smoke.sh` completo com a stack quente, 45/45/46 s.
 
 - [Uma Extração trava, raramente, com o SDK desligado](tickets/061-travamento-raro-com-o-sdk-desligado.md)
-  — **aberto**. Achado ao medir o custo da instrumentação no 059: com
-  `QUARKUS_OTEL_SDK_DISABLED=true`, a configuração que o overlay de carga passou a usar, uma
-  Extração ocasionalmente para com o Vídeo em `PROCESSANDO`, a mensagem *unacked*, **nenhuma
-  thread e nenhum log** — e o `max-outstanding-messages=1` prende a réplica para sempre. A/B de
-  três rodadas alternadas: 1 travamento em 30 ciclos com as imagens do 059, 0 em 30 com as
-  pré-059. Sem causa raiz, e por isso sem correção: o critério é o do 027, defeito medido vira
-  ticket. A demo — com o SDK ligado — não exibiu o sintoma.
+  — a causa **não era o SDK**, e o título do ticket é o nome de uma correlação que a medição
+  desfez. Reproduzido em `scripts/carga/travamento.sh` (novo: repete ciclos com teto e, no
+  primeiro que estoura, coleta filas, *scratch* e thread dump enquanto a réplica ainda está
+  presa) e localizado por sondas: a Extração para **entre** o adapter do MinIO e a primeira
+  linha do método guardado, sem thread, sem socket, sem retentativa e sem log. É a tolerância a
+  falhas por interceptor: numa operação verdadeiramente assíncrona o SmallRye monta
+  `RememberEventLoop -> ThreadOffload` e **reagenda a chamada no contexto Vert.x do próprio
+  consumidor**, que só é liberado quando aquela chamada terminar — o reagendamento entra atrás
+  de quem espera por ele. A/B no mesmo host: **4 travamentos em ~60 ciclos com `@Retry` +
+  `@AsynchronousNonBlocking`, 0 em 90 sem eles**. A retentativa do ADR 0001 passou a ser
+  `onFailure().retry()` do Mutiny nos três serviços — mesma contagem, mesma espera, sem
+  reagendar nada —, a extensão saiu dos três `pom.xml` e uma regra nova do
+  `ArchitectureConstraintsTest` barra o interceptor voltar. **Achado colateral, e o mais caro**:
+  `QUARKUS_OTEL_SDK_DISABLED=true` não desliga a instrumentação, só a exportação — o span
+  continua gravando. O guarda por `isRecording()` do `Rastro` nunca dispara: as duas pernas do
+  A/B do 059 eram, no código, a mesma perna, e a variável em torno da qual este ticket inteiro
+  foi escrito não existia. Segue no 062.
+
+- [A chave que não desliga o SDK](tickets/062-a-chave-que-nao-desliga-o-sdk.md) — **aberto**.
+  Medido no 061: com `quarkus.otel.sdk.disabled=true` (por variável de ambiente **e** por
+  propriedade de sistema, Quarkus 3.31.3) o span continua sendo um `SdkSpan` que grava. O que
+  isso desfaz: o overlay de carga não roda "sem instrumentação", e os ~5% de custo do 059
+  compararam duas configurações que diferem menos do que se supôs. Comentários e ADR já foram
+  corrigidos; o que falta é decidir o que o overlay deve fazer e se a comparação com os
+  tickets 025–028 se sustenta.
 
 ## Ainda não especificado
 

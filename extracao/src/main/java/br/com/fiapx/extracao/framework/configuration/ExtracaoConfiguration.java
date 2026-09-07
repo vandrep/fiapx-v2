@@ -1,4 +1,4 @@
-package br.com.fiapx.extracao.framework.web;
+package br.com.fiapx.extracao.framework.configuration;
 
 import br.com.fiapx.extracao.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.extracao.core.interfaces.gateway.EspacoDeTrabalhoGateway;

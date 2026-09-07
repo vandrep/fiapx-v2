@@ -738,6 +738,11 @@ verificadas por teste, não são sugestão). Projeto original em
   sem módulo compartilhado; no `extracao`, a mesma cópia atende o consumo normal e o da DLQ,
   preservando o `failure-strategy=reject` que envia tentativas esgotadas ao Estacionamento.
 
+- [Workers não anunciam uma borda HTTP que não existe](tickets/068-framework-web-em-worker-sem-borda-http.md)
+  — `ExtracaoConfiguration` e `NotificacaoConfiguration` são raízes de composição CDI e moram
+  em `framework.configuration`; só o `videos`, que expõe a borda pública, mantém
+  `framework.web`. Uma guarda idêntica nos três serviços proíbe o pacote web em qualquer worker.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

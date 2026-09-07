@@ -1,4 +1,4 @@
-package br.com.fiapx.notificacao.framework.web;
+package br.com.fiapx.notificacao.framework.configuration;
 
 import br.com.fiapx.notificacao.core.interfaces.gateway.EmailGateway;
 import br.com.fiapx.notificacao.core.usecases.notificacao.EnviarNotificacaoDeFalhaUseCase;

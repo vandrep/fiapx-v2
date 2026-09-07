@@ -371,6 +371,25 @@ class ArchitectureConstraintsTest {
     }
 
     @Test
+    void workersNaoDevemDeclararPacoteDeBordaHttp() {
+        if (MODULO_DO_SERVICO.equals("videos")) {
+            return;
+        }
+
+        var pacoteWeb = BASE_PACKAGE + "." + MODULO_DO_SERVICO + ".framework.web";
+        var violations = javaSources().stream()
+                .filter(source -> {
+                    var pacote = packageName(source);
+                    return pacote.equals(pacoteWeb) || pacote.startsWith(pacoteWeb + ".");
+                })
+                .map(source -> source.relativePath()
+                        + ": worker sem borda HTTP nao deve declarar pacote .framework.web")
+                .toList();
+
+        assertNoViolations(violations);
+    }
+
+    @Test
     void bordaNaoPodeBuscarVideoSemDono() {
         var violations = new ArrayList<String>();
 

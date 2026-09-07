@@ -257,9 +257,10 @@ Extrações passava por todos os outros scripts sem deixar uma linha de log.
 `scripts/carga/conservacao.sh` é o outro degrau: rajada de centenas de envios contra o Compose
 com falha injetada (`docker kill` no `extracao` ou no `videos`), julgada por critérios fixados
 antes de rodar. Rode-o quando mexer em máquina de estados, consumo de evento ou reconciliação —
-ele reprova onde o `smoke.sh` passa, porque o `smoke.sh` manda um vídeo de cada vez. Hoje ele
-**reprova de propósito**: três defeitos medidos e ainda abertos, em
-[`docs/wayfinder/tickets/027-melhorias-medidas.md`](docs/wayfinder/tickets/027-melhorias-medidas.md).
+ele reprova onde o `smoke.sh` passa, porque o `smoke.sh` manda um vídeo de cada vez. Os dois
+defeitos de correção que ele reprovava de propósito (terminal fora de ordem, marca do ADR 0003)
+foram corrigidos no ticket 027; remedido contra o código atual no ticket 073, ele passa: 400/400
+em `limpo`, 41/41 em `mata-videos` com o `videos` derrubado no meio da rajada.
 
 ## Commits
 

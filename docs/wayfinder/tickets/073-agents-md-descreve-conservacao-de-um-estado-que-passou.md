@@ -2,8 +2,8 @@
 
 - id: 073
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
 - prioridade: P2
 
@@ -51,6 +51,29 @@ medição recente.
 
 ## Critérios de aceite
 
-- [ ] O `conservacao.sh` foi executado nesta rodada, e o resultado está no ticket
-- [ ] O § Rodar do AGENTS.md descreve o comportamento medido, com o ticket que o registra
-- [ ] Se houver reprovação, ela tem ticket próprio ou reabre o 027 com a medição
+- [x] O `conservacao.sh` foi executado nesta rodada, e o resultado está no ticket
+- [x] O § Rodar do AGENTS.md descreve o comportamento medido, com o ticket que o registra
+- [x] Se houver reprovação, ela tem ticket próprio ou reabre o 027 com a medição
+
+## Resolução
+
+**Passou.** As imagens `ghcr.io/vandrep/fiapx-{videos,extracao,notificacao}:latest` locais eram
+de `2026-09-06T19:38`, anteriores aos três últimos commits de código (067, 068, 069) — o
+gotcha que o próprio 027 registrou ("o harness mede a imagem que estiver por perto"). Reconstruídas
+com `./mvnw package` + `docker build` a partir do HEAD atual (`406392d`) antes de medir, senão a
+rodada mediria o binário de um dia atrás em silêncio.
+
+Duas rodadas sob `systemd-inhibit --what=sleep:idle`:
+
+| Modo | Critério | Resultado |
+|---|---|---|
+| `limpo` (400 envios) | zero recusas, 100% terminal, zero preso, zero `FALHOU` | 400/400 `CONCLUIDO` em 98s, 0 recusas, 0 presos |
+| `mata-videos` (400 envios, `videos` morto aos 3s) | ao menos 1 aceito antes da queda (rodada válida), 100% terminal, zero preso | 41 aceitos antes da queda, 41/41 `CONCLUIDO` em 11s, 0 presos |
+
+Os dois modos passaram em todos os critérios — `mata-videos` é o que exercita os defeitos 1
+(terminal fora de ordem) e 2 (marca do ADR 0003) que o 027 corrigiu, e não achou nenhum vídeo
+preso. O terceiro defeito do 027 (gate por idade na varredura de scratch) não é exercitado por
+este script; ele mora no boot, não na rajada.
+
+O § Rodar do AGENTS.md perdeu a frase de reprovação esperada e passou a apontar para este
+ticket como a medição que sustenta "ele passa".

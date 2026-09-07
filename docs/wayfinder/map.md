@@ -953,6 +953,16 @@ verificadas por teste, não são sugestão). Projeto original em
   sem explicação — foi atendido pela via oposta à que ele previa: em vez de explicar os 138
   arquivos, a entrega deixou de rastreá-los.
 
+- [O `AGENTS.md` descreve o `conservacao.sh` de um estado que passou](tickets/073-agents-md-descreve-conservacao-de-um-estado-que-passou.md)
+  — o § Rodar afirmava reprovação de propósito pelos três defeitos do 027, que fechou entre a
+  revisão e este ticket. Rodar era a única resposta possível; não rodou de graça, porque as
+  imagens `:latest` locais eram de um dia antes dos três últimos commits de código — o mesmo
+  gotcha que o próprio 027 já tinha registrado ("o harness mede a imagem que estiver por
+  perto"). Reconstruídas a partir do HEAD, duas rodadas sob `systemd-inhibit`: `limpo` fechou
+  400/400 em 98s sem recusa nem preso, e `mata-videos` — o modo que exercita os dois defeitos
+  de correção do 027 — aceitou 41 antes de matar o `videos` e fechou os 41 em 11s, zero preso.
+  O § Rodar perdeu a frase da reprovação esperada e passou a apontar para cá.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

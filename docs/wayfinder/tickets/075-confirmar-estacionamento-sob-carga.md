@@ -1,7 +1,7 @@
 # A garantia de estacionamento do 029 nunca foi confirmada sob carga
 
 - id: 075
-- label: wayfinder:bug
+- label: ready-for-agent
 - status: fechado
 - assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
@@ -130,9 +130,8 @@ mecanismo de estacionamento que o 029 desenhou — o mesmo loop sem fundo que o
 onde esse desenho age.
 
 Evidência completa em `scripts/carga/saida/075-mata-publicacao/`: log da rodada
-(`conservacao.log`, capturado em `/tmp/075-mata-publicacao.log`), log das 4 réplicas do
-`extracao` (`extracao-<container>.log`), o dump de headers
-(`headers-x-delivery-count.txt`) e o estado final das três filas envolvidas
+(`veredito.log`), log das 4 réplicas do `extracao` (`extracao-<container>.log`), o dump de
+headers (`headers-x-delivery-count.txt`) e o estado final das três filas envolvidas
 (`estado-final-*.json`).
 
 **O 029 reabre** com este diagnóstico anexado — a garantia que ele declara ("falha definitiva

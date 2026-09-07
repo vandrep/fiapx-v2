@@ -980,6 +980,17 @@ verificadas por teste, não são sugestão). Projeto original em
   diretamente. O 029 **reabriu** com o diagnóstico anexado; a correção é trabalho novo, fora
   deste ticket.
 
+- [Lacunas e ofuscação na guarda de tolerância a falhas](tickets/076-lacunas-da-guarda-de-fault-tolerance.md)
+  — a regra do 064 ganhou o namespace `smallrye.faulttolerance` ao lado de
+  `quarkus.fault-tolerance`, com o mesmo ciclo vermelho/verde à mão que a regra original teve.
+  O alcance sobre variável de ambiente ficou recusado por escrito, não implícito: mesmo limite
+  que o 034 documentou para `publish-confirms`, mas aqui sem um caso real hoje, porque a
+  extensão saiu dos três `pom.xml` no 061. As duas constantes partidas por concatenação para
+  escapar de uma busca textual (`"fault" + "tolerance"`) voltaram a literais — o truque nem
+  funcionava, porque o `AGENTS.md` cita o termo em prosa e fica fora de `docs/` do mesmo jeito.
+  O critério de aceite do 064 que motivava o truque foi reformulado nele mesmo, para restringir
+  a busca a código, config e pom em vez de excluir caminho por caminho.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

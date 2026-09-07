@@ -2,8 +2,8 @@
 
 - id: 076
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
 - prioridade: P2
 
@@ -53,7 +53,50 @@ arquivo do teste na busca é mais honesta que uma concatenação que engana o `g
 
 ## Critérios de aceite
 
-- [ ] Uma chave `smallrye.faulttolerance.*` no `.properties` reprova o build
-- [ ] Nenhuma constante do teste partida por concatenação para escapar de busca textual
-- [ ] O alcance da regra sobre variável de ambiente está escrito, alcançado ou recusado
-- [ ] As três cópias seguem idênticas; `./mvnw test` verde a partir da raiz
+- [x] Uma chave `smallrye.faulttolerance.*` no `.properties` reprova o build
+- [x] Nenhuma constante do teste partida por concatenação para escapar de busca textual
+- [x] O alcance da regra sobre variável de ambiente está escrito, alcançado ou recusado
+- [x] As três cópias seguem idênticas; `./mvnw test` verde a partir da raiz
+
+## Resolução
+
+**A lacuna do namespace.** `TOLERANCIA_A_FALHAS_CONFIGURADA` ganhou uma terceira alternativa,
+ao lado da forma do MicroProfile (`.../Retry/...`) e de `quarkus.fault-tolerance`:
+`smallrye\.faulttolerance(?:\.|[=:\s]|$)`, mesmo tratamento de separador e fim de linha que as
+outras duas já tinham. Ciclo TDD observado à mão: `smallrye.faulttolerance.globalThreadPoolSize=42`
+acrescentado ao `application.properties` do `videos` e do `extracao` reprovou
+`toleranciaAFalhasNaoPodeSerConfigurada` antes da mudança de regex (vermelho) e passou a
+reprovar com ela (a chave nomeada na mensagem, sem o valor); removida a linha, o teste volta a
+verde.
+
+**O alcance da variável de ambiente.** Recusado, por escrito, no Javadoc de
+`TOLERANCIA_A_FALHAS_CONFIGURADA`: a regra lê o `.properties` do próprio serviço, então
+`MP_Fault_Tolerance_*`/`SMALLRYE_FAULTTOLERANCE_*` passam por fora — o mesmo limite que o
+ticket 034 já documentou para `publish-confirms`. Aqui ele pesa menos: a extensão saiu dos três
+`pom.xml` no ticket 061, então a variável não muda comportamento nenhum sem que alguém
+reintroduza a dependência primeiro, e nenhum `docker-compose*.yml` deste repositório declara
+uma variável nesse formato hoje (conferido por grep). Diferente do canal de mensageria — que
+sempre existe e só troca de forma —, aqui não há um caso real no repositório hoje que o limite
+esconda.
+
+**A ofuscação.** As duas constantes partidas por concatenação
+(`"fault" + "tolerance"`, `"ApplyFault" + "Tolerance"`) voltaram a literais legíveis. O critério
+de aceite do ticket 064 que motivava o truque foi reformulado nele mesmo: em vez de
+`grep -ri faulttolerance` fora de `docs/` — que nunca passou de verdade, porque o `AGENTS.md`
+documenta a regra em prosa e fica fora de `docs/` — o critério agora restringe a busca aos
+tipos de arquivo que sempre foram a intenção (`--include="*.java" --include="*.xml"
+--include="*.properties"`), e aí só acha as três cópias do próprio guarda, o que é esperado:
+elas citam o termo de propósito, para reprová-lo.
+
+**As três cópias.** Editado em `videos`, copiado byte a byte para `extracao` e `notificacao`;
+`scripts/verifica-testes-arquiteturais.sh` confirma identidade antes e depois.
+
+### Validação
+
+- Vermelho/verde da regra nova, à mão, nos dois serviços com canal de saída: chave
+  `smallrye.faulttolerance.globalThreadPoolSize=42` reprova `toleranciaAFalhasNaoPodeSerConfigurada`;
+  removida, o teste passa.
+- `grep -ril faulttolerance --include="*.java" --include="*.xml" --include="*.properties"` a
+  partir da raiz: só as três cópias de `ArchitectureConstraintsTest.java`.
+- `./mvnw test` na raiz, com Docker, ffmpeg e ffprobe reais: BUILD SUCCESS, 140 testes em
+  `videos`, 277 em `extracao`, 29 em `notificacao`, 0 falhas e 0 erros nos três.

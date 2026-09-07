@@ -1,0 +1,158 @@
+# Os tres alertas do ticket 058, provisionados no Grafana.
+#
+# Todos sao sobre FILA, e nenhum e sobre latencia ou taxa: sao condicoes que hoje so um humano
+# descobre abrindo o management UI — e o `CONTEXT.md` § Estacionamento diz isso com todas as
+# letras, que o desfecho "so um humano produz, olhando o management UI". Estes tres sao esse
+# humano sendo avisado.
+#
+# NAO ha canal de notificacao nesta entrega, de proposito: eles vivem so no Grafana. Isso
+# significa que a DETECCAO NAO MUDOU — um alerta que so existe na UI e visto apenas por quem
+# ja foi olhar, que e exatamente a propriedade do health check no incidente de 06/09. O que se
+# ganha e forense: o Grafana avalia e guarda historico, entao depois do fato da para dizer
+# "isto disparou as 11:26 e durou 14 minutos". Plugar o MailHog depois e configuracao de
+# contact point, nao rearquitetura. A limitacao esta escrita em `docs/arquitetura.md`.
+#
+# As expressoes foram VERIFICADAS contra o broker real antes de virarem arquivo, e a terceira
+# foi verificada reproduzindo o incidente de 06/09 (extracao parado, uma mensagem na fila):
+# disparou com `extracao.extrair | prontas: 1 | consumidores: 0`.
+#
+# As metricas vem do plugin `rabbitmq_prometheus` em `/metrics/detailed` — o `/metrics` padrao
+# e agregado e nao tem rotulo de fila, e as tres perguntas aqui sao todas por fila.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: filas
+    folder: FIAP X
+    interval: 1m
+    rules:
+      # 1. O Estacionamento e fila terminal: mensagem que chegou nele esgotou ate o fundo da
+      #    propria DLQ, e nada mais a move. Uma mensagem aqui e sempre trabalho humano
+      #    pendente, e o Video correspondente costuma estar preso em PROCESSANDO.
+      - uid: fiapx-estacionamento-nao-vazio
+        title: Estacionamento nao-vazio
+        condition: B
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: >-
+            Ha mensagem no Estacionamento (`extracao.extrair.estacionamento`). E fila terminal:
+            nada a tira dai sozinho. Provavelmente ha Video preso em PROCESSANDO do outro lado.
+            Ver CONTEXT.md § Estacionamento e ADR 0001.
+        labels:
+          severidade: humano-necessario
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              range: false
+              expr: 'rabbitmq_detailed_queue_messages{queue="extracao.extrair.estacionamento"} > 0'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: { from: 0, to: 0 }
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0] }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { type: last, params: [] }
+
+      # 2. A DLQ do extracao TEM consumidor (e a unica DLQ do contrato que tem), entao mensagem
+      #    parada aqui significa que a retentativa de publicacao tambem esta falhando — nao e
+      #    so "uma Extracao falhou".
+      - uid: fiapx-dlq-extracao-com-mensagem
+        title: DLQ do extracao com mensagem
+        condition: B
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: >-
+            `extracao.extrair.dlq` tem mensagem parada. Esta DLQ tem consumidor proprio, entao
+            acumulo aqui indica que a republicacao tambem esta falhando — o proximo salto e o
+            Estacionamento.
+        labels:
+          severidade: humano-necessario
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              range: false
+              expr: 'rabbitmq_detailed_queue_messages{queue="extracao.extrair.dlq"} > 0'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: { from: 0, to: 0 }
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0] }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { type: last, params: [] }
+
+      # 3. O incidente de 06/09, exatamente. Vale para QUALQUER fila, sem enumerar nome: se ha
+      #    trabalho e nao ha quem o pegue, alguem precisa saber. Pega tambem as DLQs terminais
+      #    (`videos.dlq`, `notificacao.dlq`), que nascem com zero consumidores por design — e
+      #    isso e desejado, porque mensagem nelas tambem so sai por intervencao humana. Fila
+      #    terminal vazia nao dispara: a condicao exige mensagem E ausencia de consumidor.
+      #
+      #    `for: 5m` e o unico numero calibrado deste arquivo, e ele nao foi inventado: um
+      #    redeploy do `extracao` derruba o consumidor por instantes, e o dreno do ticket 035
+      #    tem teto de 420s. Cinco minutos tolera o redeploy e ainda pega o incidente de 06/09,
+      #    que durou 14 minutos e nao ia melhorar sozinho. Abaixo disso o alerta toca a cada
+      #    deploy e vira ruido; muito acima, deixa de ser alerta.
+      - uid: fiapx-fila-sem-consumidor
+        title: Fila com mensagem e zero consumidores
+        condition: B
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: >-
+            A fila {{ $labels.queue }} tem mensagem pronta e nenhum consumidor. Foi este o
+            incidente de 06/09/2026: as duas replicas do extracao morreram em laco de
+            PRECONDITION_FAILED e todo Video enviado ficou em RECEBIDO por 14 minutos.
+        labels:
+          severidade: humano-necessario
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              range: false
+              expr: 'rabbitmq_detailed_queue_messages_ready > 0 and rabbitmq_detailed_queue_consumers == 0'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: { from: 0, to: 0 }
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0] }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { type: last, params: [] }

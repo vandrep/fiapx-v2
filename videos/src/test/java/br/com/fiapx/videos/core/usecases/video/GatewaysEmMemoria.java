@@ -3,6 +3,7 @@ package br.com.fiapx.videos.core.usecases.video;
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
@@ -39,6 +40,14 @@ final class GatewaysEmMemoria {
         final Map<UUID, Video> armazenados = new LinkedHashMap<>();
         final Map<UUID, Instant> comandoPublicadoEm = new LinkedHashMap<>();
         final Map<UUID, Instant> falhaPublicadaEm = new LinkedHashMap<>();
+
+        /**
+         * Os instantes de corte que cada metade da varredura pediu. Guardados porque a
+         * simetria do ticket 050 e uma propriedade da <b>passada</b>, nao de cada busca: dois
+         * testes independentes de idade passariam verde com folgas diferentes.
+         */
+        final List<Instant> cortesDeComandos = new ArrayList<>();
+        final List<Instant> cortesDeFalhas = new ArrayList<>();
         private final Map<UUID, EstadoVideo> corridasArmadas = new LinkedHashMap<>();
 
         /**
@@ -104,13 +113,8 @@ final class GatewaysEmMemoria {
         }
 
         @Override
-        public CompletableFuture<Boolean> marcarConcluida(UUID id,
-                                                          Instant concluidaEm,
-                                                          String chavePacote,
-                                                          int quantidadeFrames,
-                                                          long tamanhoPacoteBytes) {
-            return transicionar(id, linha -> linha.marcaComoConcluida(
-                    concluidaEm, chavePacote, quantidadeFrames, tamanhoPacoteBytes));
+        public CompletableFuture<Boolean> marcarConcluida(UUID id, ResultadoExtracao resultado) {
+            return transicionar(id, linha -> linha.marcaComoConcluida(resultado));
         }
 
         @Override
@@ -143,6 +147,7 @@ final class GatewaysEmMemoria {
 
         @Override
         public CompletableFuture<List<Video>> buscarComandosPendentes(Instant recebidosAntesDe, int tamanhoDoLote) {
+            cortesDeComandos.add(recebidosAntesDe);
             var pendentes = armazenados.values().stream()
                     .filter(video -> video.estado() == EstadoVideo.RECEBIDO)
                     .filter(video -> !comandoPublicadoEm.containsKey(video.id()))
@@ -154,11 +159,13 @@ final class GatewaysEmMemoria {
         }
 
         @Override
-        public CompletableFuture<List<Video>> buscarFalhasPendentes(int tamanhoDoLote) {
+        public CompletableFuture<List<Video>> buscarFalhasPendentes(Instant falhadosAntesDe, int tamanhoDoLote) {
+            cortesDeFalhas.add(falhadosAntesDe);
             var pendentes = armazenados.values().stream()
                     .filter(video -> video.estado() == EstadoVideo.FALHOU)
                     .filter(video -> !falhaPublicadaEm.containsKey(video.id()))
-                    .sorted(Comparator.comparing(Video::recebidoEm))
+                    .filter(video -> video.finalizadoEm().isBefore(falhadosAntesDe))
+                    .sorted(Comparator.comparing(Video::finalizadoEm))
                     .limit(tamanhoDoLote)
                     .toList();
             return CompletableFuture.completedFuture(pendentes);

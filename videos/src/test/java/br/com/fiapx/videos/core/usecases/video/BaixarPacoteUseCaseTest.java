@@ -3,6 +3,7 @@ package br.com.fiapx.videos.core.usecases.video;
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.exceptions.PacoteExpiradoException;
 import br.com.fiapx.videos.core.exceptions.PacoteIndisponivelException;
@@ -109,7 +110,8 @@ class BaixarPacoteUseCaseTest {
     private Video concluido() {
         var video = Video.novo("ferias.mp4", 10L, DONO).armazenadoEm("k");
         video.marcaComoIniciada();
-        video.marcaComoConcluida(Instant.parse("2026-08-21T14:05:47Z"), video.id() + ".zip", 1200, 900L);
+        video.marcaComoConcluida(new ResultadoExtracao(
+                Instant.parse("2026-08-21T14:05:47Z"), video.id() + ".zip", 1200, 900L));
         videos.armazenados.put(video.id(), video);
         return video;
     }

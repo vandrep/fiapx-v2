@@ -3,6 +3,7 @@ package br.com.fiapx.videos.framework.web;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.exceptions.ArquivoAusenteException;
 import br.com.fiapx.videos.core.usecases.video.BaixarPacoteUseCase;
+import br.com.fiapx.videos.framework.observabilidade.Rastro;
 import br.com.fiapx.videos.interfaces.controllers.VideosController;
 import br.com.fiapx.videos.interfaces.presenters.VideoPresenterAdapter;
 import br.com.fiapx.videos.interfaces.presenters.VideosPaginadosPresenterAdapter;
@@ -13,6 +14,7 @@ import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -30,11 +32,13 @@ import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.RestMulti;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 
+import java.net.URI;
 import java.nio.ByteBuffer;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Supplier;
 
@@ -49,6 +53,12 @@ import java.util.function.Supplier;
  *
  * <p>Anotacoes OpenAPI so aqui, e so as que o gerador nao acerta sozinho: o caminho feliz
  * ele deduz dos tipos, mas os status de erro nao.
+ *
+ * <p>Esta e a ponta de cima da travessia (ticket 059): o span de servidor HTTP que a
+ * auto-instrumentacao abre e o pai de tudo o que vem depois, inclusive do que roda nos outros
+ * dois servicos, e o {@link Rastro#marcar} e o que o torna alcancavel por {@code idVideo}. Sem
+ * isso a busca por um Video acharia o trabalho do worker e perderia a requisicao que o
+ * originou — que costuma ser o comeco da investigacao, nao o fim.
  */
 @Tag(name = "Videos", description = "Envio, acompanhamento e download dos Vídeos do usuário autenticado")
 @Path("/videos")
@@ -66,6 +76,9 @@ public class VideosResource {
 
     @Inject
     VideosPaginadosPresenterAdapter videosPaginadosPresenter;
+
+    @Inject
+    Rastro rastro;
 
     @POST
     @Consumes(MediaType.MULTIPART_FORM_DATA)
@@ -92,8 +105,9 @@ public class VideosResource {
                 sub(),
                 email());
         return doController(() -> videosController.enviar(requisicao))
+                .invoke(rastro::marcar)
                 .map(id -> Response.accepted(videoPresenter.viewModel())
-                        .location(java.net.URI.create("/videos/" + id))
+                        .location(URI.create("/videos/" + id))
                         .build());
     }
 
@@ -104,8 +118,8 @@ public class VideosResource {
     @APIResponse(responseCode = "200", description = "Página de Vídeos do usuário")
     @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
     public Uni<VideosPaginadosViewModel> listar(@QueryParam("estado") EstadoVideo estado,
-                                                @QueryParam("pagina") @jakarta.ws.rs.DefaultValue("0") int pagina,
-                                                @QueryParam("tamanho") @jakarta.ws.rs.DefaultValue("20") int tamanho) {
+                                                @QueryParam("pagina") @DefaultValue("0") int pagina,
+                                                @QueryParam("tamanho") @DefaultValue("20") int tamanho) {
         var requisicao = new VideosController.ListagemRequest(sub(), email(), estado, pagina, tamanho);
         return doController(() -> videosController.listar(requisicao))
                 .replaceWith(videosPaginadosPresenter::viewModel);
@@ -119,6 +133,7 @@ public class VideosResource {
     @APIResponse(responseCode = "404", description = "O Vídeo não existe, ou não é seu")
     @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
     public Uni<VideoViewModel> consultar(@PathParam("id") UUID id) {
+        rastro.marcar(id);
         return doController(() -> videosController.consultar(id, sub(), email()))
                 .replaceWith(videoPresenter::viewModel);
     }
@@ -139,6 +154,7 @@ public class VideosResource {
     @APIResponse(responseCode = "410", description = "Não mais: o Pacote expirou (7 dias)")
     @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
     public RestMulti<byte[]> baixarPacote(@PathParam("id") UUID id) {
+        rastro.marcar(id);
         return RestMulti.fromUniResponse(
                 doController(() -> videosController.baixarPacote(id, sub(), email())),
                 pacote -> Multi.createFrom().publisher(pacote.conteudo()).map(VideosResource::bytes),
@@ -166,7 +182,7 @@ public class VideosResource {
      * assincronas colocam por cima da excecao de dominio — sem isso, toda falha do core
      * cairia no mapper de 500 em vez do seu.
      */
-    private static <T> Uni<T> doController(Supplier<java.util.concurrent.CompletableFuture<T>> chamada) {
+    private static <T> Uni<T> doController(Supplier<CompletableFuture<T>> chamada) {
         return Uni.createFrom().completionStage(chamada)
                 .onFailure(CompletionException.class)
                 .transform(falha -> falha.getCause() == null ? falha : falha.getCause());

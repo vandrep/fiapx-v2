@@ -29,6 +29,7 @@ O resto do contexto está atrás de ponteiros, cada um com o seu gatilho:
 | tocar em retry, dead-letter ou notificação duplicada | [ADR 0001](docs/adr/0001-politica-de-falhas.md) |
 | tocar em transição de estado do Vídeo | [ADR 0002](docs/adr/0002-maquina-de-estados-em-duas-camadas.md) |
 | tocar em publicação de comando ou de falha no `videos` | [ADR 0003](docs/adr/0003-reconciliacao-por-varredura.md) |
+| tocar em span, métrica, log estruturado ou na stack de observabilidade | [ADR 0004](docs/adr/0004-camada-de-observabilidade.md) — e § Nomes na observabilidade, abaixo |
 
 ## Layout
 
@@ -119,6 +120,63 @@ de canal com traço (ticket 038). Overrides de Compose são deliberados e revisa
 junto do arquivo que os declara; o defeito que este teste persegue é o canal esquecido no
 `.properties`.
 
+Uma sexta chegou no ticket 061: **nada de tolerância a falhas por interceptor** em código de
+produção — nenhum import de `org.eclipse.microprofile.faulttolerance` nem de
+`io.smallrye.faulttolerance`. Não é preferência de estilo. Numa operação verdadeiramente
+assíncrona, e aqui todas são, o interceptor monta `RememberEventLoop -> ThreadOffload` e
+**reagenda a invocação no contexto Vert.x do chamador** — e esse reagendamento pode nunca
+rodar. Nenhuma thread, nenhum socket, nenhuma retentativa, nenhuma linha de log, mensagem sem
+ack para sempre. A explicação que encaixa é a ordenação daquele contexto (a chamada fica atrás
+da cadeia que espera por ela); o que está *medido* é que a tarefa reagendada não roda. A
+medição é do `extracao`; nos outros dois a regra vale por analogia estrutural, e é global
+porque obedecê-la custa um operador do Mutiny e descobri-la por medição custa um travamento em
+produção. Medido: 4 travamentos em ~60 ciclos com o interceptor, 0 em 90 sem ele
+(`scripts/carga/travamento.sh`). O que substitui é `onFailure().retry()` do Mutiny, que
+retenta dentro da própria cadeia — a política do [ADR 0001](docs/adr/0001-politica-de-falhas.md)
+não mudou, só quem a implementa. A extensão saiu dos três `pom.xml` junto com a regra.
+
+## As cópias deliberadas entre serviços
+
+Além dos records do contrato de mensagens, quatro implementações se repetem entre serviços:
+`Rastro` e `JsonObjectPayloadConverter` nos três, `comRepeticao` nos três clientes de I/O e
+`MotivoFalha.doCodigo` em `videos` e `notificacao`. As cópias são deliberadas. Cada serviço
+continua dono do próprio código e do próprio artefato; um módulo `shared` transformaria
+coincidência de implementação em acoplamento de build e de evolução entre os três serviços.
+
+Ao mudar a parte comum de uma dessas implementações, inspecione todas as cópias e aplique em
+cada uma somente o que preserva o mesmo contrato. Não as force a convergir: o `Rastro`, por
+exemplo, documenta recursos externos diferentes e só o de `videos` oferece `marcar`.
+
+Não há guarda automática de divergência para essas quatro famílias. Nenhuma delas tem
+identidade byte a byte como invariante, e uma comparação parcial confundiria diferença local
+legítima com esquecimento. Os testes de cada serviço guardam o comportamento; a revisão
+coordenada guarda a parte comum. O `ArchitectureConstraintsTest` é a exceção explícita porque
+suas três cópias foram desenhadas para ser idênticas, e por isso têm a guarda do agregador.
+
+## Nomes na observabilidade
+
+Os três serviços exportam log, métrica e trace por OTLP (ticket 059). Os nomes têm **duas
+origens, e duas regras** — não misture:
+
+- **O que a auto-instrumentação emite fica como o OTel emite.** `http.route`,
+  `messaging.destination.name`, os nomes de span do conector RabbitMQ e do SDK da AWS: são
+  contrato com a ferramenta. Traduzir para o vocabulário do projeto quebra consulta e receita
+  de ecossistema, e não compra nada em troca. Vale inclusive quando o nome soa feio ao lado
+  do resto do código.
+- **O que é nosso usa o vocabulário do [`CONTEXT.md`](CONTEXT.md).** A métrica própria é
+  `fiapx.extracao.duracao`, com o atributo `resultado` em `concluida`/`falhou` — as palavras
+  do glossário, não `success`/`error`. A mesma regra vale para atributo próprio de span e
+  campo estruturado de log: `idVideo` é `idVideo`, como no contrato de mensagens.
+
+Métrica nova precisa de justificativa igual à da primeira: existe uma só, e ela existe porque
+mede um intervalo que roda fora do JVM e que nenhuma auto-instrumentação enxerga. O que já é
+respondível pela auto-instrumentação ou por um endpoint não vira métrica.
+
+Instrumentação vive **só em `framework`**, e quem cobra isso é o `ArchitectureConstraintsTest`
+— a lista de imports e anotações proibidos está lá, que é a autoridade. O porquê de ela ter
+sido endurecida no ticket 059 está no
+[ADR 0004](docs/adr/0004-camada-de-observabilidade.md).
+
 ## BDD
 
 Cenários de aceite em Gherkin **em português** (`# language: pt` na primeira linha), em
@@ -182,12 +240,27 @@ mensageria, config de Compose ou imagem: é a única coisa no repo que reprova u
 passa nos próprios testes e mesmo assim não fala com o vizinho. `verify` em vez de `test`
 porque o CI precisa do `package` para construir as imagens no mesmo runner.
 
+`scripts/concorrencia.sh` é o degrau seguinte, e o único que julga um requisito do enunciado
+em vez do fluxo: manda uma rajada de oito Vídeos contra o Compose padrão e reprova se a
+listagem nunca mostrar dois em `PROCESSANDO` ao mesmo tempo. Rode-o quando mexer em réplica,
+prefetch ou canal de entrada do `extracao` — é ele que segura a regressão do ticket 049, onde
+a demo processava um vídeo por vez enquanto a documentação dava o requisito como atendido.
+
+`scripts/carga/travamento.sh` persegue outro tipo de defeito: o que não aparece em uma
+execução. Ele repete ciclos `POST /videos` → `CONCLUIDO` contra o Compose com teto por ciclo e,
+no primeiro que estoura, coleta filas, *scratch* e thread dump **enquanto a réplica ainda está
+presa** — que é o único momento em que a evidência existe. Rode-o quando mexer no consumidor de
+`extracao.extrair`, nos adapters de I/O do `extracao` ou em qualquer coisa que reagende
+trabalho entre threads. Foi ele que mediu o ticket 061, onde um travamento de 1 em ~15
+Extrações passava por todos os outros scripts sem deixar uma linha de log.
+
 `scripts/carga/conservacao.sh` é o outro degrau: rajada de centenas de envios contra o Compose
 com falha injetada (`docker kill` no `extracao` ou no `videos`), julgada por critérios fixados
 antes de rodar. Rode-o quando mexer em máquina de estados, consumo de evento ou reconciliação —
-ele reprova onde o `smoke.sh` passa, porque o `smoke.sh` manda um vídeo de cada vez. Hoje ele
-**reprova de propósito**: três defeitos medidos e ainda abertos, em
-[`docs/wayfinder/tickets/027-melhorias-medidas.md`](docs/wayfinder/tickets/027-melhorias-medidas.md).
+ele reprova onde o `smoke.sh` passa, porque o `smoke.sh` manda um vídeo de cada vez. Os dois
+defeitos de correção que ele reprovava de propósito (terminal fora de ordem, marca do ADR 0003)
+foram corrigidos no ticket 027; remedido contra o código atual no ticket 073, ele passa: 400/400
+em `limpo`, 41/41 em `mata-videos` com o `videos` derrubado no meio da rajada.
 
 ## Commits
 

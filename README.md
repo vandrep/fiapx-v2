@@ -56,6 +56,45 @@ ponto exato. Precisa de `jq` e `unzip` além do Docker.
 
 A seção [Usar](#usar) é o mesmo percurso passo a passo, para quem quiser conduzir na mão.
 
+### Mais de um vídeo ao mesmo tempo
+
+O `extracao` sobe com **duas réplicas** nesta stack — elas competem pela mesma fila, e cada
+uma pega uma extração por vez. Não é preciso ligar nada:
+
+```bash
+docker compose ps extracao   # duas linhas, ambas (healthy)
+./scripts/concorrencia.sh    # rajada de 8 vídeos, ~1 min do zero
+```
+
+O script envia a rajada autenticada e acompanha a listagem `GET /videos`, desenhando a linha
+do tempo de cada Vídeo em `PROCESSANDO` — que é exatamente o intervalo da extração, porque o
+estado abre no início e fecha na conclusão. Barras que se sobrepõem são extrações
+simultâneas, e ele reprova se nunca houver duas ao mesmo tempo por mais de um instante:
+
+```
+    302aa8a5           #######  CONCLUIDO (0,7s)
+    d4b25402           #######  CONCLUIDO (0,7s)
+```
+
+No fim ele confere que cada Vídeo chegou a `CONCLUIDO` com o Pacote íntegro e invisível para
+o outro usuário: concorrência que troca resultado não conta. Precisa de `jq` e `unzip`, como
+o smoke. Para acompanhar por dentro, `docker compose logs -f extracao` mostra as duas
+réplicas trabalhando ao mesmo tempo.
+
+Para ver mais em paralelo, escale o worker — nada mais precisa mudar, porque ele não publica
+porta nem guarda estado:
+
+```bash
+FIAPX_EXTRACAO_REPLICAS=4 ./scripts/concorrencia.sh 16
+```
+
+A variável é a mesma do `docker-compose.yml` (`replicas: ${FIAPX_EXTRACAO_REPLICAS:-2}`),
+então vale igual para um `docker compose up -d` avulso. Prefira-a a `--scale`: o script roda
+`up -d`, que devolveria a stack ao valor do arquivo.
+
+Quanto isso rende foi medido até 6 réplicas (eficiência de escala 0,88; 15,6 vídeo/min) em
+[`docs/pesquisa/carga-escalabilidade.md`](docs/pesquisa/carga-escalabilidade.md).
+
 | Console | Endereço | Credenciais |
 |---|---|---|
 | **Swagger UI** (a demo) | http://localhost:8080/q/swagger-ui | `demo` / `demo` |
@@ -63,6 +102,13 @@ A seção [Usar](#usar) é o mesmo percurso passo a passo, para quem quiser cond
 | RabbitMQ | http://localhost:15672 | `fiapx` / `fiapx` |
 | MinIO | http://localhost:9001 | `minioadmin` / `minioadmin` |
 | MailHog | http://localhost:8025 | — |
+| Grafana (observabilidade) | http://localhost:3000 | — (acesso anônimo) |
+
+O Grafana traz log, métrica e trace dos três serviços, correlacionados pelo `idVideo`, e três
+alertas sobre as filas — Estacionamento não-vazio, DLQ do `extracao` com mensagem, e fila com
+mensagem e zero consumidores. **Não há painel montado**: a exploração é pelo *Explore*, e os
+alertas não têm canal de notificação, então só são vistos por quem abre a tela. A retenção é
+efêmera: o histórico morre no `docker compose down`.
 
 Para derrubar preservando os dados: `docker compose down`. O próximo `docker compose up -d`
 reutiliza os volumes do mesmo projeto Compose: banco, buckets, uploads, mensagens do
@@ -98,6 +144,11 @@ deixa seus containers e volumes para inspeção. Para encerrá-lo preservando os
 
 Não há interface web: a demo é o **Swagger UI**. Clique em **Authorize**, entre com
 `demo`/`demo` e as quatro operações passam a rodar autenticadas na própria página.
+
+O diálogo Authorize some com `client_id`, `client_secret` e o seletor "Client credentials
+location" — CSS de demo, não indisponibilidade: neste client público só há uma resposta
+certa para os três, e deixá-los visíveis só convida a preencher errado antes de digitar
+`demo`/`demo`.
 
 O realm traz dois usuários, `demo`/`demo` e `outro`/`outro` — o segundo existe para mostrar
 que o Vídeo de um usuário responde `404` para o outro. O dono vem sempre do `sub` do token,
@@ -173,6 +224,20 @@ Antes de escrever a primeira classe, leia [`AGENTS.md`](AGENTS.md): as regras de
 são convenção, são verificadas por `ArchitectureConstraintsTest` e reprovam o build.
 
 O CI roda o mesmo `verify` num job só e publica as três imagens no GHCR a partir da `main`.
+
+### Por que o `.devcontainer/` está versionado
+
+O `.devcontainer/` está no repositório de entrega, não num `.gitignore`, porque fixa o
+toolchain (Java, Node, Docker rootless) que qualquer clone precisa para reproduzir
+`./mvnw verify` sem depender do que já está instalado em quem entrega ou revisa. Ele não é
+pedido pelo enunciado; versioná-lo é tratar a reprodutibilidade do build como parte da
+entrega, não como andaime descartado.
+
+O ferramental de agente que automatiza o fluxo de tickets em
+[`docs/wayfinder/`](docs/wayfinder/map.md) seguiu o caminho oposto: ele é instalado por
+ferramenta externa, vive na instalação global de quem trabalha aqui e está no `.gitignore`.
+O que a entrega guarda é o **resultado** desse fluxo — o mapa, os tickets e os ADRs —, não a
+ferramenta que o produziu.
 
 ### Devcontainer com Docker rootless
 

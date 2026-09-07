@@ -60,6 +60,28 @@ dizer se o evento saiu.
   o caso normal a cada 30 s). Com isso a republicação foi vista de ponta a ponta: um Vídeo em
   `RECEBIDO` sem marca virou `reconciliacao republicou 1 comando(s) e 0 falha(s)` no log e
   chegou a `CONCLUIDO` com a marca gravada.
+- **Uma folga só, aplicada às duas metades da varredura.** O corte de um minuto nasceu na
+  metade do comando e a metade da falha ficou sem nenhum, por descuido e não por decisão: a
+  janela entre gravar e publicar é a mesma dos dois lados — `INSERT` → `publish` do
+  `ExtrairVideo`, `UPDATE` para `FALHOU` → `publish` do `VideoFalhou` —, e sem folga uma
+  varredura que caísse sobre um `ProcessarExtracaoFalhouUseCase` em voo republicaria o evento
+  e duplicaria a notificação. O [ADR 0001](0001-politica-de-falhas.md) aceita a duplicata, mas
+  ela não tinha por que acontecer. Simetrizado no
+  [ticket 050](../wayfinder/tickets/050-folga-contra-crash-nas-falhas-pendentes.md): o mesmo
+  instante de corte governa as duas buscas, e o da falha é comparado com `finalizado_em`, que
+  é onde `marcarFalha` grava quando a linha virou `FALHOU`. `finalizado_em` é o instante do
+  **evento** `ExtracaoFalhou`, não o da escrita, então sob backlog de fila a folga efetiva
+  encurta — no pior caso ela vira a de hoje, zero, e o pior caso continua sendo a duplicata
+  tolerada. Coluna nova para o instante da escrita pagaria migração por essa diferença.
+  O índice parcial já era `(finalizado_em)`, então o predicado novo é servido por ele, e a
+  ordenação passou de `recebido_em` para `finalizado_em` para casar com ele. Duas coisas que
+  o corte novo assume, e que ficam registradas em vez de tácitas: comparação com `NULL` nunca
+  é verdadeira, então uma linha `FALHOU` sem `finalizado_em` sumiria da varredura para sempre
+  — hoje só `marcarFalha` escreve `FALHOU` e sempre grava o instante, e o
+  `ck_video_falhou_finalizado` do `init.sql` passou a segurar isso em vez de deixá-lo por
+  conta de quem escreve; e o instante comparado vem do relógio do `extracao` contra o
+  `Instant.now()` do `videos`, então relógio adiantado no worker alonga a folga e atrasa o
+  resgate, do mesmo jeito que o backlog a encurta.
 - **A marca é gravada *depois* do publish, e isso é deliberado.** `INSERT` com marca nula →
   publica → `UPDATE` da marca. Um crash entre o publish e a marca republica o comando: a
   Extração roda duas vezes, o mesmo objeto de Pacote é sobrescrito e o segundo

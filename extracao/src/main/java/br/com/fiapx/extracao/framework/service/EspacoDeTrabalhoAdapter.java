@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
@@ -193,7 +194,7 @@ public class EspacoDeTrabalhoAdapter implements EspacoDeTrabalhoGateway {
         }
     }
 
-    private <T> CompletableFuture<T> executarBloqueante(java.util.function.Supplier<T> operacaoBloqueante) {
+    private <T> CompletableFuture<T> executarBloqueante(Supplier<T> operacaoBloqueante) {
         return Uni.createFrom().item(operacaoBloqueante)
                 .runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
                 .onFailure().transform(erro -> new FalhaTransitoriaDeExtracaoException(

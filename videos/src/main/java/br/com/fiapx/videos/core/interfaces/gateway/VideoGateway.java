@@ -3,6 +3,7 @@ package br.com.fiapx.videos.core.interfaces.gateway;
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.presenter.dto.Pagina;
 
@@ -54,11 +55,7 @@ public interface VideoGateway {
      * <b>ou</b> de PROCESSANDO, porque a {@code ExtracaoConcluida} pode chegar antes da
      * {@code ExtracaoIniciada} (ticket 027, ADR 0002).
      */
-    CompletableFuture<Boolean> marcarConcluida(UUID id,
-                                               Instant concluidaEm,
-                                               String chavePacote,
-                                               int quantidadeFrames,
-                                               long tamanhoPacoteBytes);
+    CompletableFuture<Boolean> marcarConcluida(UUID id, ResultadoExtracao resultado);
 
     /**
      * A guarda de unicidade do e-mail: {@code true} somente quando o {@code UPDATE} mudou a
@@ -80,9 +77,12 @@ public interface VideoGateway {
     CompletableFuture<List<Video>> buscarComandosPendentes(Instant recebidosAntesDe, int tamanhoDoLote);
 
     /**
-     * Vídeos FALHOU cujo {@code VideoFalhou} nunca foi publicado. Sem folga de tempo: a
-     * transicao para FALHOU e a publicacao sao consecutivas no mesmo caminho, e o risco de
-     * corrida com uma varredura concorrente e tolerado (ADR 0003).
+     * Vídeos FALHOU cujo {@code VideoFalhou} nunca foi publicado, com a <b>mesma</b> folga de
+     * {@link #buscarComandosPendentes}, agora contra o crash entre a transicao para FALHOU e
+     * o publish: so entram aqui os que falharam antes de {@code falhadosAntesDe} (ADR 0003,
+     * ticket 050). O instante julgado e o {@code finalizadoEm}, que e onde o
+     * {@code marcarFalha} grava quando a linha virou FALHOU. Ordenado por
+     * {@code finalizadoEm}, lote limitado.
      */
-    CompletableFuture<List<Video>> buscarFalhasPendentes(int tamanhoDoLote);
+    CompletableFuture<List<Video>> buscarFalhasPendentes(Instant falhadosAntesDe, int tamanhoDoLote);
 }

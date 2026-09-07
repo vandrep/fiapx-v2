@@ -3,6 +3,7 @@ package br.com.fiapx.videos.framework.db;
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.core.interfaces.presenter.VideoPresenter;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -79,9 +81,9 @@ class VideoDataSourceAdapterTest {
         carregarEsperado(asserter, id, esperado);
 
         asserter.execute(() -> {
-            esperado[0].marcaComoConcluida(concluidaEm, "pacotes/resultado.zip", 900, 2_048L);
-            return Uni.createFrom().completionStage(() -> adapter.marcarConcluida(
-                    id[0], concluidaEm, "pacotes/resultado.zip", 900, 2_048L));
+            var resultado = new ResultadoExtracao(concluidaEm, "pacotes/resultado.zip", 900, 2_048L);
+            esperado[0].marcaComoConcluida(resultado);
+            return Uni.createFrom().completionStage(() -> adapter.marcarConcluida(id[0], resultado));
         });
         asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
     }
@@ -127,6 +129,16 @@ class VideoDataSourceAdapterTest {
 
     @Inject
     Pool pool;
+
+    @Test
+    @RunOnVertxContext
+    void adicionarMesmoVideoNovamenteNaoCriaOutraLinha(UniAsserter asserter) {
+        var video = Video.novo("idempotente.mp4", 1_024L, DONO).armazenadoEm("chave/idempotente.mp4");
+
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.adicionar(video)));
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.adicionar(video)));
+        asserter.assertThat(() -> linhasDoVideo(video.id()), linhas -> assertEquals(1L, linhas));
+    }
 
     @Test
     @RunOnVertxContext
@@ -185,6 +197,42 @@ class VideoDataSourceAdapterTest {
         asserter.assertThat(() -> falhar(id[0]), segunda -> assertFalse(segunda));
         asserter.assertThat(() -> estadoDe(id[0]),
                 estado -> assertEquals(EstadoVideo.FALHOU, estado));
+    }
+
+    /**
+     * O predicado de folga da metade da falha e HQL sobre {@code finalizadoEm} (ticket 050),
+     * e nenhum teste do {@code core} o alcanca: la o filtro e um {@code Stream}. Aqui a
+     * mesma linha e julgada por dois cortes, contra Postgres de verdade.
+     *
+     * <p>O instante e fixo, e nao {@code Instant.now()}, porque {@code timestamptz} guarda
+     * microssegundos: um {@code now()} com nanos voltaria do banco truncado <b>para tras</b>
+     * do proprio corte, e o teste passaria ou nao conforme o relogio.
+     */
+    @Test
+    @RunOnVertxContext
+    void aFalhaRecemGravadaFicaForaDaVarreduraEAJaVelhaEntra(UniAsserter asserter) {
+        var id = new UUID[1];
+        var falhouEm = Instant.parse("2026-09-05T16:00:00Z");
+        gravarRecebido(asserter, id);
+        asserter.execute(() -> Uni.createFrom().completionStage(
+                () -> adapter.marcarFalha(id[0], falhouEm, MotivoFalha.ARQUIVO_INVALIDO)));
+
+        asserter.assertThat(() -> falhasPendentesAntesDe(falhouEm),
+                pendentes -> assertFalse(contem(pendentes, id[0]),
+                        "falha dentro da folga pode estar so aguardando o publish em voo"));
+        asserter.assertThat(() -> falhasPendentesAntesDe(falhouEm.plusSeconds(1)),
+                pendentes -> assertTrue(contem(pendentes, id[0]),
+                        "passada a folga, a falha perdida tem de voltar a ser alcancada"));
+    }
+
+    /** Lote largo de proposito: a tabela do teste acumula linhas de outros cenarios. */
+    private Uni<List<Video>> falhasPendentesAntesDe(Instant falhadosAntesDe) {
+        return Uni.createFrom().completionStage(
+                () -> adapter.buscarFalhasPendentes(falhadosAntesDe, 1_000));
+    }
+
+    private static boolean contem(List<Video> pendentes, UUID id) {
+        return pendentes.stream().anyMatch(video -> id.equals(video.id()));
     }
 
     /**
@@ -315,8 +363,8 @@ class VideoDataSourceAdapterTest {
     }
 
     private Uni<Boolean> concluir(UUID id) {
-        return Uni.createFrom().completionStage(
-                () -> adapter.marcarConcluida(id, Instant.now(), id + ".zip", 900, 2_048L));
+        return Uni.createFrom().completionStage(() -> adapter.marcarConcluida(
+                id, new ResultadoExtracao(Instant.now(), id + ".zip", 900, 2_048L)));
     }
 
     private Uni<Boolean> falhar(UUID id) {
@@ -332,5 +380,12 @@ class VideoDataSourceAdapterTest {
     private Uni<EstadoVideo> estadoDe(UUID id) {
         return Panache.withSession(
                 () -> VideoEntity.<VideoEntity>findById(id).map(entidade -> entidade.estado));
+    }
+
+    private Uni<Long> linhasDoVideo(UUID id) {
+        return pool.withConnection(conexao -> conexao
+                .preparedQuery("select count(*) from video where id = $1")
+                .execute(Tuple.of(id))
+                .map(linhas -> linhas.iterator().next().getLong(0)));
     }
 }

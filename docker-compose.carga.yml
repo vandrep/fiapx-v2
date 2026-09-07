@@ -2,10 +2,14 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.carga.yml up -d
 #
-# O `docker-compose.yml` principal **e a demo da banca**, e por isso nao recebe `replicas:`
-# nem limite de CPU: sao parametros que existem so para o experimento, e deixa-los la faria a
-# demo carregar o instrumento para sempre. Overlay e a construcao que o proprio Compose
+# O `docker-compose.yml` principal **e a demo da banca**, e por isso nao recebe limite de CPU
+# nem replica da borda: sao parametros que existem so para o experimento, e deixa-los la faria
+# a demo carregar o instrumento para sempre. Overlay e a construcao que o proprio Compose
 # oferece para esta separacao.
+#
+# Uma excecao, desde o ticket 049: o `extracao` da demo sobe com `replicas: 2`, porque
+# processar mais de um video ao mesmo tempo e requisito do enunciado, nao instrumento de
+# medicao. O que continua morando so aqui e o N variavel e o teto de CPU por replica.
 #
 # As duas variaveis abaixo sao o parametro que o ticket 026 varre. O 025 fixa
 # FIAPX_EXTRACAO_REPLICAS=4 para a drenagem da rajada nao levar meia hora; o 026 percorre
@@ -15,8 +19,61 @@
 # frente, porque a porta publicada (`8080:8080`) nao pode ser aberta por N containers ao mesmo
 # tempo. `!override []` some com a publicacao de porta do `videos` so aqui — o
 # `docker-compose.yml` principal, que e a demo, continua publicando a porta como sempre porque
-# ali `deploy.replicas` nunca aparece (nasce implicitamente em 1).
+# no `videos` dele `deploy.replicas` nunca aparece (nasce implicitamente em 1). O `extracao`
+# escala na demo sem essa complicacao justamente por nao publicar porta nenhuma.
 services:
+  # A observabilidade sai do experimento (ticket 058). E a mesma logica do cabecalho deste
+  # arquivo, invertida: se a demo nao deve carregar o instrumento para sempre, o experimento
+  # tambem nao deve carregar a demo.
+  #
+  # O motivo nao e purismo. Os numeros que o mapa registra — 15,6 Video/min, eficiencia 0,88 e
+  # 0,99, mediana do 202, 0 presos em 400 — foram medidos SEM esta stack, e o que eles medem e
+  # escalabilidade limitada por CPU, com teto de CPU por replica justamente para isolar o
+  # desenho do host. Um coletor disputando o mesmo host mede outra coisa, e as quatro medicoes
+  # dos tickets 025-028 deixariam de ser comparaveis com qualquer corrida futura.
+  #
+  # `replicas: 0` e nao `profiles`: com replicas zero, uma stack que ja estava de pe e reduzida
+  # a zero pelo `up` do overlay. Com profile, um container ja rodando continuaria rodando — e a
+  # garantia que este bloco precisa dar e sobre a corrida, nao sobre a intencao.
+  #
+  # O preco disto e uma configuracao medida que nao e a configuracao entregue, e ele esta
+  # registrado em `docs/arquitetura.md` § Limitacoes conhecidas. O que fecha o buraco e o
+  # numero de sobrecarga medido uma vez sobre o fixture de controle, no ticket 058, em vez de
+  # varrer N de novo.
+  observabilidade:
+    deploy:
+      replicas: 0
+
+  # O SDK dos tres servicos desligado, pelo mesmo motivo e no mesmo movimento (ticket 059).
+  # Desligar so a stack deixaria os tres exportando para um endereco morto: cada um pagaria o
+  # custo do exportador tentando e falhando durante a rajada inteira.
+  #
+  # O QUE ESTE OVERLAY MEDE, e o ticket 062 decidiu escrever assim em vez de corrigir: um
+  # sistema INSTRUMENTADO, SEM COLETOR E SEM EXPORTADOR. Nao e "codigo que nao instrumenta
+  # nada", que e o que os tickets 025-028 mediram, nas imagens pre-059. Uma corrida deste
+  # overlay e comparavel com outra corrida deste overlay — nao com os quatro numeros de escala
+  # do mapa (15,6 Video/min, eficiencia 0,88 e 0,99, mediana do 202, 0 presos em 400).
+  #
+  # Por que fica assim, medido no 062 e nao suposto: `QUARKUS_OTEL_SDK_DISABLED=true` desliga
+  # metrica e log de verdade (sem reader, o meter vira no-op; sem processor, o logger tambem),
+  # mas NAO desliga trace — o SdkTracerProvider nao tem esse atalho, e o span acaba gravando
+  # pelo sampler DEFAULT do SDK, que amostra. Note que nesta configuracao o sampler configurado
+  # no application.properties nem e consultado: com o SDK desligado o recorder pula os
+  # customizadores e o autoconfigure pula o configureSdk inteiro.
+  #
+  # E nenhuma chave que pararia o span alcanca um overlay de Compose, que so sabe passar
+  # variavel de ambiente. `quarkus.otel.enabled=false` e fixada no build e aqui nem compila —
+  # sem os beans Tracer e Meter, Rastro e DuracaoDaExtracao ficam sem injecao. O sampler
+  # `always_off` esbarra em dois bloqueios: ele so teria efeito com o SDK LIGADO (que devolveria
+  # o exportador, o custo que este bloco existe para tirar), e a propriedade tambem e fixada no
+  # build — passada em runtime, o Quarkus recusa em voz alta. O que funcionaria e uma segunda
+  # leva de imagens so para o experimento, e o ADR 0004 recusa o preco.
+  # Ver docs/adr/0004-camada-de-observabilidade.md.
+  #
+  # `QUARKUS_OTEL_SDK_DISABLED`, e nao um override de canal ou de perfil: e a chave que o
+  # proprio Quarkus expoe para calar os tres sinais de uma vez.
+  # Override de Compose por variavel de ambiente e deliberado e revisado junto do arquivo que
+  # o declara — a ressalva que o AGENTS.md faz sobre o limite do teste arquitetural.
   extracao:
     environment:
       # Ticket 029, modo `mata-publicacao`: sobrescreve o canal de saida `extracao-falhou`
@@ -28,6 +85,7 @@ services:
       # e inventa um canal extracao sem connector, derrubando o boot.
       - FIAPX_EXTRACAO_FALHOU_EXCHANGE_NAME
       - FIAPX_EXTRACAO_FALHOU_EXCHANGE_DECLARE
+      - QUARKUS_OTEL_SDK_DISABLED=true
     deploy:
       replicas: ${FIAPX_EXTRACAO_REPLICAS:-4}
       resources:
@@ -38,9 +96,18 @@ services:
           cpus: "${FIAPX_EXTRACAO_CPUS:-2}"
 
   videos:
+    environment:
+      QUARKUS_OTEL_SDK_DISABLED: "true"
     ports: !override []
     deploy:
       replicas: ${FIAPX_VIDEOS_REPLICAS:-1}
+
+  # So aparece neste overlay por causa do SDK: o `notificacao` nao tem parametro de
+  # experimento nenhum, mas nao pode ser o unico dos tres a continuar exportando durante a
+  # medicao.
+  notificacao:
+    environment:
+      QUARKUS_OTEL_SDK_DISABLED: "true"
 
   # So existe neste overlay — a demo da banca fala com o `videos` direto. O entrypoint gera o
   # nginx.conf em runtime porque o numero de replicas so existe em runtime: ver

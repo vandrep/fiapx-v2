@@ -106,6 +106,47 @@ services:
       timeout: 5s
       retries: 10
 
+  # Camada de observabilidade (ticket 058, destino redesenhado em 06/09/2026). Um container
+  # so, com Collector + Prometheus + Tempo + Loki + Grafana. Cinco pecas separadas dariam a
+  # mesma coisa por cinco vezes o YAML e a RAM; o custo desta escolha e que a imagem e
+  # declaradamente de DEMONSTRACAO, nao de producao — o que casa com um destino que e uma demo
+  # em Compose, e esta escrito em `docs/arquitetura.md` § Limitacoes conhecidas.
+  #
+  # TRES propriedades que este bloco garante, e que sao o ponto do ticket:
+  #
+  #   1. Nenhum servico de negocio tem `depends_on` para ca, e nada aqui entra no caminho de
+  #      boot deles. Observabilidade que derruba o sistema observado troca uma camada de
+  #      diagnostico por uma causa nova de indisponibilidade. O `smoke.sh` prova isso
+  #      derrubando este container e verificando que o ciclo do Video continua inteiro.
+  #   2. Sem volume nomeado, de proposito: a retencao e efemera e o historico morre no `down`.
+  #      Volume sem teto na maquina de quem avalia e pior que perder historico — e o valor
+  #      forense aqui dura o que durar o `up`.
+  #   3. So a porta do Grafana (3000) e publicada. As de Prometheus (9090), Tempo (3200) e
+  #      OTLP (4317/4318) ficam so na rede do Compose: quem consulta e o Grafana, e os
+  #      servicos exportam por dentro.
+  #
+  # Sem credencial na tabela do README porque a imagem sobe o Grafana com acesso anonimo e
+  # papel Admin (`GF_AUTH_ANONYMOUS_ENABLED` default `true` no `run-grafana.sh` dela). Escrever
+  # configuracao de autenticacao para uma stack efemera de demonstracao seria custo sem
+  # comprador — e cada segundo de login sai do orcamento de 10 minutos do video.
+  observabilidade:
+    image: grafana/otel-lgtm:0.32.1
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./docker/observabilidade/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro
+      # O Grafana desta imagem roda com cwd em `/otel-lgtm/grafana` e le provisionamento
+      # relativo a ele — nao em `/data/grafana`, que so guarda dados e plugins.
+      - ./docker/observabilidade/alertas.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/alertas.yaml:ro
+    # `test -f /tmp/ready`, e nao um `wget` na porta do Grafana: a imagem nao traz `wget` nem
+    # `curl`, e cria `/tmp/ready` quando as cinco pecas terminaram de subir — e a marca de
+    # prontidao que ela propria publica, e cobre o conjunto, nao so o Grafana.
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   videos:
     image: ghcr.io/vandrep/fiapx-videos:latest
     environment:
@@ -149,6 +190,37 @@ services:
       MINIO_SECRET_KEY: minioadmin
     volumes:
       - fiapx-extracao-scratch:/var/fiapx/extracao
+    # Duas replicas, e nao uma (ticket 049). O primeiro requisito do enunciado e processar
+    # mais de um video ao mesmo tempo, e ate aqui a demo o exercia com uma replica so e
+    # `max-outstanding-messages=1` — um video por vez, concorrencia so no overlay de carga,
+    # que e instrumento de medicao e nao a stack que o README manda subir.
+    #
+    # Por replicas, e nao por mensagens em voo: o prefetch=1 do `extracao` protege memoria e
+    # disco (o ticket 006 mediu ate 4,4 GB de PNG numa unica Extracao), e subi-lo poria N
+    # extracoes dentro do MESMO JVM e do mesmo scratch. Competing consumers da a mesma
+    # concorrencia sem tocar nessa garantia: cada replica continua pegando uma Extracao por
+    # vez. E o desenho que `docs/arquitetura.md` § Escalar ja descrevia — o que faltava era a
+    # demo exerce-lo.
+    #
+    # Duas e o menor N que demonstra o requisito, e o ponto medido com eficiencia de escala
+    # 0,99 (ticket 026, 2,96 -> 5,87 Video/min). Para ver mais, a mesma variavel que o overlay
+    # de carga ja usava: `FIAPX_EXTRACAO_REPLICAS=4 docker compose up -d`.
+    #
+    # Duas coisas MUDAM com a replica extra, e nenhuma delas e o que o prefetch protegia
+    # (ticket 049, condicao 3):
+    #
+    #   1. O `fiapx-extracao-scratch` e um volume so, montado nas duas: o pior caso de disco
+    #      da demo dobra, de 4,4 GB para 8,8 GB. E o preco do desenho — o ticket 041 ja deu a
+    #      cada TENTATIVA o seu diretorio dentro dele exatamente porque as replicas dividem o
+    #      volume, e a varredura de orfaos com gate por idade (ticket 027) tambem nasceu ali.
+    #   2. Sem teto de CPU, cada replica dimensiona o `ffmpeg` por `availableProcessors()`,
+    #      que sem cgroup devolve o host inteiro — as duas se sobre-assinam. O 0,99 do
+    #      ticket 026 foi medido COM `cpus=2` por replica; na demo sem teto ele nao se
+    #      transfere. Aceitavel aqui porque a demo mede requisito, nao vazao: o que ela tem de
+    #      mostrar e que dois Videos sao extraidos ao mesmo tempo. Teto de CPU continua so no
+    #      overlay, que e onde se mede.
+    deploy:
+      replicas: ${FIAPX_EXTRACAO_REPLICAS:-2}
     # O terceiro dos tres numeros do ticket 035, e o unico que mora fora do JVM. O
     # DrenoDaExtracao segura o desligamento por ate `fiapx.extracao.dreno-timeout-segundos`
     # (420s) esperando a Extracao em voo terminar e dar ack, para o deploy nao gastar uma das

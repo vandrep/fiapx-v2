@@ -22,7 +22,7 @@ candidatos obvios a cortar —, se a execucao e ao vivo ou gravada de antemao (o
 precisam ser **ditos** porque nao aparecem na tela: nao perder requisicao em pico,
 escalabilidade horizontal, qualidade por testes.
 
-## Resolucao
+## Resolução
 
 [`docs/roteiro-video.md`](../../roteiro-video.md): narracao integral, palavra a palavra, com
 a lista de tomadas. Fecha em **9:19** de audio (1.352 palavras a 145 wpm), com 41 segundos de

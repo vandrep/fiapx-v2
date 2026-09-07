@@ -95,3 +95,28 @@ divergência.
   passa na fase `validate`.
 - Emenda no ADR 0002 (§ *A entidade entra no caminho de produção*) e ajuste do Javadoc de
   `VideoGateway`, que hoje descreve a assinatura antiga.
+
+## Resolução
+
+A forma decidida é a que roda em produção. `VideoGateway` ganhou `buscarPorId(UUID)` ao lado do
+`buscarPorIdEDono`, com o Javadoc dizendo que ele serve ao caminho de mensageria — que não tem
+Dono para informar — e o `ArchitectureConstraintsTest`, nas três cópias, proíbe `Resource` e
+controller HTTP de chamá-lo: a guarda de posse do [009](009-modelo-dominio-videos.md) desceu de
+estrutural para verificada, como o ticket aceitou.
+
+As três transições de `Video` devolvem `boolean` (`marcaComoIniciada`, `marcaComoConcluida`,
+`marcaComoFalha`) e são chamadas pelos três use cases de processamento, não mais só pela suíte.
+`Optional<Video>` saiu de `marcarFalha`: com o `SELECT` na frente, o use case já tem `dono`,
+`email` e `nome` para publicar `VideoFalhou`. O `UPDATE ... where estado in predecessores()`
+continua sendo quem autoriza publicar — a entidade decide, o `WHERE` confirma, e é o boolean do
+`UPDATE` que abre a publicação.
+
+Terminal para o outro terminal devolve `false` com `WARNING`, nunca exceção: sob entrega
+ao-menos-uma-vez com a DLQ sintetizando desfecho, primeiro terminal vence é a única regra sã, e
+levantar exceção mandaria uma corrida de rede para a DLQ do `videos`. O ADR 0002 foi emendado
+nesse ponto.
+
+O custo aceito — um `SELECT` a mais por evento nos três desfechos — foi pago e não medido
+isoladamente. A prova unitária das guardas só passou a valer de verdade com o
+[039](039-dubles-de-transicao-nao-guardam.md): o dublê em memória desta rodada não reprovava
+transição inválida, e por isso a suíte concordava consigo mesma.

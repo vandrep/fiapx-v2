@@ -42,7 +42,7 @@ Feche o 029, meça, e volte aqui com um número — ou remova o parâmetro.
 Uma das duas, com o motivo escrito: parâmetro removido das três camadas, ou coluna criada e
 varredura de `PROCESSANDO` justificada por medição.
 
-## Decisão
+## Resolução
 
 O parâmetro foi removido do caminho interno do `videos`: controller, command do use case,
 gateway e adapter agora carregam apenas o identificador necessário para aplicar a transição.

@@ -255,6 +255,12 @@ disco, então buscar dez mensagens de uma vez só faria uma réplica segurar tra
 ociosa, poderia estar fazendo. Já o `notificacao` usa `prefetch=10`, porque uma chamada SMTP
 é espera de rede.
 
+A stack padrão do `docker-compose.yml` sobe **duas** réplicas do `extracao` desde o
+[ticket 049](wayfinder/tickets/049-compose-da-demo-processa-em-paralelo.md): a concorrência é
+requisito do enunciado, não instrumento de medição, e antes disso ela só existia no overlay de
+carga. O que continua morando só no overlay é o `N` variável e o teto de CPU por réplica.
+`./scripts/concorrencia.sh` observa a concorrência pela borda pública, sem o overlay e sem k6.
+
 O gargalo real é o `extracao`, e é exatamente o serviço projetado para ser multiplicado. É
 também o motivo de as imagens serem publicadas para `amd64` **e** `arm64`: `ffmpeg` emulado
 inviabilizaria o serviço na máquina de quem avalia.
@@ -460,7 +466,7 @@ Fica registrado como candidato não implementado, não como conserto pendente.
 
 | Requisito | Como é atendido | Onde |
 |---|---|---|
-| Processar mais de um vídeo ao mesmo tempo | *competing consumers* no `extracao`, `prefetch=1`, réplicas independentes | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
+| Processar mais de um vídeo ao mesmo tempo | *competing consumers* no `extracao`, `prefetch=1`, réplicas independentes — e a stack padrão sobe **duas**, então o requisito é demonstrável sem overlay: `./scripts/concorrencia.sh` envia a rajada e reprova se nunca houver duas extrações no mesmo instante (ticket 049) | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
 | Não perder requisição em pico | `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit`, reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada. Escalar a borda por réplicas atrás de um proxy reduz a perda ao derrubar uma delas de 90,25% para 9,75% (ticket 028) — a ressalva que resta é que esse número não é zero | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
 | Protegido por usuário e senha | Keycloak, OIDC *bearer-only*; o dono vem do `sub` do token | [pesquisa](pesquisa/oidc-keycloak.md) |
 | Listagem de status dos vídeos do usuário | `GET /videos` paginado, escopado pelo dono; não existe consulta sem dono na interface do gateway | [contrato HTTP](contratos/http-videos.md) |
@@ -471,9 +477,19 @@ Fica registrado como candidato não implementado, não como conserto pendente.
 | Testes que garantam a qualidade | 144 testes (103 sem Docker): unitários do `core` com dublês, Cucumber pela borda, teste arquitetural, `ffmpeg` real no `extracao`, e o smoke ponta-a-ponta | [`scripts/smoke.sh`](../scripts/smoke.sh) |
 | CI/CD | GitHub Actions: `verify` e publicação das três imagens multi-arquitetura no GHCR | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) |
 
-Da stack *recomendada*, monitoramento (Prometheus/Grafana) ficou de fora conscientemente —
-veja a seção seguinte. Redis também: não há leitura repetida o bastante para justificar
-cache, e a consulta de status já é uma linha por chave primária.
+Da stack *recomendada*, monitoramento entrou — depois, e não junto. A recusa original valia
+enquanto o CI/CD era o risco; entregue o CI/CD, ela perdeu a premissa. Um container
+`grafana/otel-lgtm` sobe com a demo, fora do caminho de boot dos três serviços
+([ticket 058](wayfinder/tickets/058-piso-de-observabilidade.md)), e os três exportam log,
+métrica e trace por OTLP ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)):
+buscar um `idVideo` devolve **um** trace com os três serviços dentro, com os registros de log
+pendurados nos spans certos, e três alertas binários avaliam Estacionamento não-vazio, DLQ com
+mensagem, e fila com mensagem e zero consumidores. O que continua de fora é **painel curado e
+canal de notificação de alerta** — veja a seção seguinte. O que a camada deliberadamente não
+faz está no [ADR 0004](adr/0004-camada-de-observabilidade.md) e em *Limitações conhecidas*.
+
+Redis, esse ficou de fora mesmo: não há leitura repetida o bastante para justificar cache, e a
+consulta de status já é uma linha por chave primária.
 
 ## O que foi recusado, e por quê
 
@@ -486,7 +502,7 @@ Cada linha tem a discussão inteira no arquivo apontado.
 | **Outbox canônico** com tabela e payload | compraria *exatamente uma vez*, regime que o ADR 0001 já recusou; a tabela `video` com duas colunas marcadoras fecha as mesmas janelas sem tabela nova ([ADR 0003](adr/0003-reconciliacao-por-varredura.md)) |
 | **Kubernetes** | o enunciado aceita Compose *ou* Kubernetes; Compose garante que a demonstração roda na máquina de quem avalia, sem cluster |
 | **Módulo Maven `shared`** com os contratos | duplicar cinco records é mais honesto que acoplar três serviços por um jar; extrair depois, se doer |
-| **Prometheus + Grafana** | é stack *recomendada*, não requisito; com o prazo desta entrega, seria o primeiro a canibalizar o tempo do CI/CD, que é requisito. Health checks ficaram — e são o que o Compose usa para ordenar a subida |
+| **Painel curado no Grafana e canal de notificação de alerta** | a coleta dos três sinais entrou (tickets 058 e 059) e os três alertas avaliam; o painel e o *contact point* continuam custando sem pagar nesta entrega, e por isso a detecção não mudou ([ADR 0004](adr/0004-camada-de-observabilidade.md), e a limitação abaixo) |
 | **E2E automatizado no CI** | Compose inteiro num runner (ffmpeg + MinIO + Keycloak + RabbitMQ) é fonte de instabilidade que não acrescenta garantia; `scripts/smoke.sh` faz a mesma verificação onde ela é confiável |
 
 ## Limitações conhecidas
@@ -503,9 +519,14 @@ O que eu não defendo — apenas aceitei.
   mesmo cenário e 0 em 133 com a borda derrubada. Deixa de ser limitação; fica aqui como
   histórico porque foi a única a contrariar um requisito explícito do enunciado, e porque
   ninguém a teria encontrado sem medir.
-- **A demo sobe uma réplica só, e escalar por réplicas não zera a perda.** O
+- **A borda da demo sobe réplica única, e escalar por réplicas não zera a perda.** O
+  `extracao` da demo passou a subir com duas réplicas no
+  [ticket 049](wayfinder/tickets/049-compose-da-demo-processa-em-paralelo.md) — processar mais
+  de um vídeo ao mesmo tempo é requisito do enunciado, e até ali a stack do README o exercia
+  com uma réplica e `max-outstanding-messages=1`, isto é, um vídeo por vez. O `videos`, não: o
   [ticket 028](wayfinder/tickets/028-escala-da-borda.md) mediu N=3 réplicas atrás de um proxy
-  no overlay de carga (não no `docker-compose.yml` da demo, que segue com uma só): matar uma
+  no overlay de carga (não no `docker-compose.yml` da demo, que segue com uma só, porque
+  escalar a borda exige o proxy na frente da porta publicada): matar uma
   durante a rajada caiu de 361/400 recusados para **39/400 (9,75%)** — melhor por 9,3×, mas não
   zero, porque o proxy recusa reencaminhar um `POST` para outra réplica depois que a conexão já
   falhou esperando resposta, para não arriscar duplicar o Vídeo. A varredura do
@@ -537,9 +558,42 @@ O que eu não defendo — apenas aceitei.
   antes de entrar no consumidor, também podem ser reenfileiradas quando a assinatura é
   cancelada; o ensaio não prova zero reentregas em toda corrida de entrega. Trabalho que exceda esse teto, SIGKILL, OOM e queda de
   rede continuam podendo gastar entrega. A medição verde cobre redeploy com broker saudável.
-- **Não há observabilidade além de health check.** Sem métrica, sem tracing distribuído. Num
-  sistema assíncrono com DLQ, a primeira coisa que eu acrescentaria com mais tempo seria
-  visibilidade sobre profundidade de fila e taxa de dead-letter.
+- **Os alertas existem, mas a detecção não mudou.** As três regras do
+  [ticket 058](wayfinder/tickets/058-piso-de-observabilidade.md) avaliam continuamente e
+  guardam histórico, e nenhuma delas sai do Grafana: não há *contact point*, não há e-mail,
+  não há webhook. Um alerta disparado só é visto por quem já foi olhar — que é exatamente a
+  propriedade do health check no incidente de 06/09/2026, em que `docker ps` dizia `unhealthy`
+  por 14 minutos e ninguém perguntou. O que a camada acrescentou ali foi o **diagnóstico** (20
+  minutos de leitura de log viraram uma pergunta respondida em segundos), não a **descoberta**.
+  Fechar essa metade é configuração, não código, e continua adiada.
+- **A retenção é efêmera: o histórico morre no `docker compose down`.** A stack sobe sem volume
+  nomeado, de propósito — volume sem teto na máquina de quem avalia é pior que perder histórico.
+  A consequência é que nenhuma pergunta sobre ontem tem resposta, e a série temporal que
+  sustentaria um limiar calibrado por tendência não existe. Os três alertas serem binários e sem
+  número para calibrar não é só elegância: é o que sobra quando não há passado.
+- **A imagem da stack é declaradamente de demonstração, não de produção.** `grafana/otel-lgtm`
+  empacota Collector, Prometheus, Tempo, Loki e Grafana num container só, e o próprio projeto a
+  publica como ferramenta de desenvolvimento e teste. Ela sobe com acesso anônimo em papel
+  Admin, sem persistência e sem retenção configurada, e nada disso se leva a sério fora da demo.
+  A escolha comprou o piso inteiro por 365 MiB de RAM e 3,6 GB de imagem, num container em vez
+  de cinco; o que ela não compra é operação.
+- **A configuração medida não é a configuração entregue, e ela também não é a que os números de
+  escala mediram.** O overlay `docker-compose.carga.yml` desliga a stack (`replicas: 0`) e roda
+  os serviços com `QUARKUS_OTEL_SDK_DISABLED=true`, para não medir linearidade limitada por CPU
+  com um coletor disputando o mesmo host. O que essa configuração entrega, medido no
+  [ticket 062](wayfinder/tickets/062-a-chave-que-nao-desliga-o-sdk.md), é **um sistema
+  instrumentado sem coletor e sem exportador**: a chave desliga métrica e log de verdade, mas
+  não desliga trace — o span continua sendo gravado dentro do processo. Os números de escala
+  deste documento vêm das imagens pré-059, que não instrumentavam nada, então **uma corrida
+  futura do overlay é comparável com outra corrida do overlay, e não com eles**; a diferença
+  entre as duas configurações não está medida. Os ~5% no ciclo do Vídeo e os ~160 MiB somando os
+  três serviços ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)) medem
+  **exportar os três sinais, gravar métrica e espelhar log** — e não a gravação de span, que os
+  dois lados daquela medição pagam igual. Extrapolá-los para o regime de pico continua sendo
+  conta que ninguém fez. O 062 decidiu escrever isso em vez de corrigir:
+  nenhuma chave que pararia o span alcança um overlay de Compose, e a única forma que
+  funcionaria — uma segunda leva de imagens construída só para o experimento — está recusada no
+  [ADR 0004](adr/0004-camada-de-observabilidade.md).
 - **O fluxo entre os três serviços não roda no CI.** `./mvnw verify` testa cada serviço
   isolado; que eles conversam é verificado por `scripts/smoke.sh`, que alguém precisa rodar.
 - **O caminho de tentativas esgotadas não é testado automaticamente.** Exigiria derrubar o

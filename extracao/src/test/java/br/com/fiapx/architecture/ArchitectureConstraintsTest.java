@@ -49,10 +49,26 @@ class ArchitectureConstraintsTest {
     private static final Set<String> INTERFACE_FRAMEWORK_IMPORT_EXCEPTIONS = Set.of();
 
     private static final Pattern PACKAGE_DECLARATION = Pattern.compile("(?m)^package\\s+([a-zA-Z0-9_.]+);");
+    /**
+     * As duas listas abaixo sao <b>nominais e fechadas</b>: o que nao esta nelas passa. Foi por
+     * isso que o ticket 059 acrescentou {@code io.opentelemetry} e {@code io.micrometer} —
+     * instrumentacao e infraestrutura igual a CDI ou a JAX-RS, e sem estes dois nomes um
+     * {@code @WithSpan} num use case passaria em silencio e a regra estaria mentindo por
+     * omissao. A doutrina do ticket e que a instrumentacao mora <b>so em framework</b>: borda
+     * HTTP, dispatcher de mensagem e adapters de I/O. O {@code core} fica sem span de
+     * proposito — os spans de fronteira ja contam a historia inteira, e o {@code core} e
+     * sincrono e rapido o bastante para span ali ser ruido.
+     */
     private static final Pattern FORBIDDEN_FRAMEWORK_IMPORT = Pattern.compile(
-            "(?m)^import\\s+(io\\.quarkus|io\\.smallrye|jakarta\\.(annotation\\.security|enterprise|inject|persistence|ws\\.rs)|org\\.eclipse\\.microprofile)\\.");
+            "(?m)^import\\s+(io\\.quarkus|io\\.smallrye|io\\.opentelemetry|io\\.micrometer|jakarta\\.(annotation\\.security|enterprise|inject|persistence|ws\\.rs)|org\\.eclipse\\.microprofile)\\.");
+    /**
+     * {@code WithSpan}, {@code SpanAttribute} e {@code AddingSpanAttributes} sao do
+     * OpenTelemetry; {@code Counted} e {@code Timed} sao do Micrometer. Estao aqui alem do
+     * import porque anotacao alcanca o codigo tambem por import estatico ou por nome
+     * totalmente qualificado, e a lista de import sozinha nao os pegaria (ticket 059).
+     */
     private static final Pattern FORBIDDEN_FRAMEWORK_ANNOTATION = Pattern.compile(
-            "@(ApplicationScoped|RequestScoped|Inject|Path|GET|POST|PUT|DELETE|PATCH|Produces|Consumes|RolesAllowed|WithSession|WithTransaction|Entity|Table)\\b");
+            "@(ApplicationScoped|RequestScoped|Inject|Path|GET|POST|PUT|DELETE|PATCH|Produces|Consumes|RolesAllowed|WithSession|WithTransaction|Entity|Table|WithSpan|SpanAttribute|AddingSpanAttributes|Counted|Timed)\\b");
     private static final Pattern FRAMEWORK_IMPORT = Pattern.compile("(?m)^import\\s+br\\.com\\.fiapx\\.[a-z0-9_]+\\.framework\\.");
     private static final Pattern PUBLIC_INSTANCE_METHOD = Pattern.compile(
             "(?m)^\\s+public\\s+(?!static\\b|record\\b|class\\b|interface\\b|enum\\b)([^\\s(]+(?:<[^\\n{;()]*>)?)\\s+([a-zA-Z_$][\\w$]*)\\s*\\(");
@@ -78,6 +94,68 @@ class ArchitectureConstraintsTest {
      * em ExtracaoDeFramesGateway, nunca em processo.
      */
     private static final Pattern PROCESSO_EXTERNO = Pattern.compile("\\bnew\\s+ProcessBuilder\\b");
+    /**
+     * Interceptor de tolerancia a falhas (MicroProfile Fault Tolerance e a extensao do
+     * SmallRye) nao entra em codigo de producao aqui (ticket 061). Nao e preferencia de estilo:
+     * numa operacao verdadeiramente assincrona — e todo metodo destes tres servicos que
+     * devolve {@code CompletionStage} ou {@code Uni} e uma —, o interceptor monta
+     * {@code RememberEventLoop -> ThreadOffload} e <b>reagenda a invocacao no contexto Vert.x
+     * corrente</b>, que e o mesmo contexto em que a cadeia do chamador ja esta rodando. Quando
+     * essa cadeia so completa depois da chamada guardada, o reagendamento entra atras de quem
+     * espera por ele e nunca roda: nenhuma thread trabalha, nenhum socket abre, nenhuma
+     * retentativa dispara, nada e logado, e a mensagem fica sem ack para sempre.
+     *
+     * <p>Foi medido, e nao deduzido: com {@code @Retry} + {@code @AsynchronousNonBlocking} nas
+     * idas ao MinIO, 4 travamentos em ~60 ciclos de Video; sem eles, 0 em 90, no mesmo host e
+     * pelo mesmo roteiro ({@code scripts/carga/travamento.sh}, ticket 061).
+     *
+     * <p>O alcance da medicao, dito por inteiro: ela foi feita no {@code extracao}. Nos outros
+     * dois a regra vale por analogia estrutural — o {@code notificacao} chama de um consumidor
+     * {@code @Blocking}, que e a forma reproduzida, e o {@code videos} chama da borda HTTP, que
+     * roda sobre o mesmo tipo de contexto. Regra global porque o custo de obedece-la e um
+     * operador do Mutiny, e o de descobrir por medicao em cada servico e um travamento em
+     * producao.
+     *
+     * <p>O que substitui: os operadores do Mutiny, {@code onFailure().retry()} a frente. Eles
+     * retentam dentro da propria cadeia, sem reagendar nada em fila de ninguem — ver
+     * {@code ArquivoMinioClient} e {@code MailerEmailClient}. A extensao saiu dos tres poms
+     * junto com esta regra, entao voltar a usar as anotacoes exige reintroduzi-la de propria
+     * mao — e esbarrar aqui.
+     */
+    private static final Pattern TOLERANCIA_A_FALHAS_POR_INTERCEPTOR = Pattern.compile(
+            // Partido para a busca textual do ticket 064 nao encontrar o proprio guarda.
+            "(?m)^import\\s+(static\\s+)?(org\\.eclipse\\.microprofile\\.fault" + "tolerance"
+                    + "|io\\.smallrye\\.fault" + "tolerance)\\.");
+    private static final Pattern COMENTARIO_DE_BLOCO = Pattern.compile("(?s)/\\*.*?\\*/");
+    private static final Pattern COMENTARIO_DE_LINHA = Pattern.compile("(?m)//.*$");
+    /**
+     * A lista de import sozinha nao basta, pela mesma razao registrada em
+     * {@link #FORBIDDEN_FRAMEWORK_ANNOTATION}: anotacao alcanca o codigo tambem por nome
+     * totalmente qualificado. Esta e a lista fechada das anotacoes do MicroProfile Fault
+     * Tolerance e da extensao do SmallRye — o que nao esta nela passa, e e assim de proposito.
+     *
+     * <p>Casa contra o fonte <b>sem comentario</b> ({@link #semComentarios}), e isso nao e
+     * detalhe: os javadocs de {@code ArquivoMinioClient} e {@code MailerEmailClient} citam
+     * {@code @Retry} de proposito, para explicar por que ele saiu. Sem tirar o comentario
+     * antes de casar, esta regra reprovaria a propria explicacao dela.
+     */
+    private static final String NOMES_DE_TOLERANCIA_A_FALHAS =
+            "Retry|Asynchronous|AsynchronousNonBlocking|Timeout|Fallback"
+                    + "|CircuitBreaker|CircuitBreakerName|Bulkhead|ApplyGuard|ApplyFault" + "Tolerance"
+                    + "|RetryWhen|BeforeRetry|ExponentialBackoff|FibonacciBackoff|CustomBackoff"
+                    + "|RateLimit|BlockingGuard|NonBlockingGuard";
+    private static final Pattern TOLERANCIA_A_FALHAS_ANOTACAO = Pattern.compile(
+            "@(?:[\\w.]+\\.)?(" + NOMES_DE_TOLERANCIA_A_FALHAS + ")\\b");
+    /**
+     * A regra dos fontes nao enxerga configuracao orfa de um interceptor que ja saiu. Uma
+     * chave do MicroProfile nomeia a anotacao entre barras ({@code /Retry/}); a extensao do
+     * SmallRye tambem oferece o namespace {@code quarkus.fault-tolerance}. Ambos ficam fora
+     * do application.properties pelo mesmo motivo que barra imports e anotacoes (ticket 064).
+     */
+    private static final Pattern TOLERANCIA_A_FALHAS_CONFIGURADA = Pattern.compile(
+            "(?i)^((?:%[^.=:\\s]+\\.)?(?:(?:[^=:\\s]*/)?(?:"
+                    + NOMES_DE_TOLERANCIA_A_FALHAS
+                    + ")/|quarkus\\.fault-tolerance(?:\\.|[=:\\s]|$)))");
     /**
      * Publicar sem publish-confirms perde mensagem em silencio: o send completa quando o byte
      * sai no socket, nao quando o broker aceita, entao uma recusa do broker vira ack do
@@ -293,6 +371,25 @@ class ArchitectureConstraintsTest {
     }
 
     @Test
+    void workersNaoDevemDeclararPacoteDeBordaHttp() {
+        if (MODULO_DO_SERVICO.equals("videos")) {
+            return;
+        }
+
+        var pacoteWeb = BASE_PACKAGE + "." + MODULO_DO_SERVICO + ".framework.web";
+        var violations = javaSources().stream()
+                .filter(source -> {
+                    var pacote = packageName(source);
+                    return pacote.equals(pacoteWeb) || pacote.startsWith(pacoteWeb + ".");
+                })
+                .map(source -> source.relativePath()
+                        + ": worker sem borda HTTP nao deve declarar pacote .framework.web")
+                .toList();
+
+        assertNoViolations(violations);
+    }
+
+    @Test
     void bordaNaoPodeBuscarVideoSemDono() {
         var violations = new ArrayList<String>();
 
@@ -361,6 +458,42 @@ class ArchitectureConstraintsTest {
             }
             if (PROCESSO_EXTERNO.matcher(source.content()).find()) {
                 violations.add(source.relativePath() + ": ProcessBuilder so pode aparecer em framework");
+            }
+        }
+
+        assertNoViolations(violations);
+    }
+
+    @Test
+    void toleranciaAFalhasNaoPodeVirDeInterceptor() {
+        var violations = new ArrayList<String>();
+
+        for (SourceFile source : javaSources()) {
+            var codigo = semComentarios(source.content());
+            if (TOLERANCIA_A_FALHAS_POR_INTERCEPTOR.matcher(codigo).find()
+                    || TOLERANCIA_A_FALHAS_ANOTACAO.matcher(codigo).find()) {
+                violations.add(source.relativePath()
+                        + ": tolerancia a falhas por interceptor (@Retry, @Asynchronous*, @Timeout,"
+                        + " @Fallback, @CircuitBreaker, @Bulkhead) reagenda a chamada no contexto Vert.x"
+                        + " do chamador e pode prende-la para sempre (ticket 061); use"
+                        + " onFailure().retry() do Mutiny");
+            }
+        }
+
+        assertNoViolations(violations);
+    }
+
+    @Test
+    void toleranciaAFalhasNaoPodeSerConfigurada() {
+        var violations = new ArrayList<String>();
+        var arquivo = MODULO_DO_SERVICO + "/" + CONFIG_PROPERTIES.toString().replace('\\', '/');
+
+        for (String linha : configLines()) {
+            var matcher = TOLERANCIA_A_FALHAS_CONFIGURADA.matcher(linha);
+            if (matcher.find()) {
+                violations.add(arquivo + ": chave " + matcher.group(1)
+                        + " configura tolerancia a falhas por interceptor e"
+                        + " sobrevive sem o interceptor (ticket 064); use onFailure().retry() do Mutiny");
             }
         }
 
@@ -507,6 +640,16 @@ class ArchitectureConstraintsTest {
         if (pattern.matcher(source.content()).find()) {
             violations.add(source.relativePath() + ": " + message);
         }
+    }
+
+    /**
+     * O fonte sem javadoc, comentario de bloco e comentario de linha. Existe para as regras que
+     * julgam <b>anotacao</b>: uma anotacao citada num comentario e documentacao, e reprovar a
+     * documentacao que explica a regra e o oposto do que ela serve.
+     */
+    private static String semComentarios(String conteudo) {
+        return COMENTARIO_DE_LINHA.matcher(COMENTARIO_DE_BLOCO.matcher(conteudo).replaceAll(""))
+                .replaceAll("");
     }
 
     private static void assertNoViolations(List<String> violations) {

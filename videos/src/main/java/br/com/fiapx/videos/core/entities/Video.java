@@ -108,18 +108,15 @@ public final class Video {
         return true;
     }
 
-    public boolean marcaComoConcluida(Instant concluidaEm,
-                                      String chavePacote,
-                                      int quantidadeFrames,
-                                      long tamanhoPacoteBytes) {
+    public boolean marcaComoConcluida(ResultadoExtracao resultado) {
         if (!estado.transitaPara(EstadoVideo.CONCLUIDO)) {
             return false;
         }
         this.estado = EstadoVideo.CONCLUIDO;
-        this.finalizadoEm = concluidaEm;
-        this.chavePacote = chavePacote;
-        this.quantidadeFrames = quantidadeFrames;
-        this.tamanhoPacoteBytes = tamanhoPacoteBytes;
+        this.finalizadoEm = resultado.concluidaEm();
+        this.chavePacote = resultado.chavePacote();
+        this.quantidadeFrames = resultado.quantidadeFrames();
+        this.tamanhoPacoteBytes = resultado.tamanhoPacoteBytes();
         return true;
     }
 

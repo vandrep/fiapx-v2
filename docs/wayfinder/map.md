@@ -10,6 +10,14 @@ assíncrono resiliente, listagem de status por usuário, download do ZIP e notif
 erro — acompanhado da documentação de arquitetura, do script de banco, do repositório no
 GitHub com CI/CD e do roteiro do vídeo de até 10 minutos.
 
+**Destino redesenhado em 06/09/2026**: soma-se ao acima uma **camada de observabilidade** —
+log, métrica e trace coletados e correlacionáveis por `idVideo`, com alertas sobre as filas.
+O monitoramento estava em *Fora de escopo* desde a cartografia, recusado porque canibalizaria
+o tempo do CI/CD, que é requisito. A premissa expirou: o CI/CD está entregue (ticket 013), a
+fronteira ficou vazia e restam 23 dias. Pela regra do wayfinder, trabalho fora de escopo não
+gradua — ele só volta se o destino for redesenhado, e então como esforço novo. É o que esta
+linha faz. O que **não** entra continua fora: painel curado e canal de notificação de alerta.
+
 Este mapa carrega **decisões e execução**: as decisões de arquitetura vêm primeiro, e os
 tickets de implementação graduam da névoa conforme cada decisão fecha.
 
@@ -489,11 +497,134 @@ verificadas por teste, não são sugestão). Projeto original em
   módulos. Não vinha da rodada de arquitetura dos 029–033: saiu da revisão de código da
   implementação do 029, na mesma sessão.
 
+- [A decisão de transição roda em Java, no caminho de produção](tickets/031-decisao-de-transicao-em-java.md)
+  — `transitaPara` e os `marcaComo*` tinham zero chamadores em `src/main`: a suíte de use case
+  inteira validava uma implementação que não embarcava. Os três use cases de processamento
+  passaram a carregar o Vídeo, perguntar à entidade e só então rodar o `UPDATE ... where estado
+  in predecessores()`, que continua sendo quem autoriza publicar — a entidade decide, o `WHERE`
+  confirma. `VideoGateway` ganhou `buscarPorId(UUID)` para o caminho de mensageria, que não tem
+  Dono a informar, e o teste arquitetural das três cópias proíbe `Resource` e controller HTTP de
+  chamá-lo: a guarda de posse do [009](tickets/009-modelo-dominio-videos.md) desceu de estrutural
+  para verificada, e isso é preço, não detalhe. As três transições passaram a devolver `boolean`,
+  e `Optional<Video>` saiu de `marcarFalha`. O ADR 0002 foi emendado no ponto que importa:
+  terminal→terminal deixa de ser bug e vira corrida de rede, que devolve `false` com log e nunca
+  exceção — levantar mandaria uma corrida de rede para a DLQ do `videos`. Custo aceito: um
+  `SELECT` a mais por evento nos três desfechos.
+
+- [O ciclo da Extração mora no `extracao`, não dentro do adapter de ffmpeg](tickets/032-ciclo-da-extracao-no-extracao.md)
+  — a regra permanente contra transitória vivia num adapter de 280 linhas sem teste: eram duas
+  máquinas de estado e só uma estava modelada. A costura ficou onde estava e a **decisão**
+  atravessou: `Extracao.classificarFalhaDoFfmpeg(SinaisDoFfmpeg)` em `core/entities` recebe exit
+  code e stderr e devolve `MotivoFalha` permanente ou transitória, e a tolerância na contagem de
+  frames e o teto de duração foram junto. As tabelas de `docs/pesquisa/ffmpeg-extracao.md` e de
+  `docs/contratos/mensagens.md` § motivos deixaram de ser prosa e viraram teste tabelado, que
+  roda sem ffmpeg no classpath. O ffmpeg continua necessário para a mecânica — `ProcessBuilder`,
+  timeouts, ZIP `STORED`, `-threads` — e deixou de ser necessário para a regra.
+
+- [O `iniciadaEm` sai do caminho interno em vez de ganhar coluna](tickets/033-iniciada-em-morto.md)
+  — o instante atravessava três camadas do `videos` sem destino, e era exatamente a coluna que
+  faltaria para varrer `PROCESSANDO` preso. Das duas saídas, a escolhida foi remover: controller,
+  command, gateway e adapter carregam só o identificador necessário para aplicar a transição. O
+  campo permanece no record de mensageria dos dois serviços, porque tirá-lo seria mudança
+  incompatível de contrato — o consumidor tolerant reader desserializa e descarta na borda. Nada
+  de coluna nem de varredura nova: o [029](tickets/029-terminal-na-dlq-do-extracao.md) fechou a
+  perda silenciosa que motivava a precaução e tornou a falha residual visível no Estacionamento,
+  mas não trouxe medição que justifique reabrir o esquema, e sem esse número persistir o instante
+  criaria estado e recuperação especulativos.
+
+- [A Extração em voo é drenada antes do `SIGTERM`](tickets/035-drenar-extracao-antes-do-sigterm.md)
+  — nasceu do 030, na mesma sessão que o fechou: a leitura do código-fonte do conector e do
+  `quarkus-arc` desmentiu a premissa de que `stop_grace_period` bastasse. O observador CDI
+  cancela a assinatura `extrair-video` antes de esperar o ack, mantendo canal e publicadores
+  abertos. A ponte usa campos privados do SmallRye e **rejeita no boot** versões diferentes da
+  4.32.1; atualizar exige repetir o ensaio. Duas réplicas, 12 Vídeos de dois minutos: 12
+  concluídos, zero reentregas novas, redeploy em 4 s; antes da correção a mesma carga gastou uma
+  reentrega. Cancelamento e espera dividem os 420 s do dreno, abaixo dos 480 s do Docker. SIGKILL
+  e falhas de rede continuam fora.
+
+- [Boot corrigido e `mata-publicacao` medido pela primeira vez](tickets/038-override-de-canal-por-variavel-quebra-o-boot.md)
+  — a **presença** de `MP_MESSAGING_OUTGOING_EXTRACAO_FALHOU_*`, mesmo com os valores default,
+  derrubava o `extracao`: o traço de `extracao-falhou` volta da variável de ambiente como ponto,
+  e a enumeração do SmallRye deduzia daí um canal `extracao` sem `connector`. A saída foi
+  variáveis próprias `FIAPX_*` resolvidas por expressão no `.properties`, que preserva o nome do
+  canal sem inventar canal na enumeração — em vez de renomear o canal ou sobrescrever o
+  entrypoint da imagem. Override direto `MP_MESSAGING_OUTGOING_*` continua sujeito à ambiguidade,
+  e isso fica declarado. Com o boot de pé, o harness julgou os três critérios de verdade: quatro
+  réplicas, três envios aceitos e três Vídeos em `PROCESSANDO` (critérios 1 e 2 aprovados),
+  critério 3 **reprovado** — zero mensagens novas no estacionamento em 241 s, limite 240 s. A
+  garantia do [029](tickets/029-terminal-na-dlq-do-extracao.md) permanece pendente de
+  diagnóstico; o aceite deste ticket era chegar ao veredito, não obter três aprovações.
+
+- [O dublê de `VideoGateway` volta a guardar](tickets/039-dubles-de-transicao-nao-guardam.md)
+  — as três guardas em memória aplicam a transição do domínio à linha armazenada, e `buscarPorId`
+  devolve **cópia**: sem ela o use case movia o próprio objeto do mapa e a guarda chegava sem
+  nada para julgar, que era a raiz do defeito. O flag `proximaTransicaoMudaLinha` saiu; a corrida
+  perdida se arma por id, no instante da leitura, que é onde ela acontece de verdade — entre o
+  `SELECT` e o `UPDATE`. As três transições ganharam teste de corrida; antes só `falha` tinha, e
+  nenhum reprovava. A unicidade do e-mail do ADR 0001 volta a ser provada pela suíte unitária, e
+  não por um dublê que concordava consigo mesmo.
+
+- [O Vídeo está visível antes de o comando de Extração ser publicado](tickets/040-confirmar-video-antes-de-publicar-extracao.md)
+  — `VideoDataSourceAdapter.adicionar` abre sua própria transação e `VideosResource` não mantém
+  mais uma transação englobando a publicação: concluir a persistência passou a significar commit,
+  não flush. A corrida foi reproduzida com um consumidor lendo por **conexão própria do pool** —
+  dentro de uma transação ambiente ele conta zero linhas, sem ela conta uma —, e a sincronização
+  é o encadeamento da própria transação, sem sleep. Como `Panache.withTransaction` se **junta** a
+  uma transação ambiente, devolver `@WithTransaction` à borda reabriria o buraco sem nada ficar
+  vermelho: daí a cerca `BordaDoEnvioSemTransacaoTest`, medida por mutação. A janela oposta do
+  ADR 0003 — commit feito, publicação interrompida — ganhou prova com Postgres, MinIO e broker
+  reais, com a folga vencida envelhecendo `recebido_em` por SQL em vez de esperando.
+
+- [O scratch passou a ser por tentativa, não por Vídeo](tickets/041-isolar-espaco-por-tentativa-de-extracao.md)
+  — `prepararNovo` abre `{idVideo}-{sufixo}` atômico e `limpar` recebe o **caminho** daquela
+  tentativa, não o id: com o nome derivado só do Vídeo, "limpar a minha tentativa" e "limpar a da
+  outra réplica" eram o mesmo comando, e duas réplicas com o comando duplicado apagavam os frames
+  uma da outra sobre o volume compartilhado. Medido no Compose com duas réplicas: antes, o h264
+  válido terminou em `FALHOU`/`ARQUIVO_INVALIDO` com os dois desfechos publicados para o mesmo
+  Vídeo; depois, `CONCLUIDO` e Pacote íntegro pela borda pública, sem sobra no volume. O ensaio
+  virou `scripts/carga/duplicata-em-replicas.sh`. A varredura de órfãos do 027 ganhou precisão de
+  graça — julga tentativa, não Vídeo — e ganhou gatilho periódico (`@Scheduled`, 15 min): sem o
+  apaga-e-recria, o boot sozinho não alcança o órfão da réplica que morreu e voltou, o que foi
+  medido no volume depois do ensaio de conservação.
+
+- [Os dois workers são exercitados pela borda que têm: o RabbitMQ](tickets/042-bdd-dos-workers-pelo-rabbitmq.md)
+  — cada worker ganhou uma `BordaDeMensageria` no classpath de teste, cliente AMQP puro no papel
+  que o RestAssured cumpre nos steps do `videos`. Os cenários publicam na routing key real do
+  contrato, então roteamento, `JsonObjectPayloadConverter` e consumidor de verdade rodam em todo
+  cenário; nenhum step toca controller, use case ou gateway para disparar o comportamento sob
+  teste. Provado por mutação: apontar a routing key de entrada para o lugar errado reprova os
+  quatro cenários, e com a configuração antiga as duas quebras passariam despercebidas. Duas
+  armadilhas ficaram registradas porque o próximo autor de step erraria as duas — a corrida de
+  boot (exchange `topic` sem binding descarta em silêncio, daí o `queueDeclarePassive` antes de
+  publicar) e a fila exclusiva (o RabbitMQ 4.x barra fila transiente não exclusiva). `AGENTS.md`
+  § BDD passou a distinguir as duas bordas por serviço e a proibir endpoint criado só para teste.
+
+- [O `500` do contrato passou a existir também no OpenAPI](tickets/043-documentar-erro-interno-no-openapi.md)
+  — as quatro operações de `VideosResource` declaram `@APIResponse(responseCode = "500")` com a
+  descrição que repete, palavra por palavra, o `detail` que o `ProblemDetailMappers.ErroInterno`
+  já emitia em runtime: parafraseá-la seria a mesma dívida de tradução dupla que o contrato
+  recusa em `motivo`. O gerador só declara o caminho feliz, então status de erro só chega ao
+  Swagger por anotação. Mudança puramente aditiva. O aceite virou teste sobre o **documento
+  gerado** — `GET /q/openapi` procurando `responses.'500'` nas quatro operações —, e não sobre as
+  anotações do recurso: quem lê a API lê o Swagger, não o mapper.
+
 - [Mensagens e identidades sobrevivem à recriação da stack](tickets/044-preservar-mensagens-ao-recriar-rabbitmq.md)
   — RabbitMQ ganhou volume nomeado e hostname estável; Keycloak ganhou volume para manter
   o `sub` do dono dos Vídeos. O ensaio isolado `scripts/persistencia-rabbitmq.sh` exige
   comandos confirmados e marcas no Postgres antes do `down`, preservação da topologia
   sem os serviços ligados e conclusão dos mesmos Vídeos pela API após o `up`.
+
+- [As duas consultas da listagem são encadeadas, não combinadas](tickets/045-serializar-consultas-da-listagem.md)
+  — `listarPorDono` deixou de combinar página e contagem num `Uni.combine().all()` e passou a
+  encadeá-las por `flatMap`, uma de cada vez na mesma sessão. O contrato HTTP não mudou. **A
+  reprodução do defeito falhou, e isso está registrado no teste**: com o `Uni.combine()` original
+  a rajada de 40 requisições simultâneas passou, e também uma sonda temporária de 150 sobre 40
+  Vídeos — a corrida é *dentro* de uma requisição e cada requisição tem sessão própria, então
+  simultaneidade entre elas não abre a janela. Ou o Hibernate Reactive serializa por baixo nesta
+  versão, ou a janela não se abre por carga. Como nenhuma asserção de resultado distingue a
+  versão certa da errada, a cerca é sintática: um teste lê o `.java` do adapter e reprova
+  `Uni.combine` dentro do método. Ele guarda a forma, não a semântica — `Uni.join` passaria —, e
+  é escolha barata deliberada contra a reintrodução literal.
 
 - [O estado após a expiração é verificado pela borda](tickets/046-verificar-estado-apos-expiracao-pela-borda.md)
   — o cenário do Pacote expirado parou de ler a `VideoEntity` para afirmar que o Vídeo
@@ -511,6 +642,327 @@ verificadas por teste, não são sugestão). Projeto original em
   envio publica `recebidoEm` com nanossegundos e o `GET` publica o mesmo campo truncado em
   microssegundos pelo Postgres.
 
+- [A borda também absorve o blip do armazenamento](tickets/048-retry-no-acesso-ao-minio-pela-borda.md)
+  — o ADR 0001 dizia que o `@Retry` no adapter cobre os blips de I/O contra o MinIO, e só os
+  dois workers cumpriam. Implementado em vez de excetuado: atrás da borda síncrona não há fila
+  quorum para reentregar, então o blip que ela não absorve já virou `500` no cliente. O acesso
+  ao MinIO do `videos` ganhou o mesmo par de beans do `extracao` — `ArquivoMinioClient` com o
+  `@Retry`, `ArquivoMinioAdapter` com bucket e convenção de chave. Diferença do worker: o
+  `NoSuchKeyException` vira `Optional.empty()` **dentro** do método anotado, para a chave
+  ausente continuar `410` imediato em vez de gastar três tentativas. Quatro cenários pela
+  borda cobram os dois caminhos síncronos vezes os dois desfechos: com o blip, o envio responde
+  `202` e o download entrega o Pacote inteiro; com o armazenamento sempre fora, os dois
+  respondem `500`, com o corpo `problem+json` que o contrato prevê.
+
+- [A demo processa mais de um vídeo ao mesmo tempo](tickets/049-compose-da-demo-processa-em-paralelo.md)
+  — o primeiro requisito do enunciado só era exercido pelo overlay de carga: a stack do README
+  subia uma réplica do `extracao` com `max-outstanding-messages=1`, um vídeo por vez. Resolvido
+  por réplicas, não por mensagens em voo — o prefetch de 1 protege memória e disco de uma
+  extração de até 4,4 GB de PNG, e subi-lo poria N extrações no mesmo JVM e no mesmo scratch.
+  `deploy.replicas: ${FIAPX_EXTRACAO_REPLICAS:-2}` no Compose da demo — o ponto medido com
+  eficiência 0,99, e a mesma variável que o overlay já usava. Fica registrado o que a réplica
+  extra muda e o prefetch não protegia: o scratch é um volume só, então o pior caso de disco
+  dobra, e sem teto de CPU as duas se sobre-assinam (o 0,99 foi medido com `cpus=2`).
+  `scripts/concorrencia.sh` observa a concorrência pela borda pública — rajada de oito,
+  amostragem da listagem a cada 100 ms, critério de pelo menos dois em `PROCESSANDO` no mesmo
+  instante e por duas amostras seguidas, porque um instante isolado é indistinguível de
+  reordenação entre `extracao.iniciada` e `extracao.concluida` — e foi conferido por controle
+  negativo: com uma réplica só, ele reprova e a linha do tempo sai em escada. O smoke e o
+  ensaio de persistência contavam saúde por linha de `docker compose ps` e esperariam até o
+  timeout com duas réplicas; passaram a contar serviços distintos e containers não-saudáveis.
+
+- [A folga contra crash vale para as duas metades da varredura](tickets/050-folga-contra-crash-nas-falhas-pendentes.md)
+  — a reconciliação do ADR 0003 protegia comandos pendentes com um minuto de folga e falhas
+  pendentes com nenhuma, então uma passada que caísse sobre uma publicação de `VideoFalhou` em
+  voo republicava o evento e duplicava o e-mail. **Simetrizado**, e não registrado como
+  decisão: a janela entre gravar e publicar é a mesma dos dois lados, e documentar a ausência
+  seria inventar justificativa para um descuido. Um instante de corte por passada governa as
+  duas buscas, e o da falha é comparado com `finalizado_em`. O limite fica registrado no ADR:
+  `finalizado_em` é o instante do **evento**, não o da escrita, então sob backlog de fila a
+  folga efetiva encurta — no pior caso ela vira a de antes, zero, e o pior caso continua sendo
+  a duplicata que o ADR 0001 aceita; coluna nova pagaria migração por essa diferença. Sem
+  mudança de esquema: o índice parcial da falha já era `(finalizado_em)`. O teste que
+  reprovava antes é o gêmeo do que já existia para o comando, e o predicado novo, que é HQL e
+  nenhum dublê alcança, ganhou teste contra Postgres de verdade.
+
+- [O tipo fala o vocabulário do glossário, e cada método carrega regra](tickets/051-ciclo-da-extracao-no-glossario.md)
+  — `CicloDaExtracao` usava em código um termo que o `CONTEXT.md` não define, contra a regra do
+  `AGENTS.md`. Resolvido **pelo lado do código**: a classe virou `Extracao`, o termo que o
+  glossário já define, em vez de o glossário ganhar um verbete novo. "Ciclo" não nomeava nada
+  que a Extração já não nomeasse — a peça não modela ciclo de vida com estados próprios, ela
+  decide o desfecho de uma Extração a partir dos sinais do `ffmpeg` e do `ffprobe` —, e um
+  verbete a mais obrigaria o leitor a distinguir dois termos onde o domínio tem um. O
+  `CONTEXT.md` ficou intocado de propósito. Na mesma passada, `motivoSeSondagemFalhou(int)` e
+  `motivoAoValidarFluxoDeVideo(boolean)` saíram: eram ternário → `Optional`, sem limiar nem
+  tolerância, e viraram duas guardas explícitas no adapter, onde a precedência entre
+  `ARQUIVO_INVALIDO` e `SEM_FLUXO_DE_VIDEO` passou a ser a ordem das linhas em vez de semântica
+  de `Optional` encadeado. Ficaram na entidade os três que decidem algo: a tabela de exit codes
+  do ffmpeg, o teto de duração e a tolerância de 10% da contagem de frames. Classificação
+  idêntica, entrada por entrada. Dos dois caminhos que o unitário removido cobria, um já era
+  exercido pela borda — o cenário BDD do arquivo que não é vídeo —, e o outro,
+  `SEM_FLUXO_DE_VIDEO` na sondagem de stream, teria ficado descoberto: o cenário BDD para na
+  primeira sondagem, a de duração. A revisão o pegou, e ele ganhou teste próprio contra
+  `ffprobe` de verdade sobre um segundo de áudio sem vídeo nenhum.
+
+- [Os dados da conclusão viajam como um conceito só](tickets/052-nomear-o-resultado-da-extracao-no-videos.md)
+  — `ResultadoExtracao` (record: `concluidaEm`, `chavePacote`, `quantidadeFrames`,
+  `tamanhoPacoteBytes`) entra em `videos/core/entities` e passa a viajar inteiro pelas cinco
+  assinaturas que carregavam os quatro dados soltos, do `ExtracaoEventosConsumer` até o
+  `VideoDataSourceAdapter`. A desambiguação de `tamanhoBytes` acontece na própria borda de
+  mensageria — é onde o consumidor monta o conceito a partir do evento —, então nenhum nome
+  do caminho fica ambíguo entre o tamanho do Pacote e o do Vídeo. O contrato
+  (`framework.dispatcher.ExtracaoConcluida`) não mudou. O nome escolhido foi
+  `ResultadoExtracao`, não `Extracao`: o 051 reservou essa disputa para aqui, mas `videos` e
+  `extracao` são serviços diferentes sem módulo compartilhado, e o vocabulário do `videos` é
+  sobre o Vídeo que concluiu, não sobre a Extração em si — não havia disputa de fato.
+
+- [A forma comum aos três use cases de evento mora em `TransicaoDeVideo`](tickets/053-unificar-a-forma-dos-use-cases-de-extracao.md)
+  — classe utilitária em `core/usecases/video`, sem sufixo `UseCase.java` (mesmo padrão de
+  `PublicarVideoFalhou`): busca o Video, aplica a transição da entidade, curto-circuita
+  quando ela recusa ou o Video não existe, grava, e roda um efeito posterior opcional. Só
+  `ProcessarExtracaoFalhouUseCase` usa o efeito posterior, para publicar `VideoFalhou`; os
+  outros dois passam um no-op. A decisão de transição continua na entidade (ADR 0002); nada
+  mudou no que cada evento aceita ou recusa.
+
+- [Os nomes qualificados inline viraram import](tickets/054-nomes-qualificados-inline.md)
+  — `VideosResource` (`videos`) e `EspacoDeTrabalhoAdapter` (`extracao`) escreviam tipo,
+  anotação e utilitário por extenso (`java.net.URI`, `jakarta.ws.rs.DefaultValue`,
+  `java.util.function.Supplier`, `java.util.concurrent.CompletableFuture`) no meio do
+  código, destoando do resto dos próprios arquivos. Nenhum dos casos desambiguava tipo
+  homônimo, então todos viraram import comum; nada mais mudou.
+
+- [As quatro escolhas sem registro ganharam a frase que faltava](tickets/055-registrar-as-escolhas-fora-do-enunciado.md)
+  — nenhuma mudou de comportamento, só ficou explicada onde a banca olha. A ausência de
+  Prometheus/Grafana entrou no roteiro do vídeo (Bloco 4) como recusa deliberada, coerente
+  com o que este mapa já registra em Fora de escopo. `.claude/skills/` e `.devcontainer/`
+  ganharam um parágrafo no README (`Ferramental de agente versionado`) dizendo por que
+  vivem no repositório de entrega em vez de num `.gitignore`. E o CSS que esconde
+  `client_id`, `client_secret` e o seletor de client credentials no Authorize do Swagger
+  ganhou uma linha no README, ao lado de onde a demo já manda clicar em Authorize — o
+  comentário dentro do próprio CSS já explicava o "porquê" para quem lê código, mas
+  ninguém que só abre o repositório ou assiste ao vídeo passa por `META-INF/branding/`.
+  *Revertido em parte pelo [ticket 074](tickets/074-remover-o-ferramental-de-agente-versionado.md):
+  a metade das skills saiu do rastreamento — ver Fora de escopo. A do `.devcontainer/` vale.*
+
+- [A topologia durável existe antes do primeiro serviço subir](tickets/056-garantir-roteamento-no-primeiro-boot.md)
+  — com o broker limpo, os exchanges eram criados pelo primeiro serviço que declarasse um canal,
+  e o `videos` só dependia da saúde do RabbitMQ: uma publicação confirmada num exchange sem
+  binding podia completar sem entregar a mensagem. O Compose passou a importar no RabbitMQ a
+  topologia completa — exchanges, dead-letter exchanges, filas quorum, DLQs, argumentos de
+  entrega e todos os bindings do contrato — antes de iniciar os serviços de negócio. As
+  propriedades dos serviços continuam declarando a mesma topologia, de forma idempotente, porque
+  os Dev Services sobem um broker limpo e não leem o arquivo do Compose. O ensaio reexecutável é
+  `scripts/primeiro-boot-roteamento.sh`, que sobe broker e `videos` com os workers desligados,
+  comprova destinos e bindings pela API de management, envia um Vídeo e só então libera os
+  workers. `publish-confirms`, filas duráveis, tolerância a duplicatas e reconciliação ficaram
+  inalterados.
+
+- [O acesso ao Postgres absorve a falha transitória](tickets/057-retry-transitorio-no-postgres.md)
+  — todas as leituras, escritas, transições e consultas da reconciliação do
+  `VideoDataSourceAdapter` passam por `PostgresRetry`: três retentativas, espera de 2 s, e só
+  para falha de conexão, timeout, lock/transação abortada ou SQLSTATE transitório (`08`, `40`,
+  `53`, `57P01`). Violação permanente como `23505` vai direto ao chamador. O `Supplier<Uni<T>>` é
+  reassinado a cada tentativa, então `withSession`/`withTransaction` criam contexto novo em vez
+  de reusar a sessão que falhou — sem isso a retentativa herdaria a transação abortada.
+  `adicionar` ficou idempotente pelo UUID: confirmação incerta na primeira inserção não vira
+  Vídeo duplicado. As guardas de unicidade dos ADRs 0001/0002 e a reconciliação do ADR 0003
+  continuam onde estavam.
+
+- [O piso de observabilidade entrou, medido](tickets/058-piso-de-observabilidade.md)
+  — primeiro ticket do destino redesenhado de 06/09/2026. `grafana/otel-lgtm:0.32.1` num
+  container só, no Compose principal, fora do caminho de boot e sem volume. **Custa 365 MiB
+  de RAM** (5.814 → 7.857 → 8.222 MiB, host ocioso → demo → demo com a stack) e +23 s no `up`;
+  o custo que pesa é disco, 3,6 GB de imagem. A sobrecarga sobre o fixture de controle **não
+  se distingue do ruído** (7/6/7 s contra 6/7/6 s) — mas isso mede só competição por recurso,
+  porque os serviços ainda não exportam nada; o custo da instrumentação é do 059. As métricas
+  de fila vêm do `rabbitmq_prometheus`, que já estava habilitado, em `/metrics/detailed` (o
+  `/metrics` padrão é agregado e não tem rótulo de fila). Os três alertas avaliam, e o de
+  **fila com mensagem e zero consumidores** foi validado reproduzindo o incidente de 06/09.
+  O overlay de carga desliga a stack com `replicas: 0` — o que o 062 depois mostrou preservar
+  menos do método dos tickets 025–028 do que se supunha, porque desligar a stack e os
+  exportadores não desliga a instrumentação. Sem canal de notificação: os alertas existem,
+  **a detecção não mudou**.
+
+- [Os três sinais saem dos três serviços, costurados pelo idVideo](tickets/059-tres-sinais-nos-tres-servicos.md)
+  — buscar um `idVideo` devolve **um** trace com `fiapx-videos`, `fiapx-extracao` e
+  `fiapx-notificacao` dentro, e os logs dos três chegam ao Loki com `idVideo` como campo e o
+  `trace_id` do mesmo trace. O contexto atravessa o RabbitMQ por header AMQP; os cinco records do
+  contrato ficaram intactos. Duas coisas foram **medidas e mudaram uma decisão**: a
+  auto-instrumentação encerra o span de recebimento *antes* do método `@Incoming` rodar, então
+  sem um span nosso a publicação seguinte viraria raiz e o rastro se partiria em cada salto; e a
+  extensão da AWS, que monta o `AwsSdkTelemetry` sozinha, **não emitiu nenhum span de S3** — eu
+  havia removido os spans próprios de MinIO por causa dela e tive de devolvê-los. Uma métrica
+  própria só: `fiapx.extracao.duracao`, os 98,2% do tempo de serviço que rodam fora do JVM.
+  **Custo da observabilidade, que o 058 deixou por medir: ~5% no ciclo do Vídeo (0,56–0,59 s
+  contra 0,53–0,56 s) e ~160 MiB somando os três serviços**, com amostragem em 100% — o
+  [062](tickets/062-a-chave-que-nao-desliga-o-sdk.md) reetiquetou o que esse delta contém
+  (exportar os três sinais, gravar métrica e espelhar log; **não** gravar span, que os dois
+  lados pagam). O
+  `smoke.sh` ganhou os passos 10 e 11 — o 10 é a única prova de correlação ponta a ponta que
+  existe no repositório, e reprovou de verdade antes de a busca ser ancorada no serviço certo.
+  Deixou um defeito medido em aberto, [061](tickets/061-travamento-raro-com-o-sdk-desligado.md).
+
+- [A camada de observabilidade virou registro](tickets/060-registrar-a-camada-de-observabilidade.md)
+  — fecha a cadeia 058–060, na direção inversa do 055: lá o trabalho era registrar escolha sem
+  registro, aqui é desmentir quatro textos que a entrega tornou falsos. `docs/arquitetura.md`
+  mudou nos três pontos, e a linha da tabela de recusados passou a recusar **painel curado e
+  canal de notificação**, não monitoramento inteiro. Entraram **quatro limitações novas**, sem
+  eufemismo: a detecção não mudou (alerta sem canal é a mesma propriedade do health check no
+  incidente de 06/09), a retenção morre no `down`, a imagem da stack é de demonstração, e **a
+  configuração medida não é a entregue** — o overlay de carga desliga a observabilidade para
+  preservar o método dos tickets 025–028, então os números de escala descrevem um sistema que a
+  demo não é. **ADR 0004** responde as três perguntas que não tinham onde ser respondidas:
+  `core` sem span (com o teste endurecido, porque a lista nominal mentia por omissão), `idVideo`
+  × `trace_id`, e o overlay que desliga. `docs/contratos/mensagens.md` ganhou § Headers —
+  `traceparent` ao lado do `x-death`, corpos intactos —, e o `AGENTS.md` a regra de nomes: o que
+  o OTel emite fica como o OTel emite, o que é nosso usa o `CONTEXT.md`. O **`CONTEXT.md` não
+  mudou, e é decisão**: trace, span e travessia são vocabulário de infraestrutura, e glossário é
+  glossário. No roteiro, as 53 palavras que narravam a recusa viraram 16 de afirmação e o Bloco 2
+  ganhou o passo de trace dentro do take que já existia — 1.404 palavras, **9:41**, o mesmo teto
+  de antes. O único número novo é medido: três corridas de `smoke.sh` completo com a stack quente, 45/45/46 s.
+
+- [Uma Extração trava, raramente, com o SDK desligado](tickets/061-travamento-raro-com-o-sdk-desligado.md)
+  — a causa **não era o SDK**, e o título do ticket é o nome de uma correlação que a medição
+  desfez. Reproduzido em `scripts/carga/travamento.sh` (novo: repete ciclos com teto e, no
+  primeiro que estoura, coleta filas, *scratch* e thread dump enquanto a réplica ainda está
+  presa) e localizado por sondas: a Extração para **entre** o adapter do MinIO e a primeira
+  linha do método guardado, sem thread, sem socket, sem retentativa e sem log. É a tolerância a
+  falhas por interceptor: numa operação verdadeiramente assíncrona o SmallRye monta
+  `RememberEventLoop -> ThreadOffload` e **reagenda a chamada no contexto Vert.x do próprio
+  consumidor**, que só é liberado quando aquela chamada terminar — o reagendamento entra atrás
+  de quem espera por ele. A/B no mesmo host: **4 travamentos em ~60 ciclos com `@Retry` +
+  `@AsynchronousNonBlocking`, 0 em 90 sem eles**. A retentativa do ADR 0001 passou a ser
+  `onFailure().retry()` do Mutiny nos três serviços — mesma contagem, mesma espera, sem
+  reagendar nada —, a extensão saiu dos três `pom.xml` e uma regra nova do
+  `ArchitectureConstraintsTest` barra o interceptor voltar. **Achado colateral, e o mais caro**:
+  `QUARKUS_OTEL_SDK_DISABLED=true` não desliga a instrumentação, só a exportação — o span
+  continua gravando. O guarda por `isRecording()` do `Rastro` nunca dispara: as duas pernas do
+  A/B do 059 eram, no código, a mesma perna, e a variável em torno da qual este ticket inteiro
+  foi escrito não existia. Segue no 062.
+
+- [Chaves órfãs de Fault Tolerance não sobrevivem à regra do 061](tickets/064-chaves-orfas-de-fault-tolerance.md)
+  — as duas configurações de `@Retry` que restavam no perfil de teste do `videos` saíram; a
+  repetição é do `onFailure().retry()` do Mutiny e seus valores vêm do código. A regra
+  arquitetural agora alcança também o `application.properties` dos três serviços e barra
+  chaves do MicroProfile e o namespace `quarkus.fault-tolerance`.
+
+- [O último nome qualificado inline saiu, e a regra fica sem guarda de build](tickets/065-ultimo-nome-qualificado-inline.md)
+  — `CompletionException` e `ExecutionException` passaram a ser importadas em `PostgresRetry`,
+  como os demais tipos do arquivo. A regra continua sendo convenção de revisão, de propósito: um
+  teste baseado só na presença de nome qualificado inline daria falso positivo quando dois tipos
+  homônimos de pacotes diferentes precisassem coexistir no mesmo arquivo, e distinguir esse caso
+  legítimo exigiria resolução semântica completa — complexidade permanente no teste arquitetural
+  em troca de uma preferência de legibilidade, sem efeito de comportamento ou arquitetura.
+
+- [O adapter de ffmpeg não esconde diferença atrás de Middle Man nem bandeira](tickets/066-middle-man-e-bandeira-no-adapter-de-ffmpeg.md)
+  — `falhaPermanente(...)` saiu e todos os pontos constroem a exceção diretamente. Os dois
+  wrappers de execução e `capturarStdout` também saíram: um único `executar(...)` redireciona,
+  aguarda e lê stdout e stderr. A classificação de falha permanente ou transitória pelo exit
+  code ficou intacta.
+
+- [O overlay de carga mede um sistema instrumentado, sem coletor](tickets/062-a-chave-que-nao-desliga-o-sdk.md)
+  — a decisão que o 061 deixou aberta. Ele fica **como está** e passa a declarar o que mede, das
+  três saídas possíveis a única que existe: nenhuma chave que pararia o span alcança um overlay
+  de Compose. Verificado, não suposto — `quarkus.otel.enabled=false` é fixado no build e nem
+  compila aqui (somem os beans `Tracer` e `Meter`); `otel.sdk.disabled` pelo autoconfigure é a
+  mesma configuração com outro nome; o sampler `always_off` funciona mas também é fixado no
+  build, e o runtime recusa em voz alta. A forma que funcionaria — uma segunda leva de imagens —
+  custa um artefato paralelo à demo e **ainda assim não devolveria** a comparabilidade com os
+  025–028, porque aquele código mudou desde então. O mecanismo ficou mais estreito de quebra: a
+  chave desliga métrica e log de verdade, e falha só no trace, porque o `SdkTracerProvider` não
+  tem o atalho "sem processador, vira no-op". Consequências escritas: os ~5% do 059 medem
+  exportar os três sinais, gravar métrica e espelhar log — **não** a gravação de span, que os
+  dois lados pagam —, e uma corrida do overlay só é comparável com outra corrida do overlay.
+
+- [O `Scope` do `Rastro` abre numa thread e fecha noutra](tickets/063-escopo-do-rastro-atravessa-thread.md)
+  — o risco era alcançável, e o "sem sintoma medido" do 061 era só sonda no lugar errado. Sondados
+  os dez pontos de instrumentação dos três serviços com a suíte inteira: oito abrem sobre contexto
+  duplicado, e dois não — `extracao.frames` (4 de 4 Extrações, fechando noutra thread nas 4, uma
+  delas a `InnocuousThread-1` do pool comum da JVM) e `extracao.gravar-pacote` (3 de 3, fechando na
+  mesma thread por acaso). Os dois chegam lá porque a cadeia segue na thread que completou o
+  download do MinIO; o `videos` escapa porque devolve a continuação ao contexto de chamada, e o
+  `@Scheduled` e o boot nem tocam no `Rastro`. Sintoma medido, não deduzido: `frames` e
+  `gravar-pacote` nasciam filhos de `extracao.baixar-video` — span **já encerrado**, corrente
+  porque o `close` de outra thread é ignorado em silêncio. A regra que fica: escopo só atravessa
+  fronteira assíncrona preso ao contexto duplicado do Vert.x; fora disso, abre e fecha na mesma
+  thread. Depois da troca, os dois nascem filhos de `extracao.extrair-video`.
+
+- [A cauda de ack manual tem nome local em cada serviço](tickets/067-cauda-de-ack-repetida-nos-consumidores.md)
+  — os quatro consumidores encerram o trabalho pela mesma forma nomeada: sucesso chama `ack()` e
+  falha chama `nack(falha)`. Cada serviço mantém sua própria cópia package-private em `framework`,
+  sem módulo compartilhado; no `extracao`, a mesma cópia atende o consumo normal e o da DLQ,
+  preservando o `failure-strategy=reject` que envia tentativas esgotadas ao Estacionamento.
+
+- [Workers não anunciam uma borda HTTP que não existe](tickets/068-framework-web-em-worker-sem-borda-http.md)
+  — `ExtracaoConfiguration` e `NotificacaoConfiguration` são raízes de composição CDI e moram
+  em `framework.configuration`; só o `videos`, que expõe a borda pública, mantém
+  `framework.web`. Uma guarda idêntica nos três serviços proíbe o pacote web em qualquer worker.
+
+- [A contagem da reconciliação percorre a cadeia em vez de uma célula mutável](tickets/069-celula-mutavel-na-reconciliacao.md)
+  — o `new int[1]` saiu: depois de publicar os comandos em sequência, o estágio produz o tamanho
+  da lista e o entrega ao estágio que busca e publica as falhas, e o valor compõe o mesmo
+  `Republicacoes` que o log do scheduler já consumia. Ordem, instante de corte e tamanho de lote
+  ficaram idênticos — é troca de forma, não de comportamento.
+
+- [A duplicação de implementação entre serviços é deliberada](tickets/070-duplicacao-entre-modulos-nao-registrada.md)
+  — `Rastro`, `JsonObjectPayloadConverter`, `comRepeticao` e `MotivoFalha.doCodigo` continuam
+  locais aos serviços: um módulo `shared` trocaria coincidência de implementação por acoplamento
+  de build e evolução. Não há guarda de divergência, inclusive para o `Rastro`: diferenças por
+  serviço são legítimas, e comparar só a região comum daria garantia parcial. Quem altera uma
+  regra comum inspeciona todas as cópias; os testes de cada serviço guardam o comportamento. A
+  comparação byte a byte segue exclusiva do `ArchitectureConstraintsTest`, cuja identidade é
+  invariante declarado.
+
+- [O rastreador voltou a obedecer à própria convenção](tickets/072-rastreador-contradiz-a-propria-convencao.md)
+  — as duas consultas do `TRACKER.md` se apoiam no campo `status`, e seis tickets em
+  `status: resolvido` — valor que a convenção não tem — não casavam nem a fronteira nem o
+  resolvido: sumiam das duas, invisíveis tanto para quem pergunta "o que falta?" quanto para quem
+  pergunta "o que já foi feito?". Os seis viraram `fechado` depois de conferidos contra o código,
+  um a um. A varredura foi maior do que o ticket previa, porque o levantamento dele contou por
+  amostra: eram 10 `fechado` sem `## Resolução`, não 1, e 17 sem linha aqui, não 6 — seguir a
+  lista teria fechado o ticket deixando a própria condição de aceite falsa. Sete dessas linhas já
+  existiam como texto, mas em **"Ainda não especificado"**: a fronteira anunciava como pergunta
+  aberta um trabalho já fechado (031, 032, 033, 035, 038, 039, 041). O 074 é o único `fechado`
+  cuja decisão pertence a Fora de escopo — ele foi quem pôs o ferramental de agente para fora —,
+  e ganhou linha aqui apontando para lá em vez de `label: wayfinder:fora-de-escopo`, que diria
+  que ele próprio estava fora. Fica a lição de método: a auditoria que fecha um ticket de
+  consistência tem de ser mecânica sobre os 74 arquivos, não sobre os que saltam à vista.
+
+- [O ferramental de agente sai do repositório de entrega](tickets/074-remover-o-ferramental-de-agente-versionado.md)
+  — a execução da saída que o [071](tickets/071-agents-versionado-sem-justificativa.md) deixou
+  decidida, e a única decisão desta lista cujo conteúdo mora em **Fora de escopo**, porque é lá
+  que ela pertence. `git rm -r --cached` tirou 138 caminhos do índice — `.agents/`,
+  `.claude/skills/` e `skills-lock.json` —, que entraram no `.gitignore` num bloco próprio com o
+  comentário dizendo por quê; os arquivos continuam no disco de quem trabalha aqui. No `README`,
+  "Ferramental de agente versionado" virou "Por que o `.devcontainer/` está versionado": o título
+  antigo prometia duas coisas e só uma se sustenta, e um segundo parágrafo registra o caminho
+  oposto, para que a ausência fique tão explicada quanto a presença estava. A entrada do
+  [055](tickets/055-registrar-as-escolhas-fora-do-enunciado.md) não foi apagada — ganhou a frase
+  que aponta para a reversão, porque mapa que registra decisão antiga sem dizer que ela caiu é o
+  defeito deste ticket.
+
+- [`.agents/` era intencional, e mesmo assim sai do rastreamento](tickets/071-agents-versionado-sem-justificativa.md)
+  — as três perguntas foram respondidas antes de o
+  [074](tickets/074-remover-o-ferramental-de-agente-versionado.md) executar a saída. O diretório
+  não era espelho nem artefato órfão: os 37 caminhos sob `.claude/skills/` eram symlinks (modo
+  `120000`) para `../../.agents/skills/`, e os dois entraram no mesmo commit. O ticket tratava
+  como dois conjuntos o que era um só com duas fachadas, e por isso sua opção "Sai" estava mal
+  formulada — mandar só `.agents/` para o `.gitignore` deixaria os symlinks apontando para o
+  vazio. O mantenedor removeu as 37, não só as 8 inaplicáveis: o valor estava na instalação
+  global, não no repositório de entrega. O que o ticket pedia — que nada versionado ali ficasse
+  sem explicação — foi atendido pela via oposta à que ele previa: em vez de explicar os 138
+  arquivos, a entrega deixou de rastreá-los.
+
+- [O `AGENTS.md` descreve o `conservacao.sh` de um estado que passou](tickets/073-agents-md-descreve-conservacao-de-um-estado-que-passou.md)
+  — o § Rodar afirmava reprovação de propósito pelos três defeitos do 027, que fechou entre a
+  revisão e este ticket. Rodar era a única resposta possível; não rodou de graça, porque as
+  imagens `:latest` locais eram de um dia antes dos três últimos commits de código — o mesmo
+  gotcha que o próprio 027 já tinha registrado ("o harness mede a imagem que estiver por
+  perto"). Reconstruídas a partir do HEAD, duas rodadas sob `systemd-inhibit`: `limpo` fechou
+  400/400 em 98s sem recusa nem preso, e `mata-videos` — o modo que exercita os dois defeitos
+  de correção do 027 — aceitou 41 antes de matar o `videos` e fechou os 41 em 11s, zero preso.
+  O § Rodar perdeu a frase da reprovação esperada e passou a apontar para cá.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -527,63 +979,11 @@ verificadas por teste, não são sugestão). Projeto original em
      achou não foi vazão: foi o ADR 0002 descrevendo um desenho de duas perguntas das quais
      só uma rodava, e dois pontos sem fundo no caminho de recuperação quando o `extracao`
      cai. Os cinco tickets desta rodada saem daí, e a ordem entre eles é a ordem do risco:
-     decidir e medir a recuperação primeiro, mexer no código do `videos` depois. O 029 e o 030
-     já fecharam (ver Decisões até aqui); dos três que continuam abaixo, um ainda é decisão
-     (033), um é código testado sem chamador em produção (031) e um é código sem teste (032).
-     O 030 virou o 035, que continua a pergunta contra fonte primária: o que a sessão fechou
-     foi que a premissa original do 030 estava errada, não que o buraco fechou. -->
-
-- **[031](tickets/031-decisao-de-transicao-em-java.md) — a decisão de transição roda em Java.**
-  `transitaPara` e os `marcaComo*` têm zero chamadores em `src/main`: a suíte de use case inteira
-  valida uma implementação que não embarca. Emenda o ADR 0002 em duas frentes — a entidade entra
-  no caminho de produção, e terminal→terminal deixa de ser bug para ser corrida de rede.
-- **[032](tickets/032-ciclo-da-extracao-no-extracao.md) — o ciclo da Extração mora no
-  `extracao`.** A regra permanente contra transitória está dentro de um adapter de 280 linhas
-  sem teste. São duas máquinas de estado e só uma está modelada.
-- **[033](tickets/033-iniciada-em-morto.md) — o `iniciadaEm` descartado.** Atravessa três
-  camadas sem destino, e é exatamente a coluna que faltaria para varrer `PROCESSANDO` preso.
-  Espera o 029 para saber se o cenário sobrevive à configuração.
-
-<!-- 035 nasceu do 030, na mesma sessão de 2026-09-04 que o fechou: a leitura do código-fonte
-     do conector e do `quarkus-arc` desmentiu a premissa de que `stop_grace_period` bastasse. -->
-
-- **[035](tickets/035-drenar-extracao-antes-do-sigterm.md) — drenar a Extração em voo antes
-  do `SIGTERM`.** Concluído: o observador CDI cancela a assinatura `extrair-video` antes de
-  esperar o ack, mantendo o canal e os publicadores abertos. A ponte usa campos privados do
-  SmallRye e rejeita no boot versões diferentes da 4.32.1; atualizar exige repetir o ensaio.
-  Duas réplicas, 12 Vídeos de dois minutos: 12 concluídos, zero reentregas novas, redeploy em
-  4s; antes da correção, a mesma carga gastou uma reentrega. Cancelamento e espera dividem
-  os 420s do dreno, abaixo dos 480s do Docker. SIGKILL e falhas de rede continuam fora.
-
-- **[038](tickets/038-override-de-canal-por-variavel-quebra-o-boot.md) — boot corrigido e
-  `mata-publicacao` medido.** Overrides por variáveis próprias `FIAPX_*`, resolvidas no
-  `.properties`, preservam `extracao-falhou` sem inventar canal na enumeração do SmallRye.
-  Quatro réplicas subiram; três envios aceitos e três Vídeos em `PROCESSANDO`: critérios
-  1 e 2 aprovados. Critério 3 reprovado: zero mensagens novas no estacionamento em 241s
-  (limite 240s). A garantia do 029 permanece pendente de diagnóstico; o 038 resolve o boot
-  e permite ao harness julgar os três critérios de verdade.
-
-- **[039](tickets/039-dubles-de-transicao-nao-guardam.md) — o dublê de `VideoGateway` volta a
-  guardar.** As três guardas em memória aplicam a transição do domínio à linha armazenada, e
-  `buscarPorId` devolve cópia: sem ela o use case movia o próprio objeto do mapa e a guarda
-  chegava sem nada para julgar. O flag `proximaTransicaoMudaLinha` saiu; a corrida perdida se
-  arma por id, no instante da leitura. As três transições ganharam teste de corrida — antes só
-  `falha` tinha, e nenhum reprovava. A unicidade do e-mail do ADR 0001 volta a ser provada
-  pela suíte unitária.
-
-
-- **[041](tickets/041-isolar-espaco-por-tentativa-de-extracao.md) — o scratch passou a ser por
-  tentativa, não por Vídeo.** `prepararNovo` abre `{idVideo}-{sufixo}` atômico e `limpar`
-  recebe o caminho daquela tentativa, não o id: com o nome derivado só do Vídeo, duas réplicas
-  com o mesmo comando duplicado apagavam os frames uma da outra sobre o volume compartilhado.
-  Medido no Compose com duas réplicas: antes, o h264 válido terminou em `FALHOU`
-  /`ARQUIVO_INVALIDO` com os dois desfechos publicados para o mesmo Vídeo; depois, `CONCLUIDO`
-  e Pacote íntegro pela borda pública, sem sobra no volume. O ensaio virou script
-  (`scripts/carga/duplicata-em-replicas.sh`). A varredura de órfãos do 027 ganhou precisão de
-  graça — passa a julgar tentativa, não Vídeo — e ganhou um gatilho periódico (`@Scheduled`,
-  15 min): sem o apaga-e-recria, o boot sozinho não alcança o órfão da réplica que morreu e
-  voltou, o que foi medido no volume depois do ensaio de conservação.
-
+     decidir e medir a recuperação primeiro, mexer no código do `videos` depois. Os cinco já
+     fecharam, e as decisões estão acima: 029, 030, 031, 032 e 033. O 030 virou o 035, que
+     continuou a pergunta contra fonte primária: o que aquela sessão fechou foi que a premissa
+     original do 030 estava errada, não que o buraco fechou. O 035 fechou o dreno de verdade —
+     a entrada dele acima diz como. Esta rodada não deixou pergunta sharp em aberto. -->
 
 <!-- Recusadas nesta rodada, com o motivo, para a recusa não virar esquecimento: **banco no
      `extracao`** (tentativa como entidade durável) — reverte o `AGENTS.md`, e o Dono lê o estado
@@ -594,13 +994,33 @@ verificadas por teste, não são sugestão). Projeto original em
      — é a única mudança de contrato com defeito medido atrás dela (o 027), mas quebra o ticket 007
      e `docs/contratos/mensagens.md`; fica de fora até o contrato abrir. -->
 
+<!-- A fronteira reabriu de novo em 2026-09-05, e desta vez não por medição: por uma
+     revisão de dois eixos sobre `3a3ec95...b4672ff` — o intervalo inteiro do projeto, do
+     ticket 002 ao 047. O eixo Standards julgou o código contra o `AGENTS.md`, os contratos,
+     os ADRs e o baseline de smells; o eixo Spec julgou-o contra `docs/enunciado.md` e os
+     próprios tickets. Oito tickets saíram daí, e a ordem entre eles é a ordem do risco: os
+     dois P1 eram requisito do enunciado não exercido e ADR desmentido pelo código; os dois P2
+     são janela de reconciliação assimétrica e vocabulário ambíguo atravessando fronteira; os
+     quatro P3 são manutenção e registro. Os oito já fecharam (ver Decisões até aqui). Um
+     achado foi recusado: a cerca do 045 é sintática e `Uni.join` passaria verde, mas o
+     próprio 045 já registra isso como escolha barata deliberada, e reabrir seria refazer
+     decisão registrada. -->
+
 ## Fora de escopo
 
 <!-- ruled beyond the destination; nunca gradua -->
 
-- **Prometheus + Grafana com dashboards** — o enunciado lista monitoramento como stack
-  *recomendada*, não como requisito técnico obrigatório. Com 5,5 semanas solo, é o
-  primeiro candidato a canibalizar o tempo do CI/CD. Health checks continuam dentro.
+- **Painel curado e canal de notificação de alerta** — o que resta fora depois do redesenho
+  de destino de 06/09/2026. A recusa original era mais larga: *"Prometheus + Grafana com
+  dashboards — o enunciado lista monitoramento como stack recomendada, não como requisito
+  técnico obrigatório. Com 5,5 semanas solo, é o primeiro candidato a canibalizar o tempo do
+  CI/CD. Health checks continuam dentro."* Ela valeu enquanto o CI/CD era risco; entregue o
+  CI/CD e esvaziada a fronteira, a coleta dos três sinais entrou (tickets 058–060). Ficaram
+  de fora as duas partes que continuam custando sem pagar nesta entrega: **painel curado**
+  (a exploração ad-hoc responde as mesmas perguntas sem manutenção) e **canal de notificação
+  de alerta** (os alertas existem e guardam histórico; entregá-los por e-mail é configuração
+  de *contact point*, adiada conscientemente — a detecção não muda, e isso está registrado
+  em Limitações conhecidas).
 - **Manifests Kubernetes** — o enunciado aceita "Docker Compose **ou** Kubernetes";
   Compose garante a demo.
 - **Interface web** — o projeto original tinha HTML embutido; a demo será por Swagger UI e
@@ -612,3 +1032,11 @@ verificadas por teste, não são sugestão). Projeto original em
 - **Módulo Maven `shared`** — contrato de evento duplicado é mais honesto que acoplamento
   por jar; extrair depois se doer.
 - **Deploy em ambiente hospedado** — provisionar ambiente consome dias que o código precisa.
+- **Ferramental de agente versionado** — [ticket 074](tickets/074-remover-o-ferramental-de-agente-versionado.md)
+  tirou `.agents/`, `.claude/skills/` e `skills-lock.json` do rastreamento e os pôs no
+  `.gitignore`, revertendo a metade do [ticket 055](tickets/055-registrar-as-escolhas-fora-do-enunciado.md)
+  que os defendia no README — a outra metade, o `.devcontainer/`, continua versionada e
+  justificada. As skills são instaladas por ferramenta externa e vivem na instalação global de
+  quem trabalha aqui; 138 arquivos de processo entre o clone e o código dos três serviços
+  custavam mais atenção do avaliador do que pagavam. O que a entrega guarda é o resultado do
+  fluxo — este mapa, os tickets, os ADRs —, não a ferramenta que o produziu.

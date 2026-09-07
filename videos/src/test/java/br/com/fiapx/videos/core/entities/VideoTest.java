@@ -53,7 +53,7 @@ class VideoTest {
         var video = recebido();
 
         assertTrue(video.marcaComoIniciada());
-        assertTrue(video.marcaComoConcluida(concluidaEm, "pac.zip", 1200, 900L));
+        assertTrue(video.marcaComoConcluida(new ResultadoExtracao(concluidaEm, "pac.zip", 1200, 900L)));
 
         assertEquals(EstadoVideo.CONCLUIDO, video.estado());
         assertEquals(concluidaEm, video.finalizadoEm());
@@ -93,7 +93,7 @@ class VideoTest {
         // corrida da ExtracaoIniciada — duas filas independentes, sem ordem entre si.
         var video = recebido();
 
-        assertTrue(video.marcaComoConcluida(Instant.now(), "pac.zip", 1, 1L));
+        assertTrue(video.marcaComoConcluida(new ResultadoExtracao(Instant.now(), "pac.zip", 1, 1L)));
         assertEquals(EstadoVideo.CONCLUIDO, video.estado());
         assertEquals("pac.zip", video.chavePacote());
     }
@@ -109,7 +109,7 @@ class VideoTest {
     @Test
     void iniciarDepoisDeConcluidoNaoMudaNada() {
         var video = recebido();
-        video.marcaComoConcluida(Instant.now(), "pac.zip", 1, 1L);
+        video.marcaComoConcluida(new ResultadoExtracao(Instant.now(), "pac.zip", 1, 1L));
 
         assertFalse(video.marcaComoIniciada());
         assertEquals(EstadoVideo.CONCLUIDO, video.estado());

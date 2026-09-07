@@ -3,6 +3,7 @@ package br.com.fiapx.videos.framework.db;
 import br.com.fiapx.videos.core.entities.Dono;
 import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.entities.MotivoFalha;
+import br.com.fiapx.videos.core.entities.ResultadoExtracao;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
 import br.com.fiapx.videos.core.interfaces.presenter.dto.Pagina;
@@ -10,7 +11,9 @@ import br.com.fiapx.videos.framework.db.entities.VideoEntity;
 import io.quarkus.hibernate.reactive.panache.Panache;
 import io.quarkus.panache.common.Parameters;
 import io.quarkus.panache.common.Sort;
+import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.time.Instant;
 import java.util.List;
@@ -29,11 +32,17 @@ import java.util.concurrent.CompletableFuture;
 @ApplicationScoped
 public class VideoDataSourceAdapter implements VideoGateway {
 
+    @Inject
+    PostgresRetry postgresRetry;
+
     @Override
     public CompletableFuture<Void> adicionar(Video video) {
-        return Panache.withTransaction(() -> paraEntity(video).persist())
-                .replaceWithVoid()
-                .subscribeAsCompletionStage();
+        return postgresRetry.executar(() -> Panache.withTransaction(() ->
+                        VideoEntity.<VideoEntity>findById(video.id())
+                                .flatMap(existente -> existente == null
+                                        ? paraEntity(video).persist()
+                                        : Uni.createFrom().item(existente)))
+                .replaceWithVoid()).subscribeAsCompletionStage();
     }
 
     /**
@@ -42,19 +51,19 @@ public class VideoDataSourceAdapter implements VideoGateway {
      */
     @Override
     public CompletableFuture<Optional<Video>> buscarPorIdEDono(UUID id, Dono dono) {
-        return Panache.withSession(() ->
+        return postgresRetry.executar(() -> Panache.withSession(() ->
                         VideoEntity.<VideoEntity>find("id = ?1 and donoSub = ?2", id, dono.sub())
                                 .firstResult()
                                 .map(entity -> Optional.ofNullable(entity)
-                                        .map(VideoDataSourceAdapter::paraDominio)))
+                                        .map(VideoDataSourceAdapter::paraDominio))))
                 .subscribeAsCompletionStage();
     }
 
     @Override
     public CompletableFuture<Optional<Video>> buscarPorId(UUID id) {
-        return Panache.withSession(() -> VideoEntity.<VideoEntity>findById(id)
+        return postgresRetry.executar(() -> Panache.withSession(() -> VideoEntity.<VideoEntity>findById(id)
                         .map(entity -> Optional.ofNullable(entity)
-                                .map(VideoDataSourceAdapter::paraDominio)))
+                                .map(VideoDataSourceAdapter::paraDominio))))
                 .subscribeAsCompletionStage();
     }
 
@@ -63,7 +72,7 @@ public class VideoDataSourceAdapter implements VideoGateway {
                                                           Optional<EstadoVideo> estado,
                                                           int pagina,
                                                           int tamanho) {
-        return Panache.withSession(() -> {
+        return postgresRetry.executar(() -> Panache.withSession(() -> {
             var consulta = estado
                     .map(filtro -> VideoEntity.<VideoEntity>find(
                             "donoSub = :dono and estado = :estado",
@@ -84,7 +93,7 @@ public class VideoDataSourceAdapter implements VideoGateway {
                                     pagina,
                                     tamanho,
                                     total)));
-        }).subscribeAsCompletionStage();
+        })).subscribeAsCompletionStage();
     }
 
     /**
@@ -95,75 +104,72 @@ public class VideoDataSourceAdapter implements VideoGateway {
      */
     @Override
     public CompletableFuture<Boolean> marcarIniciada(UUID id) {
-        return Panache.withTransaction(() -> VideoEntity.update(
+        return postgresRetry.executar(() -> Panache.withTransaction(() -> VideoEntity.update(
                         "estado = ?1 where id = ?2 and estado in ?3",
                         EstadoVideo.PROCESSANDO, id, EstadoVideo.PROCESSANDO.predecessores())
-                        .map(linhasAlteradas -> linhasAlteradas > 0))
+                        .map(linhasAlteradas -> linhasAlteradas > 0)))
                 .subscribeAsCompletionStage();
     }
 
     @Override
-    public CompletableFuture<Boolean> marcarConcluida(UUID id,
-                                                       Instant concluidaEm,
-                                                       String chavePacote,
-                                                       int quantidadeFrames,
-                                                       long tamanhoPacoteBytes) {
-        return Panache.withTransaction(() -> VideoEntity.update(
+    public CompletableFuture<Boolean> marcarConcluida(UUID id, ResultadoExtracao resultado) {
+        return postgresRetry.executar(() -> Panache.withTransaction(() -> VideoEntity.update(
                         "estado = ?1, finalizadoEm = ?2, chavePacote = ?3, quantidadeFrames = ?4,"
                                 + " tamanhoPacoteBytes = ?5 where id = ?6 and estado in ?7",
-                        EstadoVideo.CONCLUIDO, concluidaEm, chavePacote, quantidadeFrames, tamanhoPacoteBytes,
+                        EstadoVideo.CONCLUIDO, resultado.concluidaEm(), resultado.chavePacote(),
+                        resultado.quantidadeFrames(), resultado.tamanhoPacoteBytes(),
                         id, EstadoVideo.CONCLUIDO.predecessores())
-                        .map(linhasAlteradas -> linhasAlteradas > 0))
+                        .map(linhasAlteradas -> linhasAlteradas > 0)))
                 .subscribeAsCompletionStage();
     }
 
     /** A guarda de unicidade do e-mail continua sendo o boolean do UPDATE (ADR 0001). */
     @Override
     public CompletableFuture<Boolean> marcarFalha(UUID id, Instant falhouEm, MotivoFalha motivo) {
-        return Panache.withTransaction(() -> VideoEntity.update(
+        return postgresRetry.executar(() -> Panache.withTransaction(() -> VideoEntity.update(
                         "estado = ?1, finalizadoEm = ?2, motivo = ?3 where id = ?4 and estado in ?5",
                         EstadoVideo.FALHOU, falhouEm, motivo, id, EstadoVideo.FALHOU.predecessores())
-                        .map(linhasAlteradas -> linhasAlteradas > 0))
+                        .map(linhasAlteradas -> linhasAlteradas > 0)))
                 .subscribeAsCompletionStage();
     }
 
     @Override
     public CompletableFuture<Void> marcarComandoPublicado(UUID id, Instant publicadoEm) {
-        return Panache.withTransaction(() -> VideoEntity.update(
+        return postgresRetry.executar(() -> Panache.withTransaction(() -> VideoEntity.update(
                         "comandoPublicadoEm = ?1 where id = ?2", publicadoEm, id))
-                .replaceWithVoid()
+                .replaceWithVoid())
                 .subscribeAsCompletionStage();
     }
 
     @Override
     public CompletableFuture<Void> marcarFalhaPublicada(UUID id, Instant publicadoEm) {
-        return Panache.withTransaction(() -> VideoEntity.update(
+        return postgresRetry.executar(() -> Panache.withTransaction(() -> VideoEntity.update(
                         "falhaPublicadaEm = ?1 where id = ?2", publicadoEm, id))
-                .replaceWithVoid()
+                .replaceWithVoid())
                 .subscribeAsCompletionStage();
     }
 
     @Override
     public CompletableFuture<List<Video>> buscarComandosPendentes(Instant recebidosAntesDe, int tamanhoDoLote) {
-        return Panache.withSession(() -> VideoEntity.<VideoEntity>find(
+        return postgresRetry.executar(() -> Panache.withSession(() -> VideoEntity.<VideoEntity>find(
                         "estado = ?1 and comandoPublicadoEm is null and recebidoEm < ?2",
                         Sort.by("recebidoEm"),
                         EstadoVideo.RECEBIDO, recebidosAntesDe)
                         .range(0, tamanhoDoLote - 1)
                         .list()
-                        .map(entidades -> entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList()))
+                        .map(entidades -> entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList())))
                 .subscribeAsCompletionStage();
     }
 
     @Override
-    public CompletableFuture<List<Video>> buscarFalhasPendentes(int tamanhoDoLote) {
-        return Panache.withSession(() -> VideoEntity.<VideoEntity>find(
-                        "estado = ?1 and falhaPublicadaEm is null",
-                        Sort.by("recebidoEm"),
-                        EstadoVideo.FALHOU)
+    public CompletableFuture<List<Video>> buscarFalhasPendentes(Instant falhadosAntesDe, int tamanhoDoLote) {
+        return postgresRetry.executar(() -> Panache.withSession(() -> VideoEntity.<VideoEntity>find(
+                        "estado = ?1 and falhaPublicadaEm is null and finalizadoEm < ?2",
+                        Sort.by("finalizadoEm"),
+                        EstadoVideo.FALHOU, falhadosAntesDe)
                         .range(0, tamanhoDoLote - 1)
                         .list()
-                        .map(entidades -> entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList()))
+                        .map(entidades -> entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList())))
                 .subscribeAsCompletionStage();
     }
 

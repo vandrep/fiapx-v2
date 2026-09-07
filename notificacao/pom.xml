@@ -31,11 +31,6 @@
             <artifactId>quarkus-mailer</artifactId>
         </dependency>
 
-        <!-- @Retry no adapter de I/O do SMTP (ADR 0001). -->
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-smallrye-fault-tolerance</artifactId>
-        </dependency>
     </dependencies>
 
     <build>

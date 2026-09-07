@@ -50,3 +50,17 @@ deveria ter morado atrás de um processo externo.
 
 A tabela exit code → `MotivoFalha` coberta por teste sem ffmpeg no classpath, e o
 `FfmpegExtracaoDeFramesAdapter` menor do que entrou.
+
+## Resolução
+
+A decisão atravessou a costura e a costura ficou onde estava.
+`Extracao.classificarFalhaDoFfmpeg(SinaisDoFfmpeg)` mora em `core/entities` e recebe exit code e
+stderr, devolvendo uma `DecisaoFalha` — `MotivoFalha` permanente ou transitória. A tolerância na
+contagem de frames e o teto de duração seguiram o mesmo caminho. O
+`FfmpegExtracaoDeFramesAdapter` continua dono da mecânica (`ProcessBuilder`, timeouts, ZIP
+`STORED`, `-threads`) e deixou de ser dono da regra.
+
+A tabela de `docs/pesquisa/ffmpeg-extracao.md` e a de `docs/contratos/mensagens.md` § motivos
+viraram teste tabelado sobre `Extracao`, que roda sem ffmpeg no classpath — era essa a condição
+de aceite. O adapter foi encolhido de novo depois, pelo
+[066](066-middle-man-e-bandeira-no-adapter-de-ffmpeg.md).

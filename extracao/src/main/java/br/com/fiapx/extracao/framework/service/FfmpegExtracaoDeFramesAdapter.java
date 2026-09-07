@@ -1,14 +1,17 @@
 package br.com.fiapx.extracao.framework.service;
 
-import br.com.fiapx.extracao.core.entities.CicloDaExtracao;
+import br.com.fiapx.extracao.core.entities.Extracao;
 import br.com.fiapx.extracao.core.entities.MotivoFalha;
 import br.com.fiapx.extracao.core.entities.ResultadoExtracao;
 import br.com.fiapx.extracao.core.exceptions.FalhaPermanenteDeExtracaoException;
 import br.com.fiapx.extracao.core.exceptions.FalhaTransitoriaDeExtracaoException;
 import br.com.fiapx.extracao.core.interfaces.gateway.ExtracaoDeFramesGateway;
+import br.com.fiapx.extracao.framework.observabilidade.DuracaoDaExtracao;
+import br.com.fiapx.extracao.framework.observabilidade.Rastro;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.infrastructure.Infrastructure;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -36,11 +39,21 @@ import java.util.zip.ZipOutputStream;
  * nao no thread que chama {@link #processar}: quem chama pode ser o thread do SDK da AWS que
  * completou o download do MinIO, nao a event loop nem o worker pool do {@code @Blocking} do
  * consumidor — o adapter nao pode confiar no contexto de quem o invoca.
+ *
+ * <p>E aqui, e so aqui, que a {@link DuracaoDaExtracao} e cronometrada (ticket 059): o span
+ * cobre o pipeline inteiro, e a metrica mede o mesmo intervalo. Este e o trecho que nenhuma
+ * auto-instrumentacao alcanca — do lado de fora do JVM, o {@code ffmpeg} e um buraco no rastro.
  */
 @ApplicationScoped
 public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
 
     private static final Logger LOG = Logger.getLogger(FfmpegExtracaoDeFramesAdapter.class);
+
+    @Inject
+    Rastro rastro;
+
+    @Inject
+    DuracaoDaExtracao duracaoDaExtracao;
 
     @ConfigProperty(name = "fiapx.extracao.timeout-ffprobe-segundos", defaultValue = "30")
     long timeoutFfprobeSegundos;
@@ -51,17 +64,38 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
     @Override
     public CompletableFuture<ResultadoExtracao> processar(Path video, Path diretorioDeTrabalho,
                                                            Path destinoZip, Duration tetoDuracao) {
-        return Uni.createFrom().item(() -> processarBloqueante(video, diretorioDeTrabalho, destinoZip, tetoDuracao))
+        return rastro.emTorno("extracao.frames", () -> Uni.createFrom()
+                .item(() -> processarCronometrado(video, diretorioDeTrabalho, destinoZip, tetoDuracao))
                 .runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
-                .subscribeAsCompletionStage();
+                .subscribeAsCompletionStage());
+    }
+
+    /**
+     * Cronometra a tentativa inteira, desfecho qualquer. O {@code finally} e o ponto: uma
+     * Extracao que estoura o teto de {@code ffmpeg} ou morre no ffprobe e justamente a que mais
+     * interessa medir, e ela sai por excecao.
+     */
+    private ResultadoExtracao processarCronometrado(Path video, Path diretorioDeTrabalho, Path destinoZip,
+                                                     Duration tetoDuracao) {
+        var comeco = System.nanoTime();
+        var concluiu = false;
+        try {
+            var resultado = processarBloqueante(video, diretorioDeTrabalho, destinoZip, tetoDuracao);
+            concluiu = true;
+            return resultado;
+        } finally {
+            duracaoDaExtracao.registrar(Duration.ofNanos(System.nanoTime() - comeco), concluiu);
+        }
     }
 
     private ResultadoExtracao processarBloqueante(Path video, Path diretorioDeTrabalho, Path destinoZip,
                                                    Duration tetoDuracao) {
         var duracao = medirDuracaoEValidarStreamDeVideo(video);
-        CicloDaExtracao.motivoAoValidarDuracao(duracao, tetoDuracao)
-                .ifPresent(motivo -> lancarFalhaPermanente(motivo,
-                        "duracao " + duracao.toMillis() + "ms; teto " + tetoDuracao.toMillis() + "ms"));
+        Extracao.motivoAoValidarDuracao(duracao, tetoDuracao)
+                .ifPresent(motivo -> {
+                    throw new FalhaPermanenteDeExtracaoException(motivo,
+                            "duracao " + duracao.toMillis() + "ms; teto " + tetoDuracao.toMillis() + "ms");
+                });
 
         extrairFrames(video, diretorioDeTrabalho);
         var frames = listarFramesOrdenados(diretorioDeTrabalho);
@@ -72,15 +106,16 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
     }
 
     private Duration medirDuracaoEValidarStreamDeVideo(Path video) {
-        var duracaoBruta = executarCapturandoStdout(timeoutFfprobeSegundos,
+        var duracaoBruta = executar(timeoutFfprobeSegundos,
                 "ffprobe", "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 video.toString());
 
-        CicloDaExtracao.motivoSeSondagemFalhou(duracaoBruta.exitCode())
-                .ifPresent(motivo -> lancarFalhaPermanente(motivo,
-                        "ffprobe saiu com " + duracaoBruta.exitCode() + ": " + resumo(duracaoBruta.stderr())));
+        if (duracaoBruta.exitCode() != 0) {
+            throw new FalhaPermanenteDeExtracaoException(MotivoFalha.ARQUIVO_INVALIDO,
+                    "ffprobe saiu com " + duracaoBruta.exitCode() + ": " + resumo(duracaoBruta.stderr()));
+        }
 
         double segundos;
         try {
@@ -91,24 +126,27 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         }
         var duracao = Duration.ofMillis((long) (segundos * 1000));
 
-        var streamDeVideo = executarCapturandoStdout(timeoutFfprobeSegundos,
+        var streamDeVideo = executar(timeoutFfprobeSegundos,
                 "ffprobe", "-v", "error",
                 "-select_streams", "v:0",
                 "-show_entries", "stream=codec_type",
                 "-of", "csv=p=0",
                 video.toString());
-        CicloDaExtracao.motivoSeSondagemFalhou(streamDeVideo.exitCode())
-                .or(() -> CicloDaExtracao.motivoAoValidarFluxoDeVideo(
-                        streamDeVideo.stdout() != null && !streamDeVideo.stdout().isBlank()))
-                .ifPresent(motivo -> lancarFalhaPermanente(motivo,
-                        "ffprobe de stream saiu com " + streamDeVideo.exitCode() + ": " + resumo(streamDeVideo.stderr())));
+        var detalheDoStream = "ffprobe de stream saiu com " + streamDeVideo.exitCode()
+                + ": " + resumo(streamDeVideo.stderr());
+        if (streamDeVideo.exitCode() != 0) {
+            throw new FalhaPermanenteDeExtracaoException(MotivoFalha.ARQUIVO_INVALIDO, detalheDoStream);
+        }
+        if (streamDeVideo.stdout() == null || streamDeVideo.stdout().isBlank()) {
+            throw new FalhaPermanenteDeExtracaoException(MotivoFalha.SEM_FLUXO_DE_VIDEO, detalheDoStream);
+        }
 
         return duracao;
     }
 
     private void extrairFrames(Path video, Path diretorioDeTrabalho) {
         var padraoSaida = diretorioDeTrabalho.resolve("frame_%04d.png").toString();
-        var resultado = executarCapturandoStderr(timeoutFfmpegSegundos,
+        var resultado = executar(timeoutFfmpegSegundos,
                 "ffmpeg", "-hide_banner", "-nostdin",
                 "-loglevel", "level+repeat+error",
                 "-threads", String.valueOf(threadsDoFfmpeg()),
@@ -146,8 +184,8 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
      */
     private RuntimeException criarFalhaDoFfmpeg(int exitCode, String stderr) {
         LOG.warnf("ffmpeg saiu com exit %d: %s", exitCode, stderr);
-        var decisao = CicloDaExtracao.classificarFalhaDoFfmpeg(
-                new CicloDaExtracao.SinaisDoFfmpeg(exitCode, stderr));
+        var decisao = Extracao.classificarFalhaDoFfmpeg(
+                new Extracao.SinaisDoFfmpeg(exitCode, stderr));
         var detalhe = "ffmpeg saiu com exit " + exitCode + ": " + resumo(stderr);
         return decisao.motivoPermanente()
                 .<RuntimeException>map(motivo -> new FalhaPermanenteDeExtracaoException(motivo, detalhe))
@@ -178,15 +216,11 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
      * absorve arredondamento do filtro {@code fps=1} nas bordas do video.
      */
     private void validarContagemDeFrames(int quantidadeFrames, Duration duracao) {
-        CicloDaExtracao.motivoAoValidarContagemDeFrames(quantidadeFrames, duracao)
+        Extracao.motivoAoValidarContagemDeFrames(quantidadeFrames, duracao)
                 .ifPresent(motivo -> {
-                    lancarFalhaPermanente(motivo,
+                    throw new FalhaPermanenteDeExtracaoException(motivo,
                             "duracao " + duracao.toMillis() + "ms, extraiu " + quantidadeFrames + " frames");
                 });
-    }
-
-    private static void lancarFalhaPermanente(MotivoFalha motivo, String detalheTecnico) {
-        throw new FalhaPermanenteDeExtracaoException(motivo, detalheTecnico);
     }
 
     /** ZIP STORED: deflate nao comprime PNG (medido, ticket 006). */
@@ -217,20 +251,12 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         }
     }
 
-    private ResultadoDoProcesso executarCapturandoStdout(long timeoutSegundos, String... comando) {
-        return executar(timeoutSegundos, true, comando);
-    }
-
-    private ResultadoDoProcesso executarCapturandoStderr(long timeoutSegundos, String... comando) {
-        return executar(timeoutSegundos, false, comando);
-    }
-
     /**
      * stdout e stderr sempre vao para arquivos, nunca para pipes lidos so depois do {@code
      * waitFor}: um processo cujo stderr enche o buffer do SO antes do pai drenar trava para
      * sempre — o classico deadlock de {@link ProcessBuilder}.
      */
-    private ResultadoDoProcesso executar(long timeoutSegundos, boolean capturarStdout, String... comando) {
+    private ResultadoDoProcesso executar(long timeoutSegundos, String... comando) {
         Path stdoutArquivo = null;
         Path stderrArquivo = null;
         try {
@@ -249,7 +275,7 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
                         comando[0] + " excedeu o timeout de " + timeoutSegundos + "s");
             }
 
-            var stdout = capturarStdout ? Files.readString(stdoutArquivo) : null;
+            var stdout = Files.readString(stdoutArquivo);
             var stderr = Files.readString(stderrArquivo);
             return new ResultadoDoProcesso(processo.exitValue(), stdout, stderr);
         } catch (IOException erro) {

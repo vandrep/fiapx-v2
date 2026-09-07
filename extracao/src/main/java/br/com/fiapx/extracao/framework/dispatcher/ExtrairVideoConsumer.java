@@ -1,5 +1,6 @@
 package br.com.fiapx.extracao.framework.dispatcher;
 
+import br.com.fiapx.extracao.framework.observabilidade.Rastro;
 import br.com.fiapx.extracao.framework.shutdown.DrenoDaExtracao;
 import br.com.fiapx.extracao.interfaces.controllers.ExtracaoController;
 import io.smallrye.common.annotation.Blocking;
@@ -11,6 +12,8 @@ import org.eclipse.microprofile.reactive.messaging.Acknowledgment;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.logging.Logger;
+
+import static br.com.fiapx.extracao.framework.dispatcher.AckManual.comAckManual;
 
 /**
  * Monta command e chama o controller, sem regra propria (docs/contratos/mensagens.md §
@@ -50,6 +53,14 @@ import org.jboss.logging.Logger;
  * fica sem ack e sem nack ate o conector fechar o canal e o broker reenfileira-la. Nackear
  * aqui seria pior, nao melhor: gasta a mesma entrega e ainda arrisca comecar o {@code
  * basicNack} no canal que o conector esta fechando.
+ *
+ * <h2>Onde o rastro entra (ticket 059)</h2>
+ *
+ * O {@link Rastro} envolve so a chamada ao controller, e nao o ack: o que interessa medir e o
+ * trabalho, e o span precisa estar corrente quando o use case publicar {@code
+ * ExtracaoIniciada}/{@code Concluida}/{@code Falhou} — e o que costura o salto de volta para o
+ * `videos` no mesmo rastro. O ack fica de fora de proposito, para nao ter como interferir na
+ * cadeia que o {@link DrenoDaExtracao} observa.
  */
 @ApplicationScoped
 public class ExtrairVideoConsumer {
@@ -61,6 +72,9 @@ public class ExtrairVideoConsumer {
 
     @Inject
     DrenoDaExtracao dreno;
+
+    @Inject
+    Rastro rastro;
 
     @Incoming("extrair-video")
     @Blocking
@@ -76,11 +90,10 @@ public class ExtrairVideoConsumer {
         // controller escaparia antes de existir cadeia onde pendurar o eventually, e o sair()
         // nunca aconteceria — deixando emVoo em 1 para sempre e fazendo todo desligamento
         // seguinte desta replica esperar o teto inteiro por uma Extracao que nao existe.
-        return Uni.createFrom().deferred(() -> Uni.createFrom().completionStage(
-                        extracaoController.processarExtrairVideo(
-                                comando.idVideo(), comando.chaveVideo(), comando.chaveDestinoPacote())))
-                .onItemOrFailure().transformToUni((ignorado, falha) -> Uni.createFrom().completionStage(
-                        falha == null ? mensagem.ack() : mensagem.nack(falha)))
+        return comAckManual(mensagem, rastro.naMensagem("extracao.extrair-video", comando.idVideo(), mensagem,
+                        () -> Uni.createFrom().deferred(() -> Uni.createFrom().completionStage(
+                                extracaoController.processarExtrairVideo(
+                                        comando.idVideo(), comando.chaveVideo(), comando.chaveDestinoPacote())))))
                 .eventually(dreno::sair);
     }
 }

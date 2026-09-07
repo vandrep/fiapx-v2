@@ -73,6 +73,16 @@ CREATE TABLE video (
             'TENTATIVAS_ESGOTADAS',
             'DESCONHECIDO'
         )
+    ),
+
+    -- Desde o ticket 050 a varredura da falha compara `finalizado_em` com o corte da folga,
+    -- e comparacao com NULL nunca e verdadeira: uma linha FALHOU sem instante ficaria
+    -- invisivel para a reconciliacao PARA SEMPRE — exatamente o buraco que ela existe para
+    -- fechar (ADR 0003). Hoje so `marcarFalha` escreve FALHOU, e sempre grava o instante;
+    -- este CHECK e o que impede que um seed, um backfill ou uma rota futura quebrem isso em
+    -- silencio, em vez de deixar a garantia dependendo de quem escreve.
+    CONSTRAINT ck_video_falhou_finalizado CHECK (
+        estado <> 'FALHOU' OR finalizado_em IS NOT NULL
     )
 );
 
@@ -91,7 +101,9 @@ CREATE INDEX ix_video_comando_pendente
     WHERE comando_publicado_em IS NULL;
 
 -- O `estado` no predicado nao e decoracao: toda linha nao-falhada tem `falha_publicada_em`
--- nula, entao sem ele este indice parcial indexaria a tabela inteira.
+-- nula, entao sem ele este indice parcial indexaria a tabela inteira. `finalizado_em` deixou
+-- de ser so ordenacao no ticket 050: a varredura da falha passou a ter a mesma folga contra o
+-- crash que a do comando, e o corte e um range sobre esta coluna.
 CREATE INDEX ix_video_falha_pendente
     ON video (finalizado_em)
     WHERE estado = 'FALHOU' AND falha_publicada_em IS NULL;

@@ -1,11 +1,16 @@
 package br.com.fiapx.notificacao.framework.dispatcher;
 
+import br.com.fiapx.notificacao.framework.observabilidade.Rastro;
 import br.com.fiapx.notificacao.interfaces.controllers.NotificacaoController;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.reactive.messaging.Acknowledgment;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
+import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.logging.Logger;
+
+import static br.com.fiapx.notificacao.framework.dispatcher.AckManual.comAckManual;
 
 /**
  * Monta command e chama o controller, sem regra propria (docs/contratos/mensagens.md §
@@ -17,6 +22,13 @@ import org.jboss.logging.Logger;
  * <p>{@code donoSub} do contrato so serve para correlacionar este log com um chamado de
  * suporte — o `core` nao tem uso de negocio para ele (ver {@code
  * EnviarNotificacaoDeFalhaUseCase}).
+ *
+ * <p>Recebe {@code Message} por causa do rastro (ticket 059): e do header AMQP que vem o
+ * contexto que liga este e-mail ao Video que o motivou, tres servicos atras. Este e o ultimo
+ * salto da travessia — sem ele, o `notificacao` seria o unico dos tres a nao aparecer na busca
+ * por {@code idVideo}. {@link Acknowledgment.Strategy#MANUAL} explicito para o ack nao depender
+ * do default do SmallRye para assinaturas com {@code Message}; o nack continua passando pelo
+ * {@code failure-strategy} do canal, sem mudanca de comportamento.
  */
 @ApplicationScoped
 public class VideoFalhouConsumer {
@@ -26,11 +38,18 @@ public class VideoFalhouConsumer {
     @Inject
     NotificacaoController notificacaoController;
 
+    @Inject
+    Rastro rastro;
+
     @Incoming("video-falhou")
-    public Uni<Void> consumir(VideoFalhou evento) {
-        LOG.infof("notificando falha do video %s (dono=%s)", evento.idVideo(), evento.donoSub());
-        return Uni.createFrom().completionStage(notificacaoController.notificarFalha(
-                evento.idVideo(), evento.emailDono(), evento.nomeArquivoOriginal(),
-                evento.codigoMotivo(), evento.ocorridoEm()));
+    @Acknowledgment(Acknowledgment.Strategy.MANUAL)
+    public Uni<Void> consumir(Message<VideoFalhou> mensagem) {
+        var evento = mensagem.getPayload();
+        return comAckManual(mensagem, rastro.naMensagem("notificacao.video-falhou", evento.idVideo(), mensagem, () -> {
+                    LOG.infof("notificando falha do video %s (dono=%s)", evento.idVideo(), evento.donoSub());
+                    return Uni.createFrom().completionStage(notificacaoController.notificarFalha(
+                            evento.idVideo(), evento.emailDono(), evento.nomeArquivoOriginal(),
+                            evento.codigoMotivo(), evento.ocorridoEm()));
+                }));
     }
 }

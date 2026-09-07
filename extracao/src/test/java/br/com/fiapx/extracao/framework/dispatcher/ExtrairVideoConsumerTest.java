@@ -1,8 +1,10 @@
 package br.com.fiapx.extracao.framework.dispatcher;
 
 import br.com.fiapx.extracao.core.usecases.extracao.ProcessarExtracaoUseCase;
+import br.com.fiapx.extracao.framework.observabilidade.Rastro;
 import br.com.fiapx.extracao.framework.shutdown.DrenoDaExtracao;
 import br.com.fiapx.extracao.interfaces.controllers.ExtracaoController;
+import io.opentelemetry.api.OpenTelemetry;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -146,6 +148,10 @@ class ExtrairVideoConsumerTest {
     private ExtrairVideoConsumer consumidorCom(Function<UUID, CompletableFuture<Void>> pipeline) {
         var consumidor = new ExtrairVideoConsumer();
         consumidor.dreno = dreno;
+        // Tracer no-op: o que este teste julga e ack, nack e dreno, nao span. Com um span que
+        // nao grava, o Rastro devolve a cadeia crua — entao o que roda aqui e exatamente a
+        // cadeia que rodaria em producao, sem o escopo em volta.
+        consumidor.rastro = new Rastro(OpenTelemetry.noop().getTracer("teste"));
         consumidor.extracaoController = new ExtracaoController(null, null) {
             @Override
             public CompletableFuture<Void> processarExtrairVideo(UUID id, String chaveVideo, String chaveDestino) {

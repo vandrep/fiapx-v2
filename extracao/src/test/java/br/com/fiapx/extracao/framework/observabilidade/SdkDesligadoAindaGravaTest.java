@@ -20,14 +20,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ul>
  *   <li>o guarda por {@code isRecording()} do {@link Rastro} nunca dispara em lugar nenhum
  *       deste repositorio, e o "caminho cru" documentado la e teorico;</li>
- *   <li>o overlay de carga nao roda "sem instrumentacao", so sem exportador — que e a decisao
- *       pendente do ticket 062.</li>
+ *   <li>o overlay de carga mede um sistema instrumentado sem coletor, e nao "codigo que nao
+ *       instrumenta nada" — e a decisao do ticket 062 e que ele fica assim e passa a dizer
+ *       isso, porque nenhuma chave que pararia o span alcanca um overlay de Compose.</li>
  * </ul>
  *
+ * <p>O 062 tambem estreitou o mecanismo: a chave desliga metrica e log de verdade (sem reader o
+ * meter vira no-op, sem processor o logger tambem), e so o trace escapa, porque o
+ * {@code SdkTracerProvider} nao tem esse atalho e o sampler nasce amostrando. E o sampler que
+ * este teste mede por tabela.
+ *
  * <p>Se um upgrade do Quarkus fizer a chave desligar o SDK de verdade, este teste reprova. Isso
- * e o ponto: e o sinal para reabrir o 062 e reescrever os comentarios que este ticket corrigiu,
- * em vez de a mudanca passar despercebida e a proxima investigacao repetir o beco sem saida
- * do 061.
+ * e o ponto: e o sinal para reabrir o 062 — cuja decisao se apoia neste comportamento — e
+ * reescrever os comentarios que o 061 corrigiu, em vez de a mudanca passar despercebida e a
+ * proxima investigacao repetir o beco sem saida.
  */
 @QuarkusTest
 class SdkDesligadoAindaGravaTest {

@@ -2,13 +2,18 @@
 
 Os três serviços exportam log, métrica e trace, e decidimos que essa camada **para na
 fronteira**: instrumentação só em `framework`, `core` sem span, contexto de trace no header e
-nunca no corpo da mensagem, e a configuração de medição de carga rodando **sem** ela. As três
+nunca no corpo da mensagem, e a configuração de medição de carga rodando **sem coletor**. As três
 decisões são de recusa, não de adoção — o que a camada não faz é o que um leitor futuro
 questionaria, e é o que não tem outro lugar onde ser respondido.
 
+A terceira dizia "sem ela" até o [ticket 062](../wayfinder/tickets/062-a-chave-que-nao-desliga-o-sdk.md),
+e a diferença de palavra é a diferença entre o que a configuração de carga promete e o que ela
+entrega: nada é exportado, mas o span continua sendo gravado dentro do processo.
+
 Decidido nos tickets [058](../wayfinder/tickets/058-piso-de-observabilidade.md) e
 [059](../wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md), registrado no
-[060](../wayfinder/tickets/060-registrar-a-camada-de-observabilidade.md). O que motivou a
+[060](../wayfinder/tickets/060-registrar-a-camada-de-observabilidade.md) e corrigido no
+[062](../wayfinder/tickets/062-a-chave-que-nao-desliga-o-sdk.md). O que motivou a
 camada é concreto: em 06/09/2026 as duas réplicas do `extracao` subiram com imagem defasada e
 morreram em laço de `PRECONDITION_FAILED`; por 14 minutos a fila teve mensagem e **zero
 consumidores**, e todo Vídeo enviado ficou em `RECEBIDO`. O dado existia (`docker ps` dizia
@@ -90,7 +95,7 @@ metadado de transporte. O W3C Trace Context existe exatamente para isso, e viaja
 lado do `x-death`, que é o mesmo tipo de coisa
 ([`docs/contratos/mensagens.md` § Headers](../contratos/mensagens.md)).
 
-## O overlay de carga desliga a observabilidade
+## O overlay de carga mede um sistema instrumentado, sem coletor
 
 `docker-compose.carga.yml` sobe a stack com `replicas: 0` e os serviços com
 `QUARKUS_OTEL_SDK_DISABLED=true`. A configuração **medida** é, portanto, diferente da
@@ -110,22 +115,90 @@ fixture de controle, em vez de varrida.
 intenção: com réplicas zero, uma stack já de pé é reduzida a zero pelo `up` do overlay; com
 profile, ela continuaria rodando ao lado da medição.
 
-O preço, que fica escrito em vez de tácito:
+### A chave desliga métrica e log, e não desliga trace
 
-- Os números de escala do projeto descrevem um sistema **sem** observabilidade. O custo dela
-  no fixture de controle é ~5% no ciclo do Vídeo e ~160 MiB somando os três serviços
-  ([ticket 059](../wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)); **extrapolar isso
-  para o regime de pico é conta que ninguém fez.**
-- `QUARKUS_OTEL_SDK_DISABLED=true` **não desliga a instrumentação**, e este parágrafo dizia
-  que sim. O [ticket 061](../wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md)
-  mediu, no Quarkus 3.31.3: com a chave ligada por variável de ambiente ou por propriedade de
-  sistema, o span continua sendo um `SdkSpan` que grava, e o `Rastro` continua abrindo escopo e
-  MDC. O que ela suprime é a **exportação**. Logo o overlay de carga não roda "sem
-  instrumentação": ele roda instrumentado, sem exportador. Os ~5% de custo medidos no ticket
-  059 comparam duas configurações que diferem menos do que se supôs, e o que fazer a respeito —
-  inclusive se a comparação com os tickets 025–028 ainda se sustenta — está no
-  [ticket 062](../wayfinder/tickets/062-a-chave-que-nao-desliga-o-sdk.md).
-- O travamento raro que o 061 carregava **não vinha do SDK**: a causa raiz é a tolerância a
+O [ticket 061](../wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md) mediu que
+`QUARKUS_OTEL_SDK_DISABLED=true` **não impede o span de gravar**, e o
+[062](../wayfinder/tickets/062-a-chave-que-nao-desliga-o-sdk.md) foi ler por quê. O mecanismo é
+mais estreito do que "a chave suprime a exportação", e a forma exata é o que sustenta a decisão
+abaixo.
+
+Quando `sdkDisabled()` é verdadeiro, o `OpenTelemetryRecorder` monta o
+`AutoConfiguredOpenTelemetrySdk` **sem** os customizadores do Quarkus, e o autoconfigure do OTel
+pula o `configureSdk` inteiro. Sobra um `OpenTelemetrySdk` construído com os três providers no
+default — e os três defaults **não são iguais**:
+
+| Provider sem nada configurado | O que ele devolve | Efeito |
+|---|---|---|
+| `SdkMeterProvider` sem reader | o meter no-op (`ExtendedDefaultMeter`) | métrica realmente desligada |
+| `SdkLoggerProvider` sem processor | `loggerBuilder` devolve o logger no-op | log realmente desligado |
+| `SdkTracerProvider` sem processor | um tracer de verdade | **span grava** |
+
+O tracer é o único dos três que não tem o atalho "sem processador, vira no-op": quem decide se o
+span grava é o **sampler**, e o default (`parentbased_always_on`) amostra. Medido no SDK 1.57.0,
+que é o do Quarkus 3.31.3: `SdkTracerProvider.builder().build()` devolve span com
+`isRecording() == true`; trocado o sampler por `always_off`, `false`.
+
+Logo o overlay hoje roda **sem métrica, sem log e sem exportador, mas com trace gravando** —
+incluindo o escopo e o MDC que o `Rastro` abre, e os spans que a auto-instrumentação monta em
+cada salto. Nada sai do processo; tudo é construído dentro dele.
+
+### A decisão: o overlay fica como está, e passa a dizer o que mede
+
+Das três saídas que o 062 pôs na mesa — deixar como está, ganhar uma forma de desligar a
+instrumentação de verdade, ou declarar que mede *com* instrumentação —, vale a terceira. Não por
+preferência: **não existe caminho suportado para "não instrumente" que um overlay de Compose
+alcance nesta versão.** Os três candidatos foram verificados, e cada um caiu por um motivo
+diferente:
+
+- **`quarkus.otel.enabled=false`** é `BUILD_AND_RUN_TIME_FIXED`, então variável de ambiente não
+  o alcança — e, pior, ele **não compila aqui**: sem os build steps do OTel somem os beans
+  `Tracer` e `Meter`, e o `Rastro` e o `DuracaoDaExtracao` reprovam com
+  `UnsatisfiedResolutionException`. Medido: `./mvnw -pl extracao package -Dquarkus.otel.enabled=false`
+  falha no `ArcProcessor#validate`.
+- **`otel.sdk.disabled` como propriedade do autoconfigure** não acrescenta nada: o
+  `OpenTelemetryRecorder` já traduz `quarkus.otel.sdk.disabled` para `otel.sdk.disabled` no
+  `propertiesSupplier`, e de todo modo o desvio dele acontece **antes**, no `if (sdkDisabled())`.
+  É a configuração que já está de pé, com outro nome.
+- **Sampler `always_off`** funciona — e é a única coisa que faria o span parar de gravar —, mas
+  `quarkus.otel.traces.sampler` também é fixado no build. Medido: subir o `extracao` empacotado
+  com `-Dquarkus.otel.traces.sampler=always_off` produz
+  `WARN: Build time property cannot be changed at runtime: quarkus.otel.traces.sampler is set to
+  'always_off' but it is build time fixed to 'always_on'`, e a corrida usa `always_on`.
+
+Sobra a única forma que funciona, e ela é o que se recusa: **uma segunda leva de imagens**,
+construída com `-Dquarkus.otel.traces.sampler=always_off` e os três `*.exporter=none` (isso
+compila, foi verificado). Ela custa um artefato paralelo aos três da demo, construído só para o
+experimento, que ninguém publica e ninguém roda em produção — e ainda assim **não devolveria a
+comparabilidade** com os tickets 025–028, porque aquelas corridas rodaram sobre um código que
+desde então mudou por outros motivos (o 061 trocou a tolerância a falhas dos adapters de I/O).
+Pagar uma imagem permanente por uma comparação que continua quebrada é troca ruim.
+
+Note que `quarkus.otel.metrics.enabled=false` tampouco serviria como meio-termo: ele também
+remove o bean `Meter` e derruba o build do `extracao`, pela mesma
+`UnsatisfiedResolutionException`. O que existe é `*.exporter=none`, que preserva os beans.
+
+### O preço, que fica escrito em vez de tácito
+
+- **O overlay mede um sistema instrumentado sem coletor**, e não "código que não instrumenta
+  nada". É esta frase que o cabeçalho do `docker-compose.carga.yml` passa a carregar.
+- **Os números de escala do projeto — 15,6 Vídeo/min, eficiência 0,88 e 0,99, mediana do 202, 0
+  presos em 400 — foram medidos noutra coisa:** as imagens pré-059, que não instrumentavam. Uma
+  corrida futura do overlay é comparável com **outra corrida do overlay**, não com aqueles
+  quatro números. A diferença entre as duas configurações é o custo de gravar span sem exportar,
+  e ele **não está medido**.
+- **O número do 059 foi reetiquetado, não remedido.** Os ~5% no ciclo do Vídeo e os ~160 MiB
+  somando os três serviços comparam *com coletor e exportador* contra *sem coletor e sem
+  exportador* — é o custo de **exportar os três sinais**, não o custo de instrumentar. Remedir
+  "com instrumentação" contra "sem" exigiria justamente a segunda leva de imagens recusada
+  acima, e o número responderia uma pergunta que nenhum requisito faz. Extrapolar qualquer um dos
+  dois para o regime de pico continua sendo conta que ninguém fez.
+- **O guarda por `isRecording()` do `Rastro` não dispara em nenhuma configuração deste
+  repositório**, e isso segue sendo verdade depois desta decisão — inclusive em `%test` e `%dev`.
+  O `SdkDesligadoAindaGravaTest` existe para que a afirmação não envelheça em silêncio: se um
+  upgrade do Quarkus fizer a chave desligar de verdade, ele reprova, e aí esta seção precisa ser
+  reescrita.
+- **O travamento raro que o 061 carregava não vinha do SDK**: a causa raiz é a tolerância a
   falhas por interceptor nos adapters de I/O, que reagendava a chamada no contexto Vert.x do
   próprio consumidor. Está fechado, e o rótulo "com o SDK desligado" no título daquele ticket
   é o nome de uma correlação que a medição desfez.

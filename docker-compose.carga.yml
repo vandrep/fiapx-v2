@@ -46,20 +46,28 @@ services:
 
   # O SDK dos tres servicos desligado, pelo mesmo motivo e no mesmo movimento (ticket 059).
   # Desligar so a stack deixaria os tres exportando para um endereco morto: cada um pagaria o
-  # custo de instrumentar — span, histograma, batch de log — e ainda o de um exportador
-  # tentando e falhando durante a rajada inteira. O que o overlay preserva e o metodo das
-  # medicoes dos tickets 025-028, e elas foram feitas com codigo que nao instrumentava nada.
+  # custo do exportador tentando e falhando durante a rajada inteira.
+  #
+  # O QUE ESTE OVERLAY MEDE, e o ticket 062 decidiu escrever assim em vez de corrigir: um
+  # sistema INSTRUMENTADO, SEM COLETOR E SEM EXPORTADOR. Nao e "codigo que nao instrumenta
+  # nada", que e o que os tickets 025-028 mediram, nas imagens pre-059. Uma corrida deste
+  # overlay e comparavel com outra corrida deste overlay — nao com os quatro numeros de escala
+  # do mapa (15,6 Video/min, eficiencia 0,88 e 0,99, mediana do 202, 0 presos em 400).
+  #
+  # Por que fica assim, medido no 062 e nao suposto: `QUARKUS_OTEL_SDK_DISABLED=true` desliga
+  # metrica e log de verdade (sem reader, o meter vira no-op; sem processor, o logger tambem),
+  # mas NAO desliga trace — o SdkTracerProvider nao tem esse atalho, e quem decide e o sampler,
+  # que nasce amostrando. E nenhuma chave que pararia o span alcanca um overlay de Compose:
+  # `quarkus.otel.enabled=false` e `quarkus.otel.traces.sampler=always_off` sao fixadas no
+  # build (a segunda reclama em voz alta ao ser passada em runtime), e a primeira nem compila
+  # aqui — sem os beans Tracer e Meter, Rastro e DuracaoDaExtracao ficam sem injecao. O que
+  # funcionaria e uma segunda leva de imagens so para o experimento, e o ADR 0004 recusa o
+  # preco. Ver docs/adr/0004-camada-de-observabilidade.md.
   #
   # `QUARKUS_OTEL_SDK_DISABLED`, e nao um override de canal ou de perfil: e a chave que o
-  # proprio Quarkus expoe para desligar os tres sinais de uma vez.
+  # proprio Quarkus expoe para calar os tres sinais de uma vez.
   # Override de Compose por variavel de ambiente e deliberado e revisado junto do arquivo que
   # o declara — a ressalva que o AGENTS.md faz sobre o limite do teste arquitetural.
-  #
-  # RESSALVA, medida no ticket 061: ela desliga a EXPORTACAO, nao a instrumentacao. O span
-  # continua nascendo e gravando, o Rastro continua abrindo escopo e MDC. O que este bloco
-  # entrega e "sem coletor e sem exportador", nao "codigo que nao instrumenta nada" — e a
-  # comparacao com as medicoes dos tickets 025-028, que rodaram sobre codigo sem instrumentacao
-  # nenhuma, e por isso mais fraca do que este comentario dizia. Ver ticket 062.
   extracao:
     environment:
       # Ticket 029, modo `mata-publicacao`: sobrescreve o canal de saida `extracao-falhou`
@@ -89,7 +97,7 @@ services:
       replicas: ${FIAPX_VIDEOS_REPLICAS:-1}
 
   # So aparece neste overlay por causa do SDK: o `notificacao` nao tem parametro de
-  # experimento nenhum, mas nao pode ser o unico dos tres a continuar instrumentado durante a
+  # experimento nenhum, mas nao pode ser o unico dos tres a continuar exportando durante a
   # medicao.
   notificacao:
     environment:

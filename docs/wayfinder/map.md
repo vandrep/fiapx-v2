@@ -629,8 +629,9 @@ verificadas por teste, não são sugestão). Projeto original em
   de fila vêm do `rabbitmq_prometheus`, que já estava habilitado, em `/metrics/detailed` (o
   `/metrics` padrão é agregado e não tem rótulo de fila). Os três alertas avaliam, e o de
   **fila com mensagem e zero consumidores** foi validado reproduzindo o incidente de 06/09.
-  O overlay de carga desliga a stack com `replicas: 0`, preservando o método dos tickets
-  025–028. Sem canal de notificação: os alertas existem, **a detecção não mudou**.
+  O overlay de carga desliga a stack com `replicas: 0` — o que o 062 depois mostrou preservar
+  menos do método dos tickets 025–028 do que se supunha, porque desligar a stack e os
+  exportadores não desliga a instrumentação. Sem canal de notificação: os alertas existem, **a detecção não mudou**.
 
 - [Os três sinais saem dos três serviços, costurados pelo idVideo](tickets/059-tres-sinais-nos-tres-servicos.md)
   — buscar um `idVideo` devolve **um** trace com `fiapx-videos`, `fiapx-extracao` e
@@ -686,19 +687,25 @@ verificadas por teste, não são sugestão). Projeto original em
   A/B do 059 eram, no código, a mesma perna, e a variável em torno da qual este ticket inteiro
   foi escrito não existia. Segue no 062.
 
-- [A chave que não desliga o SDK](tickets/062-a-chave-que-nao-desliga-o-sdk.md) — **aberto**.
-  Medido no 061: com `quarkus.otel.sdk.disabled=true` (por variável de ambiente **e** por
-  propriedade de sistema, Quarkus 3.31.3) o span continua sendo um `SdkSpan` que grava. O que
-  isso desfaz: o overlay de carga não roda "sem instrumentação", e os ~5% de custo do 059
-  compararam duas configurações que diferem menos do que se supôs. Comentários e ADR já foram
-  corrigidos; o que falta é decidir o que o overlay deve fazer e se a comparação com os
-  tickets 025–028 se sustenta.
+- [O overlay de carga mede um sistema instrumentado, sem coletor](tickets/062-a-chave-que-nao-desliga-o-sdk.md)
+  — a decisão que o 061 deixou aberta. Ele fica **como está** e passa a declarar o que mede, das
+  três saídas possíveis a única que existe: nenhuma chave que pararia o span alcança um overlay
+  de Compose. Verificado, não suposto — `quarkus.otel.enabled=false` é fixado no build e nem
+  compila aqui (somem os beans `Tracer` e `Meter`); `otel.sdk.disabled` pelo autoconfigure é a
+  mesma configuração com outro nome; o sampler `always_off` funciona mas também é fixado no
+  build, e o runtime recusa em voz alta. A forma que funcionaria — uma segunda leva de imagens —
+  custa um artefato paralelo à demo e **ainda assim não devolveria** a comparabilidade com os
+  025–028, porque aquele código mudou desde então. O mecanismo ficou mais estreito de quebra: a
+  chave desliga métrica e log de verdade, e falha só no trace, porque o `SdkTracerProvider` não
+  tem o atalho "sem processador, vira no-op". Consequências escritas: os ~5% do 059 medem o
+  custo de **exportar**, não o de instrumentar, e uma corrida do overlay só é comparável com
+  outra corrida do overlay.
 
 - [O `Scope` do `Rastro` abre numa thread e fecha noutra](tickets/063-escopo-do-rastro-atravessa-thread.md)
   — **aberto**. O 061 mandava investigá-lo junto e não investigou: a causa apareceu antes, e
   misturar as duas investigações custaria a clareza da medição. O que mudou é que a razão para
-  minimizá-lo caiu com o 062 — o escopo **é** aberto em todo perfil, porque o guarda por
-  `isRecording()` nunca dispara. Continua sem sintoma medido: nas sondas do 061 o caminho do
+  minimizá-lo caiu com o 061 e segue caída depois do 062 — o escopo **é** aberto em todo perfil,
+  porque o guarda por `isRecording()` nunca dispara. Continua sem sintoma medido: nas sondas do 061 o caminho do
   Vídeo sempre rodou sobre contexto duplicado, que é o caso seguro.
 
 ## Ainda não especificado

@@ -577,20 +577,22 @@ O que eu não defendo — apenas aceitei.
   Admin, sem persistência e sem retenção configurada, e nada disso se leva a sério fora da demo.
   A escolha comprou o piso inteiro por 365 MiB de RAM e 3,6 GB de imagem, num container em vez
   de cinco; o que ela não compra é operação.
-- **A configuração medida não é a configuração entregue.** O overlay
-  `docker-compose.carga.yml` desliga a stack (`replicas: 0`) e roda os serviços com
-  `QUARKUS_OTEL_SDK_DISABLED=true`, para preservar o método das medições dos tickets 025–028 —
-  medir linearidade limitada por CPU com um coletor disputando o mesmo host mede outra coisa.
-  O preço é honesto e fica dito: **os números de escala deste documento descrevem um sistema sem
-  observabilidade, e a demo tem uma.** O custo dela foi medido à parte, sobre o fixture de
-  controle — ~5% no ciclo do Vídeo e ~160 MiB somando os três serviços
-  ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)) —, e a extrapolação
-  desse número para o regime de pico não foi feita. Uma ressalva chegou com o
-  [ticket 061](wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md): a chave
-  `QUARKUS_OTEL_SDK_DISABLED` suprime a **exportação**, não a instrumentação — o span continua
-  gravando —, então "sem observabilidade" aqui quer dizer "sem coletor e sem exportador", e as
-  duas configurações comparadas diferem menos do que se supôs
-  ([ticket 062](wayfinder/tickets/062-a-chave-que-nao-desliga-o-sdk.md)).
+- **A configuração medida não é a configuração entregue, e ela também não é a que os números de
+  escala mediram.** O overlay `docker-compose.carga.yml` desliga a stack (`replicas: 0`) e roda
+  os serviços com `QUARKUS_OTEL_SDK_DISABLED=true`, para não medir linearidade limitada por CPU
+  com um coletor disputando o mesmo host. O que essa configuração entrega, medido no
+  [ticket 062](wayfinder/tickets/062-a-chave-que-nao-desliga-o-sdk.md), é **um sistema
+  instrumentado sem coletor e sem exportador**: a chave desliga métrica e log de verdade, mas
+  não desliga trace — o span continua sendo gravado dentro do processo. Os números de escala
+  deste documento vêm das imagens pré-059, que não instrumentavam nada, então **uma corrida
+  futura do overlay é comparável com outra corrida do overlay, e não com eles**; a diferença
+  entre as duas configurações não está medida. Os ~5% no ciclo do Vídeo e os ~160 MiB somando os
+  três serviços ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)) medem o
+  custo de **exportar** os três sinais, não o de instrumentar, e extrapolá-los para o regime de
+  pico continua sendo conta que ninguém fez. O 062 decidiu escrever isso em vez de corrigir:
+  nenhuma chave que pararia o span alcança um overlay de Compose, e a única forma que
+  funcionaria — uma segunda leva de imagens construída só para o experimento — está recusada no
+  [ADR 0004](adr/0004-camada-de-observabilidade.md).
 - **O fluxo entre os três serviços não roda no CI.** `./mvnw verify` testa cada serviço
   isolado; que eles conversam é verificado por `scripts/smoke.sh`, que alguém precisa rodar.
 - **O caminho de tentativas esgotadas não é testado automaticamente.** Exigiria derrubar o

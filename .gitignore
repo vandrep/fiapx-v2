@@ -27,3 +27,10 @@ scripts/carga/saida/
 
 # Lock de runtime do Claude Code: pid de sessao, nao configuracao
 .claude/scheduled_tasks.lock
+
+# Ferramental de agente (ticket 074): as skills sao instaladas por ferramenta externa
+# e vivem na instalacao global do usuario, nao na entrega. `skills-lock.json` e o
+# manifesto dessa instalacao; `.claude/skills/` sao symlinks para `.agents/skills/`.
+.agents/
+.claude/skills/
+skills-lock.json

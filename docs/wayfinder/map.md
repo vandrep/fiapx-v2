@@ -618,6 +618,8 @@ verificadas por teste, não são sugestão). Projeto original em
   ganhou uma linha no README, ao lado de onde a demo já manda clicar em Authorize — o
   comentário dentro do próprio CSS já explicava o "porquê" para quem lê código, mas
   ninguém que só abre o repositório ou assiste ao vídeo passa por `META-INF/branding/`.
+  *Revertido em parte pelo [ticket 074](tickets/074-remover-o-ferramental-de-agente-versionado.md):
+  a metade das skills saiu do rastreamento — ver Fora de escopo. A do `.devcontainer/` vale.*
 
 - [O piso de observabilidade entrou, medido](tickets/058-piso-de-observabilidade.md)
   — primeiro ticket do destino redesenhado de 06/09/2026. `grafana/otel-lgtm:0.32.1` num
@@ -839,3 +841,11 @@ verificadas por teste, não são sugestão). Projeto original em
 - **Módulo Maven `shared`** — contrato de evento duplicado é mais honesto que acoplamento
   por jar; extrair depois se doer.
 - **Deploy em ambiente hospedado** — provisionar ambiente consome dias que o código precisa.
+- **Ferramental de agente versionado** — [ticket 074](tickets/074-remover-o-ferramental-de-agente-versionado.md)
+  tirou `.agents/`, `.claude/skills/` e `skills-lock.json` do rastreamento e os pôs no
+  `.gitignore`, revertendo a metade do [ticket 055](tickets/055-registrar-as-escolhas-fora-do-enunciado.md)
+  que os defendia no README — a outra metade, o `.devcontainer/`, continua versionada e
+  justificada. As skills são instaladas por ferramenta externa e vivem na instalação global de
+  quem trabalha aqui; 138 arquivos de processo entre o clone e o código dos três serviços
+  custavam mais atenção do avaliador do que pagavam. O que a entrega guarda é o resultado do
+  fluxo — este mapa, os tickets, os ADRs —, não a ferramenta que o produziu.

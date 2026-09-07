@@ -225,15 +225,19 @@ são convenção, são verificadas por `ArchitectureConstraintsTest` e reprovam 
 
 O CI roda o mesmo `verify` num job só e publica as três imagens no GHCR a partir da `main`.
 
-### Ferramental de agente versionado
+### Por que o `.devcontainer/` está versionado
 
-`.claude/skills/` e `.devcontainer/` estão no repositório de entrega, não num
-`.gitignore`, porque fazem parte de como este projeto foi construído: as skills
-automatizam o fluxo de tickets em [`docs/wayfinder/`](docs/wayfinder/map.md), e o
-devcontainer fixa o toolchain (Java, Node, Docker rootless) que qualquer clone precisa
-para reproduzir `./mvnw verify` sem depender do que já está instalado em quem entrega ou
-revisa. Nenhum dos dois é pedido pelo enunciado; versionar os dois é tratar o processo de
-construção como parte reproduzível da entrega, não como andaime descartado.
+O `.devcontainer/` está no repositório de entrega, não num `.gitignore`, porque fixa o
+toolchain (Java, Node, Docker rootless) que qualquer clone precisa para reproduzir
+`./mvnw verify` sem depender do que já está instalado em quem entrega ou revisa. Ele não é
+pedido pelo enunciado; versioná-lo é tratar a reprodutibilidade do build como parte da
+entrega, não como andaime descartado.
+
+O ferramental de agente que automatiza o fluxo de tickets em
+[`docs/wayfinder/`](docs/wayfinder/map.md) seguiu o caminho oposto: ele é instalado por
+ferramenta externa, vive na instalação global de quem trabalha aqui e está no `.gitignore`.
+O que a entrega guarda é o **resultado** desse fluxo — o mapa, os tickets e os ADRs —, não a
+ferramenta que o produziu.
 
 ### Devcontainer com Docker rootless
 

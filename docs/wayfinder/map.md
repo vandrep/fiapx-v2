@@ -1007,6 +1007,12 @@ verificadas por teste, não são sugestão). Projeto original em
   do 068) ficavam sem o *porquê* que só a prosa registra. A série continua no mesmo formato,
   nomeando o ticket de origem de cada uma.
 
+- [Ramo morto no adapter de ffmpeg depois do
+  066](tickets/079-ramo-morto-no-adapter-de-ffmpeg.md) — o 066 removeu a bandeira
+  `capturarStdout`, e com ela fora `stdout()` nunca mais volta `null`; sobraram um `catch` de
+  `NullPointerException` inalcançável e uma guarda `== null` sempre falsa. Os dois saíram; a
+  classificação por exit code e por stdout vazio (`SEM_FLUXO_DE_VIDEO`) ficou idêntica.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

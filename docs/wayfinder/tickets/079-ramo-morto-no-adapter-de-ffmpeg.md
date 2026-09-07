@@ -2,8 +2,8 @@
 
 - id: 079
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
 - prioridade: P3
 
@@ -39,7 +39,19 @@ presente, possivelmente vazio. `isBlank()` continua sendo a guarda real do strea
 
 ## Critérios de aceite
 
-- [ ] Nenhum teste de `null` sobre `stdout()` no adapter
-- [ ] `NullPointerException` não aparece mais em `catch` que não possa recebê-lo
-- [ ] A classificação por exit code e por stdout vazio sai idêntica
-- [ ] `./mvnw test` verde a partir da raiz, com `ffmpeg`/`ffprobe` no `PATH`
+- [x] Nenhum teste de `null` sobre `stdout()` no adapter
+- [x] `NullPointerException` não aparece mais em `catch` que não possa recebê-lo
+- [x] A classificação por exit code e por stdout vazio sai idêntica
+- [x] `./mvnw test` verde a partir da raiz, com `ffmpeg`/`ffprobe` no `PATH`
+
+## Resolução
+
+Os dois ramos saíram: o `catch` de `duracaoBruta.stdout().trim()` não captura mais
+`NullPointerException`, só `NumberFormatException`; e a guarda de `streamDeVideo.stdout()`
+não testa mais `== null`, só `isBlank()`. Nenhuma outra linha do arquivo mudou — a
+classificação por exit code e por stdout vazio (`SEM_FLUXO_DE_VIDEO`) ficou byte a byte
+igual, como o ticket exigia.
+
+A suíte do `extracao` passou com `ffmpeg`/`ffprobe` reais: 277 testes, sem falha. O `videos`
+não rodou na validação pela raiz nesta sessão — o Keycloak do Dev Services não sobe neste
+ambiente (achado preexistente, sem relação com esta mudança).

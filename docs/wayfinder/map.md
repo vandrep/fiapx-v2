@@ -963,6 +963,23 @@ verificadas por teste, não são sugestão). Projeto original em
   de correção do 027 — aceitou 41 antes de matar o `videos` e fechou os 41 em 11s, zero preso.
   O § Rodar perdeu a frase da reprovação esperada e passou a apontar para cá.
 
+- [`mata-publicacao` reprova de novo, agora com causa](tickets/075-confirmar-estacionamento-sob-carga.md)
+  — remedido contra o HEAD (imagens reconstruídas, digest idêntico ao do 073: nenhum código
+  mudou), a mesma reprovação do 038 se repetiu — 0/3 no estacionamento, 241 s, limite 240 s —
+  mas desta vez com diagnóstico, não só número. Causa: **circulação**. Para uma falha de
+  extração já classificada como permanente, `ProcessarExtracaoUseCase.tratarFalha` devolve
+  direto o futuro de `enviarFalhou`; se essa publicação falhar (o defeito que o modo injeta),
+  a falha sobe como transitória e `ExtrairVideoConsumer` reenfileira o comando, mandando o
+  ffprobe rodar de novo sobre o mesmo arquivo inválido. O `x-delivery-limit=3` que deveria
+  limitar esse loop não dispara: os headers da mensagem em voo mostraram `x-acquired-count` de
+  24-25 contra `x-delivery-count` de 1-2 — o contador que a fila usa para decidir quando
+  esgotar não acompanha as tentativas reais, e a mensagem nunca sai de `extracao.extrair`, nunca
+  chega à DLQ nem ao estacionamento. A garantia do [029](tickets/029-terminal-na-dlq-do-extracao.md)
+  não vale para o caminho de falha permanente detectada de imediato — a maioria dos casos
+  reais —, só para o esgotamento por `x-delivery-limit` que o `@QuarkusTest` de topologia força
+  diretamente. O 029 **reabriu** com o diagnóstico anexado; a correção é trabalho novo, fora
+  deste ticket.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

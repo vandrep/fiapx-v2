@@ -1,9 +1,9 @@
 # A falha definitiva do `extracao` tem confirmação e tem fundo
 
 - id: 029
-- label: wayfinder:task
-- status: fechado
-- assignee: vandrep
+- label: wayfinder:bug
+- status: aberto
+- assignee:
 - bloqueado-por:
 
 ## Question
@@ -231,3 +231,27 @@ do `conservacao.sh`, só conseguiu subir depois do
 do estacionamento **reprovado** por prazo: zero mensagens novas em 241 s, limite de 240 s. A
 garantia deste ticket, portanto, está construída e provada em teste, mas **não confirmada sob
 carga**; o 038 registra o número e o diagnóstico pendente.
+
+## Reabertura (075)
+
+O [075](075-confirmar-estacionamento-sob-carga.md) remediu `mata-publicacao` contra o HEAD
+atual e reproduziu a mesma reprovação (0/3 no estacionamento, 241 s, limite 240 s) — e desta
+vez com diagnóstico. A causa é **circulação**: para uma falha de extração já classificada como
+permanente (`FalhaPermanenteDeExtracaoException`), `ProcessarExtracaoUseCase.tratarFalha`
+devolve direto o futuro de `enviarFalhou(...)`; se essa publicação falhar — o defeito que este
+próprio ticket injeta para testar —, a falha sobe como se fosse transitória e
+`ExtrairVideoConsumer` reenfileira o comando no canal `extrair-video`, mandando o ffprobe rodar
+de novo sobre o mesmo arquivo. O `x-delivery-limit=3` da fila `extracao.extrair`, que deveria
+limitar esse loop e escalar ao DLQ (e daí ao estacionamento, pelo desenho deste ticket), não
+dispara: os headers da mensagem em voo mostraram `x-acquired-count` de 24-25 contra
+`x-delivery-count` de 1-2 — o contador que a fila usa para decidir quando esgotar não acompanha
+as tentativas reais. A mensagem nunca sai de `extracao.extrair`, e por isso nunca chega a
+`extracao.extrair.dlq` nem a `extracao.extrair.estacionamento`.
+
+A garantia que este ticket declara — "falha definitiva para no estacionamento" — **não vale**
+para o caminho de falha permanente detectada de imediato (a maioria dos casos reais: formato
+inválido, é o que o `mata-publicacao` exercita). Ela só foi provada em teste
+(`ExtracaoEstacionamentoTest`) porque aquele teste força o esgotamento via
+`x-delivery-limit` diretamente, sem passar pelo caminho de falha permanente do
+`ProcessarExtracaoUseCase`. Evidência completa em
+`scripts/carga/saida/075-mata-publicacao/`.

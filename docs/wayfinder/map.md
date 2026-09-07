@@ -1000,6 +1000,13 @@ verificadas por teste, não são sugestão). Projeto original em
   (`scripts/verifica-ackmanual.sh`) roda no agregador, ao lado do
   `verifica-testes-arquiteturais.sh`, e reprova o build quando uma cópia diverge.
 
+- [A série do § *As três cópias do teste arquitetural* ganha a sétima e a oitava
+  regra](tickets/078-regras-do-teste-arquitetural-sem-linha-no-agents.md) — `AGENTS.md` narrava
+  seis regras em prosa e o teste já cobrava oito; as duas que a revisão acrescentara
+  (`toleranciaAFalhasNaoPodeSerConfigurada` do 064, `workersNaoDevemDeclararPacoteDeBordaHttp`
+  do 068) ficavam sem o *porquê* que só a prosa registra. A série continua no mesmo formato,
+  nomeando o ticket de origem de cada uma.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

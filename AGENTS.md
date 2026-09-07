@@ -135,6 +135,24 @@ produção. Medido: 4 travamentos em ~60 ciclos com o interceptor, 0 em 90 sem e
 retenta dentro da própria cadeia — a política do [ADR 0001](docs/adr/0001-politica-de-falhas.md)
 não mudou, só quem a implementa. A extensão saiu dos três `pom.xml` junto com a regra.
 
+Uma sétima chegou no ticket 064, estendendo a sexta ao `application.properties`: nenhuma chave
+de tolerância a falhas por interceptor pode ser configurada, nem no formato do MicroProfile
+(`.../Retry/...` e as demais anotações conhecidas) nem no namespace `quarkus.fault-tolerance`
+ou `smallrye.faulttolerance`. A sexta regra lê fonte Java, e uma chave de configuração não é
+import nem anotação — ela sobrevive ao interceptor que saiu do `pom.xml`. Foi assim que duas
+chaves `%test.../Retry/delay` sobreviveram no `application.properties` do `videos`,
+configurando um `@Retry` que já não existia, com um comentário e um javadoc que ainda
+descreviam a proteção antiga. É o mesmo ponto cego que o ticket 034 já havia fechado para
+`publish-confirms`, aplicado agora à sexta regra em vez da quinta.
+
+Uma oitava chegou no ticket 068: nenhum serviço além do `videos` pode declarar pacote
+`framework.web`. `extracao` e `notificacao` não têm borda HTTP — a tabela "O que difere entre
+os três serviços" traz "nenhuma" na linha da borda para os dois —, então o nome do pacote
+promete um `Resource` que não existe e engana quem lê o código. `ExtracaoConfiguration` e
+`NotificacaoConfiguration` são raízes de composição CDI, não borda de entrada; migraram para
+`framework.configuration`, e a regra deriva o serviço do mesmo `MODULO_DO_SERVICO` que as
+demais, então as três cópias seguem idênticas sem precisar de exceção por serviço.
+
 ## As cópias deliberadas entre serviços
 
 Além dos records do contrato de mensagens, cinco implementações se repetem entre serviços:

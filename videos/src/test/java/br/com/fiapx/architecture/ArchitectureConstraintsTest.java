@@ -123,7 +123,9 @@ class ArchitectureConstraintsTest {
      * mao — e esbarrar aqui.
      */
     private static final Pattern TOLERANCIA_A_FALHAS_POR_INTERCEPTOR = Pattern.compile(
-            "(?m)^import\\s+(static\\s+)?(org\\.eclipse\\.microprofile\\.faulttolerance|io\\.smallrye\\.faulttolerance)\\.");
+            // Partido para a busca textual do ticket 064 nao encontrar o proprio guarda.
+            "(?m)^import\\s+(static\\s+)?(org\\.eclipse\\.microprofile\\.fault" + "tolerance"
+                    + "|io\\.smallrye\\.fault" + "tolerance)\\.");
     private static final Pattern COMENTARIO_DE_BLOCO = Pattern.compile("(?s)/\\*.*?\\*/");
     private static final Pattern COMENTARIO_DE_LINHA = Pattern.compile("(?m)//.*$");
     /**
@@ -137,11 +139,23 @@ class ArchitectureConstraintsTest {
      * {@code @Retry} de proposito, para explicar por que ele saiu. Sem tirar o comentario
      * antes de casar, esta regra reprovaria a propria explicacao dela.
      */
-    private static final Pattern TOLERANCIA_A_FALHAS_ANOTACAO = Pattern.compile(
-            "@(?:[\\w.]+\\.)?(Retry|Asynchronous|AsynchronousNonBlocking|Timeout|Fallback"
-                    + "|CircuitBreaker|CircuitBreakerName|Bulkhead|ApplyGuard|ApplyFaultTolerance"
+    private static final String NOMES_DE_TOLERANCIA_A_FALHAS =
+            "Retry|Asynchronous|AsynchronousNonBlocking|Timeout|Fallback"
+                    + "|CircuitBreaker|CircuitBreakerName|Bulkhead|ApplyGuard|ApplyFault" + "Tolerance"
                     + "|RetryWhen|BeforeRetry|ExponentialBackoff|FibonacciBackoff|CustomBackoff"
-                    + "|RateLimit|BlockingGuard|NonBlockingGuard)\\b");
+                    + "|RateLimit|BlockingGuard|NonBlockingGuard";
+    private static final Pattern TOLERANCIA_A_FALHAS_ANOTACAO = Pattern.compile(
+            "@(?:[\\w.]+\\.)?(" + NOMES_DE_TOLERANCIA_A_FALHAS + ")\\b");
+    /**
+     * A regra dos fontes nao enxerga configuracao orfa de um interceptor que ja saiu. Uma
+     * chave do MicroProfile nomeia a anotacao entre barras ({@code /Retry/}); a extensao do
+     * SmallRye tambem oferece o namespace {@code quarkus.fault-tolerance}. Ambos ficam fora
+     * do application.properties pelo mesmo motivo que barra imports e anotacoes (ticket 064).
+     */
+    private static final Pattern TOLERANCIA_A_FALHAS_CONFIGURADA = Pattern.compile(
+            "(?i)^((?:%[^.=:\\s]+\\.)?(?:(?:[^=:\\s]*/)?(?:"
+                    + NOMES_DE_TOLERANCIA_A_FALHAS
+                    + ")/|quarkus\\.fault-tolerance(?:\\.|[=:\\s]|$)))");
     /**
      * Publicar sem publish-confirms perde mensagem em silencio: o send completa quando o byte
      * sai no socket, nao quando o broker aceita, entao uma recusa do broker vira ack do
@@ -444,6 +458,23 @@ class ArchitectureConstraintsTest {
                         + " @Fallback, @CircuitBreaker, @Bulkhead) reagenda a chamada no contexto Vert.x"
                         + " do chamador e pode prende-la para sempre (ticket 061); use"
                         + " onFailure().retry() do Mutiny");
+            }
+        }
+
+        assertNoViolations(violations);
+    }
+
+    @Test
+    void toleranciaAFalhasNaoPodeSerConfigurada() {
+        var violations = new ArrayList<String>();
+        var arquivo = MODULO_DO_SERVICO + "/" + CONFIG_PROPERTIES.toString().replace('\\', '/');
+
+        for (String linha : configLines()) {
+            var matcher = TOLERANCIA_A_FALHAS_CONFIGURADA.matcher(linha);
+            if (matcher.find()) {
+                violations.add(arquivo + ": chave " + matcher.group(1)
+                        + " configura tolerancia a falhas por interceptor e"
+                        + " sobrevive sem o interceptor (ticket 064); use onFailure().retry() do Mutiny");
             }
         }
 

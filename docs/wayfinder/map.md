@@ -693,6 +693,12 @@ verificadas por teste, não são sugestão). Projeto original em
   A/B do 059 eram, no código, a mesma perna, e a variável em torno da qual este ticket inteiro
   foi escrito não existia. Segue no 062.
 
+- [Chaves órfãs de Fault Tolerance não sobrevivem à regra do 061](tickets/064-chaves-orfas-de-fault-tolerance.md)
+  — as duas configurações de `@Retry` que restavam no perfil de teste do `videos` saíram; a
+  repetição é do `onFailure().retry()` do Mutiny e seus valores vêm do código. A regra
+  arquitetural agora alcança também o `application.properties` dos três serviços e barra
+  chaves do MicroProfile e o namespace `quarkus.fault-tolerance`.
+
 - [O overlay de carga mede um sistema instrumentado, sem coletor](tickets/062-a-chave-que-nao-desliga-o-sdk.md)
   — a decisão que o 061 deixou aberta. Ele fica **como está** e passa a declarar o que mede, das
   três saídas possíveis a única que existe: nenhuma chave que pararia o span alcança um overlay

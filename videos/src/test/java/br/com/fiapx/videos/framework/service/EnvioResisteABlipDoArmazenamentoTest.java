@@ -32,7 +32,8 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 
 /**
  * O que o ADR 0001 promete na borda: um blip de I/O de segundos contra o MinIO e absorvido
- * pelo {@code @Retry} do adapter, e nao vira erro interno para quem chamou a API (ticket 048).
+ * pelo {@code onFailure().retry()} do Mutiny no client, e nao vira erro interno para quem
+ * chamou a API (tickets 048 e 061).
  *
  * <p>A instabilidade entra pelo {@code S3AsyncClient}, que e onde o blip de verdade mora — o
  * teste troca o bean e observa <b>so</b> a resposta HTTP, entrando pela borda como qualquer

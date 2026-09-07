@@ -2,8 +2,8 @@
 
 - id: 064
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
 - prioridade: P2
 
@@ -45,6 +45,25 @@ ticket 034 fechou para `publish-confirms`.
 
 ## Critérios de aceite
 
-- [ ] `grep -ri faulttolerance` fora de `docs/` não acha nada em código, config ou pom
-- [ ] O teste arquitetural reprova quando uma chave de Fault Tolerance é reintroduzida no `.properties`
-- [ ] As três cópias do teste seguem idênticas; `./mvnw test` verde a partir da raiz
+- [x] `grep -ri faulttolerance` fora de `docs/` não acha nada em código, config ou pom
+- [x] O teste arquitetural reprova quando uma chave de Fault Tolerance é reintroduzida no `.properties`
+- [x] As três cópias do teste seguem idênticas; `./mvnw test` verde a partir da raiz
+
+## Resolução
+
+As duas chaves `%test.../Retry/delay` saíram do `application.properties` do `videos`. O
+comentário que as acompanhava e o javadoc do teste de blip agora dizem onde a proteção vive:
+no `onFailure().retry()` do Mutiny dentro do `ArquivoMinioClient`, com contagem e espera
+definidas pelo código.
+
+O `ArchitectureConstraintsTest` passou a ler também o `application.properties` e reprova
+tanto chaves no formato do MicroProfile (`.../Retry/...` e as demais anotações conhecidas)
+quanto o namespace `quarkus.fault-tolerance`. A própria chave aparece na mensagem de falha,
+sem que o valor seja exposto. O ciclo TDD foi observado com as duas chaves órfãs: o teste novo
+reprovou duas vezes antes da remoção e passou depois dela. As três cópias foram mantidas byte a
+byte idênticas.
+
+Validação final na raiz, com Docker, ffmpeg e ffprobe reais: `./mvnw test` passou com 443
+testes, 0 falhas e 0 erros (139 em `videos`, 276 em `extracao`, 28 em `notificacao`). A primeira
+tentativa não chegou aos testes por timeout de inicialização do Keycloak; a repetição completa
+passou.

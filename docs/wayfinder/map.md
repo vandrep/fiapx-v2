@@ -699,6 +699,12 @@ verificadas por teste, não são sugestão). Projeto original em
   arquitetural agora alcança também o `application.properties` dos três serviços e barra
   chaves do MicroProfile e o namespace `quarkus.fault-tolerance`.
 
+- [O adapter de ffmpeg não esconde diferença atrás de Middle Man nem bandeira](tickets/066-middle-man-e-bandeira-no-adapter-de-ffmpeg.md)
+  — `falhaPermanente(...)` saiu e todos os pontos constroem a exceção diretamente. Os dois
+  wrappers de execução e `capturarStdout` também saíram: um único `executar(...)` redireciona,
+  aguarda e lê stdout e stderr. A classificação de falha permanente ou transitória pelo exit
+  code ficou intacta.
+
 - [O overlay de carga mede um sistema instrumentado, sem coletor](tickets/062-a-chave-que-nao-desliga-o-sdk.md)
   — a decisão que o 061 deixou aberta. Ele fica **como está** e passa a declarar o que mede, das
   três saídas possíveis a única que existe: nenhuma chave que pararia o span alcança um overlay

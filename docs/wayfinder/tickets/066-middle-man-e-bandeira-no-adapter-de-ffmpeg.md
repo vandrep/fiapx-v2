@@ -2,8 +2,8 @@
 
 - id: 066
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
 - prioridade: P3
 
@@ -41,6 +41,23 @@ a classificação de falha permanente vs. transitória é o que o refactor não 
 
 ## Critérios de aceite
 
-- [ ] Uma só forma de construir a falha permanente no arquivo
-- [ ] Nenhum parâmetro-bandeira em `executar`
-- [ ] A classificação por exit code segue idêntica; suíte do `extracao` verde com `ffmpeg` real
+- [x] Uma só forma de construir a falha permanente no arquivo
+- [x] Nenhum parâmetro-bandeira em `executar`
+- [x] A classificação por exit code segue idêntica; suíte do `extracao` verde com `ffmpeg` real
+
+## Resolução
+
+`falhaPermanente(...)` saiu: os cinco chamadores agora constroem
+`FalhaPermanenteDeExtracaoException` diretamente, deixando uma única forma no arquivo. A
+decisão foi remover o *Middle Man*, não promovê-lo a fábrica exclusiva, porque ele não
+encapsulava política nem transformação.
+
+Os wrappers `executarCapturandoStdout(...)` e `executarCapturandoStderr(...)` e o booleano
+`capturarStdout` também saíram. Há um único `executar(...)`, que sempre redireciona stdout e
+stderr para arquivos temporários, aguarda o processo e lê as duas saídas. Assim a mecânica que
+evita deadlock continua concentrada num método, sem uma bandeira escondida por wrappers.
+
+A tabela `Extracao.classificarFalhaDoFfmpeg(...)` e `criarFalhaDoFfmpeg(...)` ficaram
+intactas. A suíte do `extracao` passou com Docker, `ffmpeg` e `ffprobe` reais: 276 testes, sem
+falha. Na validação final pela raiz, passaram 139 testes do `videos`, 276 do `extracao` e 28
+do `notificacao`, também sem falha.

@@ -93,7 +93,7 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         var duracao = medirDuracaoEValidarStreamDeVideo(video);
         Extracao.motivoAoValidarDuracao(duracao, tetoDuracao)
                 .ifPresent(motivo -> {
-                    throw falhaPermanente(motivo,
+                    throw new FalhaPermanenteDeExtracaoException(motivo,
                             "duracao " + duracao.toMillis() + "ms; teto " + tetoDuracao.toMillis() + "ms");
                 });
 
@@ -106,14 +106,14 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
     }
 
     private Duration medirDuracaoEValidarStreamDeVideo(Path video) {
-        var duracaoBruta = executarCapturandoStdout(timeoutFfprobeSegundos,
+        var duracaoBruta = executar(timeoutFfprobeSegundos,
                 "ffprobe", "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 video.toString());
 
         if (duracaoBruta.exitCode() != 0) {
-            throw falhaPermanente(MotivoFalha.ARQUIVO_INVALIDO,
+            throw new FalhaPermanenteDeExtracaoException(MotivoFalha.ARQUIVO_INVALIDO,
                     "ffprobe saiu com " + duracaoBruta.exitCode() + ": " + resumo(duracaoBruta.stderr()));
         }
 
@@ -126,7 +126,7 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         }
         var duracao = Duration.ofMillis((long) (segundos * 1000));
 
-        var streamDeVideo = executarCapturandoStdout(timeoutFfprobeSegundos,
+        var streamDeVideo = executar(timeoutFfprobeSegundos,
                 "ffprobe", "-v", "error",
                 "-select_streams", "v:0",
                 "-show_entries", "stream=codec_type",
@@ -135,10 +135,10 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         var detalheDoStream = "ffprobe de stream saiu com " + streamDeVideo.exitCode()
                 + ": " + resumo(streamDeVideo.stderr());
         if (streamDeVideo.exitCode() != 0) {
-            throw falhaPermanente(MotivoFalha.ARQUIVO_INVALIDO, detalheDoStream);
+            throw new FalhaPermanenteDeExtracaoException(MotivoFalha.ARQUIVO_INVALIDO, detalheDoStream);
         }
         if (streamDeVideo.stdout() == null || streamDeVideo.stdout().isBlank()) {
-            throw falhaPermanente(MotivoFalha.SEM_FLUXO_DE_VIDEO, detalheDoStream);
+            throw new FalhaPermanenteDeExtracaoException(MotivoFalha.SEM_FLUXO_DE_VIDEO, detalheDoStream);
         }
 
         return duracao;
@@ -146,7 +146,7 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
 
     private void extrairFrames(Path video, Path diretorioDeTrabalho) {
         var padraoSaida = diretorioDeTrabalho.resolve("frame_%04d.png").toString();
-        var resultado = executarCapturandoStderr(timeoutFfmpegSegundos,
+        var resultado = executar(timeoutFfmpegSegundos,
                 "ffmpeg", "-hide_banner", "-nostdin",
                 "-loglevel", "level+repeat+error",
                 "-threads", String.valueOf(threadsDoFfmpeg()),
@@ -218,14 +218,9 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
     private void validarContagemDeFrames(int quantidadeFrames, Duration duracao) {
         Extracao.motivoAoValidarContagemDeFrames(quantidadeFrames, duracao)
                 .ifPresent(motivo -> {
-                    throw falhaPermanente(motivo,
+                    throw new FalhaPermanenteDeExtracaoException(motivo,
                             "duracao " + duracao.toMillis() + "ms, extraiu " + quantidadeFrames + " frames");
                 });
-    }
-
-    private static FalhaPermanenteDeExtracaoException falhaPermanente(MotivoFalha motivo,
-                                                                       String detalheTecnico) {
-        return new FalhaPermanenteDeExtracaoException(motivo, detalheTecnico);
     }
 
     /** ZIP STORED: deflate nao comprime PNG (medido, ticket 006). */
@@ -256,20 +251,12 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         }
     }
 
-    private ResultadoDoProcesso executarCapturandoStdout(long timeoutSegundos, String... comando) {
-        return executar(timeoutSegundos, true, comando);
-    }
-
-    private ResultadoDoProcesso executarCapturandoStderr(long timeoutSegundos, String... comando) {
-        return executar(timeoutSegundos, false, comando);
-    }
-
     /**
      * stdout e stderr sempre vao para arquivos, nunca para pipes lidos so depois do {@code
      * waitFor}: um processo cujo stderr enche o buffer do SO antes do pai drenar trava para
      * sempre — o classico deadlock de {@link ProcessBuilder}.
      */
-    private ResultadoDoProcesso executar(long timeoutSegundos, boolean capturarStdout, String... comando) {
+    private ResultadoDoProcesso executar(long timeoutSegundos, String... comando) {
         Path stdoutArquivo = null;
         Path stderrArquivo = null;
         try {
@@ -288,7 +275,7 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
                         comando[0] + " excedeu o timeout de " + timeoutSegundos + "s");
             }
 
-            var stdout = capturarStdout ? Files.readString(stdoutArquivo) : null;
+            var stdout = Files.readString(stdoutArquivo);
             var stderr = Files.readString(stderrArquivo);
             return new ResultadoDoProcesso(processo.exitValue(), stdout, stderr);
         } catch (IOException erro) {

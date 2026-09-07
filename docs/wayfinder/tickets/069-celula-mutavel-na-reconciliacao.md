@@ -2,8 +2,8 @@
 
 - id: 069
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-07)
 - bloqueado-por:
 - prioridade: P3
 
@@ -30,6 +30,17 @@ comportamento.
 
 ## Critérios de aceite
 
-- [ ] Nenhum array de um elemento como acumulador no use case
-- [ ] O valor reconciliado e o que é registrado a partir dele não mudam
-- [ ] `./mvnw test` verde a partir da raiz
+- [x] Nenhum array de um elemento como acumulador no use case
+- [x] O valor reconciliado e o que é registrado a partir dele não mudam
+- [x] `./mvnw test` verde a partir da raiz
+
+## Resolução
+
+A quantidade de comandos republicados agora percorre a própria cadeia de
+`CompletableFuture`: depois de publicar os comandos em sequência, o estágio produz o tamanho
+da lista e o entrega ao estágio que busca e publica as falhas. Esse valor continua compondo o
+mesmo `Republicacoes`, consumido sem alteração pelo log do scheduler.
+
+A ordem permanece comandos → falhas, com o mesmo instante de corte e o mesmo tamanho de lote.
+O teste comportamental de `ReconciliarPublicacoesPendentesUseCase` passou isoladamente, e
+`./mvnw test` passou a partir da raiz.

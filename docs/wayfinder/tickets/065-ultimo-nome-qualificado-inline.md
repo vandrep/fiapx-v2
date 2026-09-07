@@ -2,8 +2,8 @@
 
 - id: 065
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: andrepinedacunha@gmail.com
 - bloqueado-por:
 - prioridade: P3
 
@@ -34,6 +34,19 @@ inteira.
 
 ## Critérios de aceite
 
-- [ ] Nenhum nome qualificado inline em `PostgresRetry`
-- [ ] O ticket responde por escrito se a regra vira guarda de build ou continua convenção, com o motivo
-- [ ] `./mvnw test` verde a partir da raiz
+- [x] Nenhum nome qualificado inline em `PostgresRetry`
+- [x] O ticket responde por escrito se a regra vira guarda de build ou continua convenção, com o motivo
+- [x] `./mvnw test` verde a partir da raiz
+
+## Resolução
+
+`CompletionException` e `ExecutionException` agora são importadas, como os demais tipos do
+arquivo. A regra continua sendo convenção de revisão, sem guarda de build: um teste baseado
+apenas na presença de nomes qualificados inline produziria falso positivo quando dois tipos
+homônimos de pacotes diferentes precisassem coexistir no mesmo arquivo. Distinguir esse caso
+legítimo exigiria resolução semântica completa dos tipos e ainda transformaria uma preferência
+de legibilidade, sem efeito de comportamento ou arquitetura, em complexidade permanente no
+teste arquitetural.
+
+`./mvnw test` a partir da raiz, com Docker e `ffmpeg`/`ffprobe` disponíveis:
+139 (`videos`) + 276 (`extracao`) + 28 (`notificacao`) testes, sem falha.

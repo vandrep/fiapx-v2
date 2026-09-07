@@ -7,6 +7,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.net.ConnectException;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
@@ -68,8 +70,8 @@ public class PostgresRetry {
 
     private static Throwable desembrulhar(Throwable falha) {
         var atual = falha;
-        while ((atual instanceof java.util.concurrent.CompletionException
-                || atual instanceof java.util.concurrent.ExecutionException)
+        while ((atual instanceof CompletionException
+                || atual instanceof ExecutionException)
                 && atual.getCause() != null) {
             atual = atual.getCause();
         }

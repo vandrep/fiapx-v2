@@ -1,16 +1,19 @@
 package br.com.fiapx.extracao.framework.dispatcher;
 
+import br.com.fiapx.extracao.core.exceptions.FalhaAoPublicarExtracaoFalhouException;
 import br.com.fiapx.extracao.framework.observabilidade.Rastro;
 import br.com.fiapx.extracao.framework.shutdown.DrenoDaExtracao;
 import br.com.fiapx.extracao.interfaces.controllers.ExtracaoController;
 import io.smallrye.common.annotation.Blocking;
 import io.smallrye.mutiny.Uni;
+import io.smallrye.reactive.messaging.rabbitmq.RabbitMQRejectMetadata;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import org.eclipse.microprofile.reactive.messaging.Acknowledgment;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.eclipse.microprofile.reactive.messaging.Message;
+import org.eclipse.microprofile.reactive.messaging.Metadata;
 import org.jboss.logging.Logger;
 
 import static br.com.fiapx.extracao.framework.dispatcher.AckManual.comAckManual;
@@ -22,6 +25,9 @@ import static br.com.fiapx.extracao.framework.dispatcher.AckManual.comAckManual;
  * normalmente (falha permanente ja publicada) vira <b>ack</b>; um que completa
  * excepcionalmente (falha transitoria) vira <b>nack</b> com requeue, e o {@code
  * x-delivery-limit=3} da fila quorum decide quando esgotar (ADR 0001).
+ * Se a Extracao ja falhou permanentemente e foi a publicacao desse desfecho que falhou, o nack
+ * leva {@link RabbitMQRejectMetadata} com {@code requeue=false}: repetir ffprobe/ffmpeg nao pode
+ * consertar o broker, entao o comando segue direto a DLQ e ao fundo do ticket 029.
  *
  * <p>{@code @Blocking} despacha esta chamada para o worker pool padrao do Quarkus, porque o
  * pipeline roda ffmpeg como processo externo — bloqueante e pesado (docs/pesquisa/
@@ -93,7 +99,17 @@ public class ExtrairVideoConsumer {
         return comAckManual(mensagem, rastro.naMensagem("extracao.extrair-video", comando.idVideo(), mensagem,
                         () -> Uni.createFrom().deferred(() -> Uni.createFrom().completionStage(
                                 extracaoController.processarExtrairVideo(
-                                        comando.idVideo(), comando.chaveVideo(), comando.chaveDestinoPacote())))))
+                                        comando.idVideo(), comando.chaveVideo(), comando.chaveDestinoPacote())))),
+                falha -> metadadosDoNack(mensagem, falha))
                 .eventually(dreno::sair);
+    }
+
+    private static Metadata metadadosDoNack(Message<?> mensagem, Throwable falha) {
+        for (var causa = falha; causa != null; causa = causa.getCause()) {
+            if (causa instanceof FalhaAoPublicarExtracaoFalhouException) {
+                return mensagem.getMetadata().with(new RabbitMQRejectMetadata(false));
+            }
+        }
+        return mensagem.getMetadata();
     }
 }

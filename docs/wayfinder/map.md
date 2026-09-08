@@ -448,6 +448,11 @@ verificadas por teste, não são sugestão). Projeto original em
   este ticket compra. Achado no processo, não no código: o defeito de `publish-confirms` já
   tinha acontecido um serviço abaixo (027, no `videos`) e se repetiu aqui sem guarda nenhuma
   — motivo do [034](tickets/034-publish-confirms-sem-guarda.md), aberto na mesma revisão.
+  Reaberto pelo [075](tickets/075-confirmar-estacionamento-sob-carga.md) após a carga provar
+  circulação no caminho de falha permanente imediata, foi fechado de novo preservando essa
+  classificação até a borda: falha ao publicar `ExtracaoFalhou` vira nack com
+  `RabbitMQRejectMetadata(false)`, salta direto à DLQ e chega ao Estacionamento sem reexecutar
+  ffprobe/ffmpeg. A prova agora começa em `fiapx.comandos`, não injeta direto na DLQ.
 
 - [Deploy não gasta tentativa da Extração](tickets/030-deploy-nao-gasta-tentativa.md) — a
   pergunta central tem resposta e é **não**: o conector cancela a assinatura e fecha o canal

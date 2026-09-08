@@ -2,8 +2,8 @@
 
 - id: 029
 - label: wayfinder:bug
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: codex
 - bloqueado-por:
 
 ## Question
@@ -255,3 +255,23 @@ inválido, é o que o `mata-publicacao` exercita). Ela só foi provada em teste
 `x-delivery-limit` diretamente, sem passar pelo caminho de falha permanente do
 `ProcessarExtracaoUseCase`. Evidência completa em
 `scripts/carga/saida/075-mata-publicacao/`.
+
+## Resolução da reabertura
+
+A circulação foi cortada no ponto em que a classificação se perdia. Quando uma Extração já
+falhou permanentemente e a publicação de `ExtracaoFalhou` também falha,
+`ProcessarExtracaoUseCase` agora propaga `FalhaAoPublicarExtracaoFalhouException`, preservando
+que o trabalho já tem desfecho definitivo. `ExtrairVideoConsumer` reconhece essa causa e envia
+o nack com `RabbitMQRejectMetadata(false)`: o comando não volta a executar ffprobe/ffmpeg, segue
+direto para `extracao.extrair.dlq` e, se a publicação continuar indisponível, o consumidor da
+DLQ o rejeita para `extracao.extrair.estacionamento`. Falhas transitórias continuam usando o
+nack sem metadado e o `failure-strategy=requeue` anterior.
+
+O `AckManual` ganhou uma sobrecarga que aceita os metadados do nack; as três cópias deliberadas
+foram atualizadas juntas e continuam iguais fora da linha de pacote. A prova foi feita em três
+níveis: teste do use case para a preservação da classificação, teste do consumidor para
+`requeue=false` e `ExtracaoEstacionamentoTest` pela borda AMQP real, publicando em
+`fiapx.comandos` e observando o corpo original no Estacionamento. Esta última passou com
+RabbitMQ e MinIO reais em 92,94 s (dois cenários); como o host não tem ffprobe, a execução usou
+um executável determinístico que retorna exit code 1, ainda atravessando o adapter real e sua
+classificação de falha permanente.

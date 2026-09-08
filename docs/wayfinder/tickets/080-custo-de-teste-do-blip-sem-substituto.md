@@ -136,5 +136,6 @@ inspecionar as cópias como o `AGENTS.md` § *As cópias deliberadas entre servi
 `RepeticaoNoMinioTest` do `extracao` leva **14,30 s** e `RepeticaoNoSmtpTest` do `notificacao`
 leva **10,19 s**, pela mesma aritmética. Estender o ajuste às duas é mecânico e preserva o
 contrato, mas está fora do que este ticket pediu — o escopo dele é o custo que o 048 comprou na
-borda do `videos`. Fica medido e escrito aqui; vira ticket próprio se o mantenedor quiser, pelo
-mesmo critério do [027](027-melhorias-medidas.md).
+borda do `videos`. Ficou medido e escrito aqui, e seguiu para o
+[ticket 085](085-espera-do-retry-nas-outras-duas-copias.md), pelo mesmo critério do
+[027](027-melhorias-medidas.md): defeito medido vira ticket, não conserto por palpite.

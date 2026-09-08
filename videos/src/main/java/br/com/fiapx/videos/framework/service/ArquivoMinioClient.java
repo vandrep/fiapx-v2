@@ -3,6 +3,7 @@ package br.com.fiapx.videos.framework.service;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.reactivestreams.FlowAdapters;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
@@ -43,12 +44,25 @@ import java.util.concurrent.Flow;
 public class ArquivoMinioClient {
 
     private static final int MAXIMO_DE_REPETICOES = 3;
-    private static final Duration ESPERA_ENTRE_REPETICOES = Duration.ofSeconds(2);
     /** Os 200 ms do default do {@code @Retry}, sobre os 2 s de espera: o Mutiny pede fracao. */
     private static final double JITTER = 0.1;
 
     @Inject
     S3AsyncClient s3;
+
+    /**
+     * Os 2 s do ADR 0001 em producao, reduzidos ao piso so no perfil de teste. E configuracao <b>deste
+     * bean</b>, no namespace {@code fiapx.} do projeto — nao chave de tolerancia a falhas por
+     * interceptor, que a setima regra do teste arquitetural proibe desde o ticket 064.
+     *
+     * <p>O que o cenario do blip julga e a repeticao <i>acontecer</i>, nao quanto ela espera
+     * (ticket 048): com a espera de producao, os quatro cenarios do
+     * {@code EnvioResisteABlipDoArmazenamentoTest} ficavam 20 s parados. O default de 2 s vive
+     * aqui, e nao no {@code .properties}, para que a espera de producao sobreviva a um arquivo
+     * de configuracao incompleto (ticket 080).
+     */
+    @ConfigProperty(name = "fiapx.armazenamento.espera-entre-repeticoes", defaultValue = "2s")
+    Duration esperaEntreRepeticoes;
 
     public CompletionStage<Void> gravar(String bucket, String chave, Path arquivo) {
         var requisicao = PutObjectRequest.builder().bucket(bucket).key(chave).build();
@@ -83,6 +97,9 @@ public class ArquivoMinioClient {
      * {@code withBackOff(x, x)} e como o Mutiny escreve espera constante; backoff crescente
      * seria outra politica, que o ADR nao pediu.
      *
+     * <p>A contagem continua fixa e a espera virou {@link #esperaEntreRepeticoes}: o numero de
+     * repeticoes e a politica, e a espera e o preco dela.
+     *
      * <p><b>Repeticao, e nao "tentativa".</b> No {@code CONTEXT.md} tentativa e uma <i>entrega</i>
      * da mensagem ao worker, e o limite dela tambem e 3 — os dois numeros coincidirem torna a
      * confusao facil. Estes 3 aqui sao repeticoes de uma chamada de I/O dentro de <b>uma</b>
@@ -93,9 +110,9 @@ public class ArquivoMinioClient {
      * e o caso que ele parecia cobrir, a chamada que nao volta, ele nao cobria: era o
      * travamento deste ticket.
      */
-    private static <T> Uni<T> comRepeticao(Uni<T> chamada) {
+    private <T> Uni<T> comRepeticao(Uni<T> chamada) {
         return chamada.onFailure(Exception.class::isInstance).retry()
-                .withBackOff(ESPERA_ENTRE_REPETICOES, ESPERA_ENTRE_REPETICOES)
+                .withBackOff(esperaEntreRepeticoes, esperaEntreRepeticoes)
                 .withJitter(JITTER)
                 .atMost(MAXIMO_DE_REPETICOES);
     }

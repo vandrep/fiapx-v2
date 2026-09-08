@@ -44,6 +44,25 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
  * aponta para ele, e delegar reentraria em si mesmo. Por isso ele tambem serve os bytes do
  * Pacote — o que esta sob julgamento aqui e o desfecho da requisicao, nao o armazenamento,
  * que os cenarios BDD exercitam de verdade.
+ *
+ * <h2>A protecao que existe hoje, e o que este cenario custa</h2>
+ *
+ * <p>A protecao e {@code onFailure().retry()} do Mutiny dentro do
+ * {@link ArquivoMinioClient}: 3 repeticoes, jitter de 10%, so sobre {@code Exception}. Nenhum
+ * interceptor participa — {@code @Retry} saiu no ticket 061 e as chaves que o configuravam
+ * sairam no 064.
+ *
+ * <p><b>A espera e configuravel por perfil, e aqui vale 1 ms</b>
+ * ({@code fiapx.armazenamento.espera-entre-repeticoes}, ticket 080). Com os 2 s de producao
+ * estes quatro cenarios ficavam <b>20 s parados</b> — 4 s em cada cenario de blip, 6 s em cada
+ * um de armazenamento persistentemente fora — e a classe levava <b>26,5 s</b>; com 1 ms leva
+ * <b>6,2 s</b>. O que esta sob teste e a repeticao <i>acontecer</i> e o desfecho que ela
+ * produz, nao a duracao da espera, e foi essa a leitura do ticket 048 quando ele comprou o
+ * mesmo efeito pela chave do interceptor.
+ *
+ * <p>O que a espera curta <b>deixa</b> de cobrir, e esta registrado como escolha: que os 2 s do
+ * ADR 0001 sejam os 2 s. Esse numero e guardado pelo default do {@code @ConfigProperty}, e nao
+ * por cenario — cobra-lo aqui custaria os 20 s de volta para reafirmar uma constante.
  */
 @QuarkusTest
 class EnvioResisteABlipDoArmazenamentoTest {

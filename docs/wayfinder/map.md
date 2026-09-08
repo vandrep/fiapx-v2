@@ -1018,6 +1018,19 @@ verificadas por teste, não são sugestão). Projeto original em
   `NullPointerException` inalcançável e uma guarda `== null` sempre falsa. Os dois saíram; a
   classificação por exit code e por stdout vazio (`SEM_FLUXO_DE_VIDEO`) ficou idêntica.
 
+- [O custo de teste do blip voltou a ser pago por
+  configuração](tickets/080-custo-de-teste-do-blip-sem-substituto.md) — o 064 removeu com razão
+  duas chaves órfãs de interceptor, mas o efeito que o 048 comprava foi junto, e o cenário voltou
+  a pagar a espera de produção. **Medido: 26,46 s → 6,17 s na classe, 20,3 s parados**, e o número
+  bate com a aritmética da política (3 repetições × 2 s nos dois cenários persistentes, 2 × 2 s
+  nos dois de blip). A espera virou `fiapx.armazenamento.espera-entre-repeticoes`, com default de
+  2 s **no código** e `1ms` no `%test` do `videos` — configuração do bean, no namespace `fiapx.`,
+  não chave de tolerância a falhas por interceptor, então a guarda do 064 segue verde. `0s` não
+  serve: o Mutiny recusa backoff zero na subscrição, e a recusa sai como 500 na borda. A contagem
+  continua constante — ela é a política do ADR 0001; a espera é o preço dela. Fica medido e não
+  corrigido que as outras duas cópias de `comRepeticao` pagam o mesmo (14,30 s no `extracao`,
+  10,19 s no `notificacao`), fora do escopo deste ticket.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

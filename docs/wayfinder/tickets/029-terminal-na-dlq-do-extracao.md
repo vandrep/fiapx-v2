@@ -210,7 +210,11 @@ Protege o mecanismo do qual todos os outros tickets desta rodada dependem. Fazer
 de segurança tem um buraco — e, agora que se sabe que o buraco é perda silenciosa e não loop, um
 buraco que nenhuma medição existente detectaria.
 
-## Resolução
+## Resolução (reconstruída em 2026-09-07)
+
+*Escrita a partir do código pelo [072](072-rastreador-contradiz-a-propria-convencao.md),
+não pela sessão que fechou o ticket. Marca acrescentada pelo
+[082](082-politica-de-reescrita-de-ticket-fechado.md).*
 
 A topologia decidida acima está no `application.properties` do `extracao`: o canal
 `extrair-video-dlq` tem `failure-strategy=reject` e DLQ própria, e o `reject` leva o comando à

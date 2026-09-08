@@ -96,7 +96,11 @@ divergência.
 - Emenda no ADR 0002 (§ *A entidade entra no caminho de produção*) e ajuste do Javadoc de
   `VideoGateway`, que hoje descreve a assinatura antiga.
 
-## Resolução
+## Resolução (reconstruída em 2026-09-07)
+
+*Escrita a partir do código pelo [072](072-rastreador-contradiz-a-propria-convencao.md),
+não pela sessão que fechou o ticket. Marca acrescentada pelo
+[082](082-politica-de-reescrita-de-ticket-fechado.md).*
 
 A forma decidida é a que roda em produção. `VideoGateway` ganhou `buscarPorId(UUID)` ao lado do
 `buscarPorIdEDono`, com o Javadoc dizendo que ele serve ao caminho de mensageria — que não tem

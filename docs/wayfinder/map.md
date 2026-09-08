@@ -1052,6 +1052,21 @@ verificadas por teste, não são sugestão). Projeto original em
   `Resource`. O ordinal é de registro, não de chegada — a regra é mais velha que quatro das que a
   precedem na série, e renumerar invalidaria o registro do 078.
 
+- [Ticket fechado é registro da época, não retrato do
+  código](tickets/082-politica-de-reescrita-de-ticket-fechado.md) — o 074 proibiu reescrever
+  ticket fechado e o 072, no commit anterior, reescrevera catorze. Não eram políticas opostas
+  sobre a mesma coisa: normalizar `status`, renomear cabeçalho sobre texto intacto e **escrever
+  uma `## Resolução` do zero** são três atos diferentes, e o rastreador não os separava. Ficou
+  em `TRACKER.md` § *O que pode mudar num ticket `fechado`*: metadados e links quebrados mudam;
+  corpo narrativo e `## Resolução` já escritos, não — erro descoberto depois vira seção nova,
+  porque o parágrafo errado é parte do que aconteceu. Reconstruir resolução ausente a partir do
+  código continua permitido, e agora **marcado**: proibir deixaria dez fechados invisíveis para
+  as duas consultas, que foi o defeito que o 072 saiu para consertar, e permitir sem marcar
+  transforma inferência em memória. A resposta do 074 sobre reversão virou regra geral: mapa
+  mais ticket novo, ponteiro de uma linha no revertido. Os 029, 031 e 032 ganharam a marca
+  retroativa — adição, não reversão, e sem ela o 029 seguiria afirmando um veredito de carga com
+  a autoridade de quem estava lá.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

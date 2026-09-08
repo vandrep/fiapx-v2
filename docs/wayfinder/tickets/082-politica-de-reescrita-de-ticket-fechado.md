@@ -2,8 +2,8 @@
 
 - id: 082
 - label: ready-for-human
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-08)
 - bloqueado-por:
 - prioridade: P2
 
@@ -60,7 +60,41 @@ A resposta escrita em `docs/wayfinder/TRACKER.md`, na seção de operações, e 
 
 ## Critérios de aceite
 
-- [ ] `TRACKER.md` diz o que pode e o que não pode mudar num ticket `fechado`
-- [ ] A regra cobre `## Resolução` reconstruída a partir do código
-- [ ] A regra cobre onde mora a reversão de uma decisão registrada
-- [ ] `docs/agents/issue-tracker.md` não contradiz o `TRACKER.md`
+- [x] `TRACKER.md` diz o que pode e o que não pode mudar num ticket `fechado`
+- [x] A regra cobre `## Resolução` reconstruída a partir do código
+- [x] A regra cobre onde mora a reversão de uma decisão registrada
+- [x] `docs/agents/issue-tracker.md` não contradiz o `TRACKER.md`
+
+## Resolução
+
+O conflito era menos frontal do que o ticket supunha: o [072](072-rastreador-contradiz-a-propria-convencao.md)
+fez três coisas num commit só, e só a terceira encosta no que o
+[074](074-remover-o-ferramental-de-agente-versionado.md) proibiu. Normalizar `status: resolvido`
+para `fechado` mexe em campo de consulta; renomear `## Solução` para `## Resolução` no 038 mexe
+em cabeçalho, com o texto intacto; escrever `## Resolução` do zero em 029, 031 e 032 é texto
+novo, redigido meses depois, ocupando o lugar de um registro contemporâneo. O `TRACKER.md` agora
+separa os três casos em § *O que pode mudar num ticket `fechado`*.
+
+A regra que ficou: **um ticket fechado é registro do que se decidiu na época, não documentação
+do estado atual do código.** Metadados e links quebrados mudam; corpo narrativo e `## Resolução`
+já escritos, não. Erro descoberto depois vira seção nova, porque o parágrafo errado é parte do
+que aconteceu.
+
+Reconstrução de resolução ausente ficou **permitida e marcada**, como
+`## Resolução (reconstruída em AAAA-MM-DD)` com a primeira linha dizendo que não veio da sessão
+que fechou o ticket. Proibir deixaria os dez fechados sem resolução invisíveis para as duas
+consultas do rastreador — que foi o defeito que o 072 saiu para consertar; permitir sem marcar
+transforma inferência em memória. Renomear cabeçalho sobre conteúdo existente não é
+reconstrução e não leva marca.
+
+A resposta do 074 sobre reversão virou regra geral: ela mora no mapa e num ticket novo, e o
+ticket revertido ganha no máximo um ponteiro de uma linha.
+
+Uma decisão além do que o ticket pedia, tomada com aprovação do usuário: os três tickets já
+reconstruídos pelo 072 **ganharam a marca retroativa**. O ticket dizia que eles não seriam
+revertidos, e não foram — acrescentar o rótulo é adição no lugar onde a seção já está, que a
+própria regra 1 permite. Sem isso, o 029 seguiria afirmando um veredito de carga ("241 s, limite
+de 240 s") com a autoridade de quem estava lá.
+
+`docs/agents/issue-tracker.md` ganhou a mesma regra em resumo, apontando para o `TRACKER.md`
+como fonte.

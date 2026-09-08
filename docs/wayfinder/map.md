@@ -1067,6 +1067,25 @@ verificadas por teste, não são sugestão). Projeto original em
   retroativa — adição, não reversão, e sem ela o 029 seguiria afirmando um veredito de carga com
   a autoridade de quem estava lá.
 
+- [Cinco tickets fechados ganham a nota que faltava nas
+  caixas](tickets/083-registro-do-071-que-nasceu-fechado.md) — o
+  [071](tickets/071-agents-versionado-sem-justificativa.md) nasceu fechado: o arquivo foi criado
+  no mesmo commit que executou o [074](tickets/074-remover-o-ferramental-de-agente-versionado.md),
+  já com `status: fechado` e `assignee`, então o ciclo `aberto → reivindicado → fechado` nunca
+  correu e ninguém marcou os critérios. O ticket supunha que ele fosse o único assim; não era.
+  Os [057](tickets/057-retry-transitorio-no-postgres.md),
+  [058](tickets/058-piso-de-observabilidade.md) e
+  [059](tickets/059-tres-sinais-nos-tres-servicos.md) nasceram fechados do mesmo jeito, no commit
+  que os implementou, e o [053](tickets/053-unificar-a-forma-dos-use-cases-de-extracao.md) nasceu
+  aberto e fechou com as caixas por marcar. Pela regra do
+  [082](tickets/082-politica-de-reescrita-de-ticket-fechado.md), as caixas **não** foram marcadas
+  — marcá-las é reescrever corpo de ticket fechado. Cada um dos cinco ganhou uma
+  `## Correção (083)` no fim, dizendo como nasceu e onde os critérios foram atendidos. Um achado
+  do levantamento ficou registrado ali em vez de escondido: o oitavo critério do 057 **não** foi
+  atendido — o `smoke.sh` e o ensaio de conservação não rodaram —, e a resolução dele já dizia
+  por quê. Ticket fechado sem caixa marcada não é o mesmo que critério não atendido, e agora o
+  registro distingue os dois.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

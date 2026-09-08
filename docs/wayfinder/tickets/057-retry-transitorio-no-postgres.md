@@ -74,3 +74,19 @@ A suíte raiz passou com **137 testes no `videos`, 269 no `extracao` e 24 no `no
 a guarda das três cópias de `ArchitectureConstraintsTest` também passou. O `smoke.sh` e o
 ensaio de conservação não foram executados: esta mudança não altera contratos ou Compose, e
 o ensaio de carga já registra falhas preexistentes no ticket 027.
+
+## Correção (083)
+
+As oito condições acima seguem `[ ]`, e continuam assim: pela política fixada no
+[082](082-politica-de-reescrita-de-ticket-fechado.md), corpo de ticket fechado não se reescreve,
+e marcar a caixa é reescrever. A nota é o que faltava.
+
+**Este ticket nasceu fechado**, como o [071](071-agents-versionado-sem-justificativa.md): o
+arquivo foi criado em `2e723c0`, o commit que implementou o retry, já com `status: fechado` e
+`assignee` preenchido. O ciclo `aberto → reivindicado → fechado` do [`TRACKER.md`](../TRACKER.md)
+não foi percorrido, e por isso não houve momento em que as caixas seriam marcadas.
+
+Sete das oito estão narradas como atendidas na `## Resolução`. A oitava **não está**, e a própria
+resolução diz por quê: a suíte rodou da raiz, mas o `smoke.sh` e o ensaio de conservação não
+foram executados, porque a mudança não altera contrato nem Compose e o ensaio de carga já
+registrava falhas preexistentes no [027](027-melhorias-medidas.md).

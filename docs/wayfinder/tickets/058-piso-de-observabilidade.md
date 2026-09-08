@@ -140,3 +140,15 @@ nem no `application.properties` de nenhum serviço.
 O que este ticket **não** entrega, e está registrado: nenhum canal de notificação — os alertas
 vivem só no Grafana, então **a detecção não mudou**; e retenção efêmera, o histórico morre no
 `down`. As duas limitações vão para `docs/arquitetura.md` no ticket 060.
+
+## Correção (083)
+
+As nove condições acima seguem `[ ]`, e continuam assim: pela política fixada no
+[082](082-politica-de-reescrita-de-ticket-fechado.md), corpo de ticket fechado não se reescreve,
+e marcar a caixa é reescrever. A nota é o que faltava.
+
+**Este ticket nasceu fechado**, como o [071](071-agents-versionado-sem-justificativa.md): o
+arquivo foi criado em `72870fc`, o commit que subiu a stack, já com `status: fechado` e
+`assignee` preenchido. O ciclo `aberto → reivindicado → fechado` do [`TRACKER.md`](../TRACKER.md)
+não foi percorrido, e por isso não houve momento em que as caixas seriam marcadas. As nove estão
+narradas como atendidas na `## Resolução`, incluindo os três números medidos e os três alertas.

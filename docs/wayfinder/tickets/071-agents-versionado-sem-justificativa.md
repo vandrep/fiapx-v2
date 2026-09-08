@@ -71,3 +71,28 @@ As três perguntas foram respondidas antes disso:
 O que este ticket pedia — que nada versionado sob `.agents/` ficasse sem explicação — foi
 atendido pela via oposta à que ele previa: em vez de explicar os 138 arquivos, a entrega deixou
 de rastreá-los.
+
+## Correção (083)
+
+Os três critérios acima seguem `[ ]`, e continuam assim: pela política fixada no
+[082](082-politica-de-reescrita-de-ticket-fechado.md), corpo de ticket fechado não se reescreve,
+e marcar a caixa é reescrever. O que faltava era a nota — é esta.
+
+**Este ticket nasceu fechado.** O arquivo não existe em `08d76ed`: foi criado em `0e30a5e`, o
+mesmo commit que executou o [074](074-remover-o-ferramental-de-agente-versionado.md), já com
+`status: fechado`, `assignee` preenchido e a `## Resolução` escrita. O ciclo
+`aberto → reivindicado → fechado` do [`TRACKER.md`](../TRACKER.md) não foi percorrido, e por isso
+não houve momento em que as caixas seriam marcadas. O 071 documenta uma decisão já tomada; não é
+o registro de um trabalho conduzido pelo rastreador.
+
+Os três critérios foram atendidos, pela via oposta à que o ticket previa, como a própria
+`## Resolução` narra: `.agents/` e `skills-lock.json` saíram do rastreamento e entraram no
+`.gitignore` (1); a decisão tem linha no mapa, em *Decisões até aqui* e em *Fora de escopo* (2);
+e nenhum arquivo sob `.agents/` continua versionado, então o terceiro critério perdeu o objeto,
+em vez de ser satisfeito (3).
+
+O 071 não é o único assim. Os tickets [057](057-retry-transitorio-no-postgres.md),
+[058](058-piso-de-observabilidade.md) e [059](059-tres-sinais-nos-tres-servicos.md) também
+nasceram fechados, no commit que os implementou, e receberam a mesma nota; o
+[053](053-unificar-a-forma-dos-use-cases-de-extracao.md) nasceu aberto e fechou com as caixas
+por marcar.

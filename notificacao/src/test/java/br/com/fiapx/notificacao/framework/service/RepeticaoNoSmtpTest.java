@@ -5,6 +5,7 @@ import io.quarkus.mailer.reactive.ReactiveMailer;
 import io.smallrye.mutiny.Uni;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -22,13 +23,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <b>politica</b>, nao a anotacao que a implementava. Sem este teste, o `notificacao` seria o
  * unico dos tres com a politica reescrita e nenhuma trava sobre ela.
  *
- * <p>Sem container: o bean tem um campo so. Os ~4 s de relogio sao a espera de 2 s do ADR 0001
- * acontecendo de verdade.
+ * <p>Sem container: o bean e montado a mao, o que dispensa o boot do Quarkus e deixa a espera
+ * entre repeticoes ser atribuida direto no campo.
+ *
+ * <p><b>A espera aqui e 1 ms, e nao os 2 s de producao</b> (ticket 085). O que esta sob
+ * julgamento e a repeticao <i>acontecer</i> e a ultima falha chegar ao chamador, nao quanto ela
+ * espera; com os 2 s a classe levava <b>10,18 s</b>, e com 1 ms leva <b>0,15 s</b>. Que os
+ * 2 s do ADR 0001 sejam 2 s fica guardado pelo default do {@code @ConfigProperty}, e nao por
+ * cenario. O piso e 1 ms e nao zero: o Mutiny recusa backoff zero com
+ * {@code IllegalArgumentException} na subscricao.
  */
 class RepeticaoNoSmtpTest {
 
     /** O servidor que nao volta: falha em toda chamada, nao so nas primeiras. */
     private static final int SEMPRE = Integer.MAX_VALUE;
+
+    /** O piso que o Mutiny aceita: backoff zero e recusado com {@code IllegalArgumentException}. */
+    private static final Duration ESPERA_DO_TESTE = Duration.ofMillis(1);
 
     @Test
     void blipDoServidorDeEmailEAbsorvidoPelaRepeticao() throws Exception {
@@ -56,6 +67,7 @@ class RepeticaoNoSmtpTest {
     private static MailerEmailClient clienteCom(ReactiveMailer mailer) {
         var cliente = new MailerEmailClient();
         cliente.mailer = mailer;
+        cliente.esperaEntreRepeticoes = ESPERA_DO_TESTE;
         return cliente;
     }
 

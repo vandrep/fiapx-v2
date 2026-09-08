@@ -196,6 +196,14 @@ Ao mudar a parte comum de uma dessas implementações, inspecione todas as cópi
 cada uma somente o que preserva o mesmo contrato. Não as force a convergir: o `Rastro`, por
 exemplo, documenta recursos externos diferentes e só o de `videos` oferece `marcar`.
 
+Uma divergência viva, e o motivo dela: as três cópias de `comRepeticao` leem a espera entre
+repetições de configuração, com default de 2 s no próprio código, mas só o `videos` a baixa por
+`%test.` no `application.properties`. O cenário de blip do `videos` é um `@QuarkusTest` e recebe
+o bean do CDI; os do `extracao` e do `notificacao` montam o bean à mão e atribuem o campo direto,
+e nenhum `@QuarkusTest` desses dois serviços injeta blip — um `%test.` neles não teria leitor
+(ticket 085). O código das três continua com a mesma forma; o que diverge é onde o teste baixa a
+espera.
+
 Não há guarda automática de divergência para quatro dessas cinco famílias — `Rastro`,
 `JsonObjectPayloadConverter`, `comRepeticao` e `MotivoFalha.doCodigo`. Nenhuma delas tem
 identidade byte a byte como invariante, e uma comparação parcial confundiria diferença local

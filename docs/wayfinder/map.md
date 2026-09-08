@@ -1086,6 +1086,23 @@ verificadas por teste, não são sugestão). Projeto original em
   por quê. Ticket fechado sem caixa marcada não é o mesmo que critério não atendido, e agora o
   registro distingue os dois.
 
+- [A espera do retry ficou igual nas três
+  cópias](tickets/085-espera-do-retry-nas-outras-duas-copias.md) — o
+  [080](tickets/080-custo-de-teste-do-blip-sem-substituto.md) mediu que as outras duas cópias de
+  `comRepeticao` pagavam a mesma espera fixa e deixou registrado como fora de escopo; este ticket
+  aplicou. A espera saiu de `private static final Duration.ofSeconds(2)` e virou
+  `fiapx.armazenamento.espera-entre-repeticoes` no `extracao` e
+  `fiapx.notificacao.espera-entre-repeticoes` no `notificacao`, com default de 2 s **no código**,
+  como no `videos`. **Medido: `RepeticaoNoMinioTest` 14,34 s → 0,25 s e `RepeticaoNoSmtpTest`
+  10,18 s → 0,15 s, 24,1 s a menos de relógio na suíte.** As duas classes só asseveram contagem
+  de chamadas e tipo de exceção — nenhuma mede a espera, então nenhuma paga por ela; os 2 s do
+  ADR 0001 seguem guardados pelo default do `@ConfigProperty`, e a contagem de repetições
+  continua constante nas três. As duas **não** ganharam `%test.` no `.properties`: os dois testes
+  montam o bean à mão e nenhum `@QuarkusTest` desses serviços injeta blip, então a chave não teria
+  leitor — e essa diferença, que é de `.properties` e não de código, ficou escrita no `AGENTS.md`
+  § *As cópias deliberadas entre serviços*. A forma das três cópias voltou a ser a mesma, e a
+  divergência de código que o 080 introduziu fechou.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

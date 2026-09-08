@@ -15,6 +15,7 @@ import software.amazon.awssdk.utils.async.SimplePublisher;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,9 +35,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * que precisa continuar travado e a <b>politica</b>, nao a anotacao que a implementava: o
  * numero de repeticoes e o fato de a ultima falha chegar ao chamador.
  *
- * <p>Sem container de proposito: o bean tem um campo so, e monta-lo a mao dispensa o boot do
- * Quarkus. O que sobra de relogio — cerca de 14 s somando os tres — e a espera de 2 s do
- * ADR 0001 sendo cumprida de verdade, que e justamente o que esta sob julgamento.
+ * <p>Sem container de proposito: monta-lo a mao dispensa o boot do Quarkus e deixa a espera
+ * entre repeticoes ser atribuida direto no campo.
+ *
+ * <p><b>A espera aqui e 1 ms, e nao os 2 s de producao</b> (ticket 085). O que esta sob
+ * julgamento e a repeticao <i>acontecer</i> e a ultima falha chegar ao chamador, nao quanto ela
+ * espera; com os 2 s a classe levava <b>14,34 s</b>, e com 1 ms leva <b>0,25 s</b>. Que os
+ * 2 s do ADR 0001 sejam 2 s fica guardado pelo default do {@code @ConfigProperty}, e nao por
+ * cenario. O piso e 1 ms e nao zero: o Mutiny recusa backoff zero com
+ * {@code IllegalArgumentException} na subscricao.
  *
  * <p>O que ele <b>nao</b> cobre, e vale saber antes de confiar demais nele: o dublê falha
  * <i>antes</i> de {@code prepare()}, entao nenhuma repeticao aqui encontra o arquivo de
@@ -51,6 +58,9 @@ class RepeticaoNoMinioTest {
 
     /** O armazenamento que nao volta: falha em toda chamada, nao so nas primeiras. */
     private static final int SEMPRE = Integer.MAX_VALUE;
+
+    /** O piso que o Mutiny aceita: backoff zero e recusado com {@code IllegalArgumentException}. */
+    private static final Duration ESPERA_DO_TESTE = Duration.ofMillis(1);
 
     @Test
     void blipNoDownloadEAbsorvidoPelaRepeticao() throws Exception {
@@ -91,6 +101,7 @@ class RepeticaoNoMinioTest {
     private static ArquivoMinioClient clienteCom(S3AsyncClient s3) {
         var cliente = new ArquivoMinioClient();
         cliente.s3 = s3;
+        cliente.esperaEntreRepeticoes = ESPERA_DO_TESTE;
         return cliente;
     }
 

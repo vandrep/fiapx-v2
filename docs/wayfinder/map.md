@@ -1031,6 +1031,16 @@ verificadas por teste, não são sugestão). Projeto original em
   corrigido que as outras duas cópias de `comRepeticao` pagam o mesmo (14,30 s no `extracao`,
   10,19 s no `notificacao`), fora do escopo deste ticket.
 
+- [A raiz de composição volta a ter um nome
+  só](tickets/081-raiz-de-composicao-com-dois-nomes.md) — o 068 moveu `ExtracaoConfiguration` e
+  `NotificacaoConfiguration` para `framework.configuration` e deixou `VideosConfiguration` sozinha
+  em `framework.web`; os três serviços passaram a nomear o mesmo papel de dois jeitos. O argumento
+  do 068 não dependia de o serviço ser worker, e sim de a classe não ser web, então ele valia para
+  as três: `VideosConfiguration` acompanhou. Movimentação pura — a classe é produtora CDI
+  descoberta por scan e não é importada por ninguém, nenhum `import` mudou. `framework.web` no
+  `videos` fica para a borda HTTP de verdade. Nenhuma regra nova: a convenção entrou em prosa no
+  `AGENTS.md`, porque uma guarda cobraria layout com um exemplo por serviço.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

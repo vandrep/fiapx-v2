@@ -1,4 +1,4 @@
-package br.com.fiapx.videos.framework.web;
+package br.com.fiapx.videos.framework.configuration;
 
 import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;

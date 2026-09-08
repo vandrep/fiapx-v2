@@ -153,6 +153,14 @@ promete um `Resource` que não existe e engana quem lê o código. `ExtracaoConf
 `framework.configuration`, e a regra deriva o serviço do mesmo `MODULO_DO_SERVICO` que as
 demais, então as três cópias seguem idênticas sem precisar de exceção por serviço.
 
+O ticket 081 fechou a divergência que essa migração abriu: `VideosConfiguration` ficara sozinha
+em `framework.web` e os três serviços passaram a nomear o mesmo papel de dois jeitos. Ela também
+foi para `framework.configuration`. **A raiz de composição de qualquer serviço mora em
+`framework.configuration`**; no `videos`, `framework.web` fica para o que é de fato borda HTTP —
+`Resource`, mapeadores de `ProblemDetail`, filtro de OpenAPI. Nenhuma regra cobrava isso, e
+nenhuma passou a cobrar: a regra oitava só proíbe `framework.web` nos workers, e uma guarda que
+exigisse o pacote da configuração no `videos` cobraria layout que só tem um exemplo por serviço.
+
 ## As cópias deliberadas entre serviços
 
 Além dos records do contrato de mensagens, cinco implementações se repetem entre serviços:

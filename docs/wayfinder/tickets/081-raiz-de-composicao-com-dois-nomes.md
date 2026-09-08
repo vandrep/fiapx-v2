@@ -2,8 +2,8 @@
 
 - id: 081
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: vandrep
 - bloqueado-por:
 - prioridade: P3
 
@@ -43,3 +43,46 @@ Uma das duas, decidida e escrita:
 - [ ] A regra `workersNaoDevemDeclararPacoteDeBordaHttp` segue verde nos três
 - [ ] Nenhuma mudança de comportamento — o ticket é de layout
 - [ ] `./mvnw test` verde a partir da raiz
+
+## Resolução
+
+**Escolhida a primeira das duas opções: `VideosConfiguration` acompanhou as outras duas.** Ela
+saiu de `br.com.fiapx.videos.framework.web` para `br.com.fiapx.videos.framework.configuration`, e
+os três serviços voltaram a nomear a raiz de composição do mesmo jeito.
+
+**Por que unificar em vez de escrever a diferença.** A alternativa exigia justificar no
+`AGENTS.md` por que a borda pública mantém a configuração junto da web, e não há justificativa
+para dar: `VideosConfiguration` não é borda HTTP em nenhum sentido — não tem `@Path`, não tem
+`Resource`, não conhece requisição. É a mesma classe de coisa que `ExtracaoConfiguration` e
+`NotificacaoConfiguration`, e o [068](068-framework-web-em-worker-sem-borda-http.md) já tinha
+decidido, para essas duas, que raiz de composição não mora em pacote de borda. O argumento dele
+não dependia de o serviço ser worker; dependia de a classe não ser web. Aplicá-lo só a dois dos
+três era o acidente, e o 068 não o notou porque a regra que ele escreveu isenta o `videos` por
+construção.
+
+**A mudança é de layout e só.** `VideosConfiguration` é produtora CDI descoberta por scan e
+**não é importada por nenhuma classe do repositório** — a movimentação não tocou um único
+`import`. As duas únicas menções ao nome estão em `ExtracaoConfiguration` (javadoc, "mesmo papel
+do `VideosConfiguration`") e em `docs/specs/publicar-e-marcar-um-caminho.md`, ambas pelo nome
+simples, ambas ainda verdadeiras. Nenhum `.properties`, `Dockerfile` ou script referencia o
+pacote.
+
+`framework.web` no `videos` ficou com o que é de fato borda HTTP: `VideosResource`,
+`ProblemDetail`, `ProblemDetailMappers`, `SegurancaOpenApiFilter`.
+
+**Nenhuma regra nova.** `workersNaoDevemDeclararPacoteDeBordaHttp` segue verde nos três — ela
+proíbe `framework.web` fora do `videos`, e no `videos` continua permitido, que é onde a borda
+mora. Uma regra que exigisse a configuração em `framework.configuration` cobraria layout com um
+exemplo por serviço, e o `AGENTS.md` passou a carregar a convenção em prosa, ao lado da oitava
+regra que a originou. As três cópias do teste arquitetural não mudaram, e a guarda de identidade
+byte a byte passa.
+
+**Validações**: `./mvnw -pl videos compile` limpo; `videos` completo verde (141 testes);
+`notificacao` verde (29); `scripts/verifica-testes-arquiteturais.sh` e
+`scripts/verifica-ackmanual.sh` passam. Nenhuma mudança de comportamento — nenhum arquivo fora do
+`.java` movido e do `AGENTS.md` foi tocado por este ticket.
+
+O `extracao` reprova 5 cenários nesta máquina por **ausência de `ffmpeg`/`ffprobe` no host**, e
+não por este ticket: verificado no `HEAD` limpo, com as mudanças em *stash*, que a reprovação é
+idêntica. O detalhe está na `## Resolução` do
+[080](080-custo-de-teste-do-blip-sem-substituto.md), que correu na mesma sessão.

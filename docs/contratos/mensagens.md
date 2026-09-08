@@ -233,7 +233,8 @@ que a mensagem foi entregue três vezes sem ack. É o único código que ele pod
 
 `DURACAO_EXCEDIDA` é o único código que não vem de um exit code: vem do `ffprobe` que o
 `extracao` já roda para conferir a contagem de frames. É falha **permanente** — ack imediato,
-sem gastar as três entregas. O teto existe porque bytes não limitam frames, e a borda não
+após o broker confirmar `ExtracaoFalhou`, sem gastar as três entregas quando a publicação
+funciona. O teto existe porque bytes não limitam frames, e a borda não
 pode medir duração sem instalar ffmpeg no `videos` (ticket 011).
 
 ## Caminhos de falha
@@ -242,7 +243,11 @@ Falha **permanente** e falha **transitória esgotada** convergem no mesmo evento
 caminhos diferentes:
 
 - **Permanente** (o usuário mandou um `.txt`): o `extracao` publica `ExtracaoFalhou`
-  imediatamente e dá **ack**. Não gasta viagem à DLQ para o caso mais comum.
+  imediatamente e dá **ack** depois que o broker confirma a publicação. Se essa publicação
+  falhar, o consumidor dá **nack com `requeue=false`**: repetir ffprobe/ffmpeg não conserta o
+  canal de saída, então o comando original segue direto para `extracao.extrair.dlq`. O
+  consumidor da DLQ tenta publicar `ExtracaoFalhou` e, se a indisponibilidade persistir,
+  rejeita o comando para `extracao.extrair.estacionamento`.
 - **Transitória** (MinIO fora, disco cheio, worker morto): `nack`, a mensagem volta à
   fila, o `x-delivery-limit=3` esgota, ela cai em `extracao.extrair.dlq`, e o consumidor
   daquela DLQ publica `ExtracaoFalhou` com `TENTATIVAS_ESGOTADAS`.

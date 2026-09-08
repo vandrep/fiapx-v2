@@ -19,6 +19,15 @@ varredura a alcance. Por isso aquela DLQ deixa de ser terminal e ganha fundo pr�
 `extracao.extrair.estacionamento` — ver *A DLQ do `extracao` tem consumidor* nas
 Consequences, abaixo, e o ticket 029 para o desenho completo.
 
+Emendado na reabertura do mesmo ticket: uma falha permanente só termina em **ack** quando
+`ExtracaoFalhou` foi aceito pelo broker. Se essa publicação falhar, o use case preserva que a
+Extração já tem desfecho definitivo e o consumidor rejeita o comando original com
+`requeue=false`. Ele salta diretamente para `extracao.extrair.dlq`; se a publicação continuar
+indisponível ali, o consumidor da DLQ o rejeita para `extracao.extrair.estacionamento`.
+Reexecutar ffprobe/ffmpeg não pode consertar o canal de saída e só faria o comando circular.
+Falhas transitórias do trabalho continuam seguindo o nack com requeue e o
+`x-delivery-limit=3`.
+
 Emendado de novo no [ticket 061](../wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md):
 a retentativa nos *adapters* de I/O continua sendo a mesma política — três tentativas, espera
 de 2 s, só sobre `Exception` —, mas **deixou de ser o `@Retry`**. O interceptor do
@@ -79,5 +88,10 @@ sem transactional outbox está no
   ganhou fundo próprio, a `extracao.extrair.estacionamento`, para esse caso — ela é terminal
   no lugar da DLQ. `videos.dlq` e `notificacao.dlq` continuam terminais como antes: mensagem
   ali significa banco ou SMTP fora por minutos, que é intervenção humana pelo management UI.
+- **Falha ao publicar uma falha permanente não é falha transitória da Extração.** O comando
+  original recebe nack com `requeue=false` e vai direto à DLQ, sem gastar novas execuções de
+  ffprobe/ffmpeg. O consumidor da DLQ ainda tenta publicar `ExtracaoFalhou` e, se o broker
+  continuar recusando, entrega o comando ao Estacionamento. O nack comum permanece com
+  requeue para falhas transitórias reais do trabalho.
 - **`failure-strategy=fail` está fora** em todos os serviços: derruba o health check e
   quebra o `depends_on: service_healthy` do Compose.

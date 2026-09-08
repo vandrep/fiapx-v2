@@ -275,3 +275,9 @@ níveis: teste do use case para a preservação da classificação, teste do con
 RabbitMQ e MinIO reais em 92,94 s (dois cenários); como o host não tem ffprobe, a execução usou
 um executável determinístico que retorna exit code 1, ainda atravessando o adapter real e sua
 classificação de falha permanente.
+
+O aceite que havia reaberto o ticket também foi repetido contra a imagem local reconstruída:
+`scripts/carga/conservacao.sh mata-publicacao 3` aprovou os três critérios em 71 s — 3/3
+envios receberam 202, os 3/3 Vídeos permaneceram em `PROCESSANDO` como previsto para a falha
+injetada, e 3/3 mensagens novas chegaram a `extracao.extrair.estacionamento` acima da linha de
+base. Evidência em `scripts/carga/saida/029-mata-publicacao-final/`.

@@ -57,5 +57,6 @@ Se for a primeira, vale notar que o piso é **1 ms e não zero**: o Mutiny recus
       [ADR 0001](../../adr/0001-politica-de-falhas.md), e só a espera é preço
 - [ ] As três cópias de `comRepeticao` têm a mesma forma, ou a diferença está escrita no
       `AGENTS.md`
-- [ ] `videos` e `notificacao` verdes; `extracao` sem regressão além das falhas por ausência de
-      `ffmpeg`/`ffprobe` no host, que o 080 registrou
+- [ ] `./mvnw test` verde a partir da raiz. Exige `ffmpeg` instalado no host — sem ele o
+      `extracao` reprova 5 cenários por um motivo que não é o seu código, e o 080 descreve os
+      quatro sintomas diferentes que a mesma causa produz

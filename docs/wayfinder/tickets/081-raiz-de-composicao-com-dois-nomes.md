@@ -42,8 +42,7 @@ Uma das duas, decidida e escrita:
 - [x] Os três serviços nomeiam a raiz de composição do mesmo jeito, ou a diferença está escrita
 - [x] A regra `workersNaoDevemDeclararPacoteDeBordaHttp` segue verde nos três
 - [x] Nenhuma mudança de comportamento — o ticket é de layout
-- [ ] `./mvnw test` verde a partir da raiz — **não satisfeito**, por ausência de
-      `ffmpeg`/`ffprobe` no host e não por este ticket; ver a `## Resolução`
+- [x] `./mvnw test` verde a partir da raiz
 
 ## Resolução
 
@@ -78,10 +77,10 @@ exemplo por serviço, e o `AGENTS.md` passou a carregar a convenção em prosa, 
 regra que a originou. As três cópias do teste arquitetural não mudaram, e a guarda de identidade
 byte a byte passa.
 
-**Validações**: `./mvnw -pl videos compile` limpo; `videos` completo verde (141 testes);
-`notificacao` verde (29); `scripts/verifica-testes-arquiteturais.sh` e
-`scripts/verifica-ackmanual.sh` passam. Nenhuma mudança de comportamento — nenhum arquivo fora do
-`.java` movido e do `AGENTS.md` foi tocado por este ticket.
+**Validações**: `./mvnw -pl videos compile` limpo; **`./mvnw test` a partir da raiz verde, 450
+testes**; `scripts/verifica-testes-arquiteturais.sh` e `scripts/verifica-ackmanual.sh` passam.
+Nenhuma mudança de comportamento — nenhum arquivo fora do `.java` movido e do `AGENTS.md` foi
+tocado por este ticket.
 
 **Build incremental verificado, porque renome de pacote costuma deixar `.class` órfão.** A
 revisão levantou um `ClassNotFoundException` de `SegurancaOpenApiFilter` sem `clean`; **não
@@ -91,7 +90,6 @@ inclusive o `ErroInternoNoOpenApiTest`, que exercita justamente aquele filtro. O
 revisão veio de um build concorrente durante o *stash* desta sessão, quando a árvore estava
 momentaneamente no layout antigo — não é propriedade do que foi entregue.
 
-O `extracao` reprova 5 cenários nesta máquina por **ausência de `ffmpeg`/`ffprobe` no host**, e
-não por este ticket: verificado no `HEAD` limpo, com as mudanças em *stash*, que a reprovação é
-idêntica. O detalhe está na `## Resolução` do
+A suíte só fechou verde depois de instalar o `ffmpeg` no host, que faltava e derrubava 5
+cenários do `extracao` — alheio a este ticket, e detalhado na `## Resolução` do
 [080](080-custo-de-teste-do-blip-sem-substituto.md), que correu na mesma sessão.

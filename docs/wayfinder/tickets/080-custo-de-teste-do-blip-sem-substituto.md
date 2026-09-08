@@ -56,8 +56,7 @@ proteção que existe hoje e o que o cenário custa.
 - [x] A escolha entre ajustar e pagar está registrada, com o motivo
 - [x] Se a espera virar configurável, nenhuma chave de tolerância a falhas por interceptor volta
       ao `.properties` — a guarda do 064 continua verde
-- [ ] `./mvnw test` verde a partir da raiz — **não satisfeito**, por ausência de
-      `ffmpeg`/`ffprobe` no host e não por este ticket; ver a `## Resolução`
+- [x] `./mvnw test` verde a partir da raiz
 
 ## Resolução
 
@@ -108,26 +107,27 @@ volta para zero.
 que a espera curta deixa de cobrir: que os 2 s do ADR sejam os 2 s. Esse número é guardado pelo
 default do `@ConfigProperty`, não por cenário.
 
-**Validações**: `EnvioResisteABlipDoArmazenamentoTest` verde nos quatro cenários; `videos`
-completo verde (141 testes); `notificacao` verde (29); `scripts/verifica-testes-arquiteturais.sh`
-e `scripts/verifica-ackmanual.sh` passam.
+**Validações**: `EnvioResisteABlipDoArmazenamentoTest` verde nos quatro cenários; **`./mvnw test`
+a partir da raiz verde — 450 testes, zero falhas** (141 no `videos`, 280 no `extracao`, 29 no
+`notificacao`); `scripts/verifica-testes-arquiteturais.sh` e `scripts/verifica-ackmanual.sh`
+passam.
 
-**O critério "`./mvnw test` verde a partir da raiz" não foi satisfeito, e não por este ticket.**
-O `extracao` reprova 5 cenários nesta máquina — `SondagemSemFluxoDeVideoTest` e três do
-`CucumberTest`, mais o `ExtracaoEstacionamentoTest` — porque **`ffmpeg` e `ffprobe` não estão
+**O critério da suíte custou uma instalação, e o desvio fica registrado porque ensina algo.** Na
+primeira corrida o `extracao` reprovou 5 cenários — `SondagemSemFluxoDeVideoTest`, três do
+`CucumberTest` e o `ExtracaoEstacionamentoTest` — porque **`ffmpeg` e `ffprobe` não estavam
 instalados no host**. Sem o binário, o `ProcessBuilder` falha ao arrancar e a falha, que deveria
-ser permanente, é classificada como transitória.
+ser permanente, é classificada como transitória. Confirmado como pré-existente e alheio a este
+trabalho antes de qualquer conserto: com as mudanças em *stash*, no `HEAD` limpo, o
+`SondagemSemFluxoDeVideoTest` reprovava igual. Instalado o `ffmpeg` 7.1.5, os 5 passaram e a
+suíte fechou verde.
 
-**Raiz única, sintomas diferentes**, e vale registrar para quem for reproduzir: só o
-`SondagemSemFluxoDeVideoTest` falha pela assinatura direta
+**Raiz única, sintomas diferentes**, e isto é o que vale guardar: só o
+`SondagemSemFluxoDeVideoTest` falhava pela assinatura direta
 (`FalhaTransitoriaDeExtracaoException` onde espera `FalhaPermanenteDeExtracaoException`); o
-`ExtracaoEstacionamentoTest` falha em `expected: not <null>`, porque a falha reclassificada
-recircula em vez de estacionar, e os três cenários do `CucumberTest` falham cada um no seu step
-do feature. Uma causa, quatro mensagens.
-
-Verificado que é pré-existente e alheio a este trabalho: com as mudanças em *stash*, no `HEAD`
-limpo, o `SondagemSemFluxoDeVideoTest` reprova igual. Nenhum arquivo do `extracao` foi tocado
-aqui.
+`ExtracaoEstacionamentoTest` falhava em `expected: not <null>`, porque a falha reclassificada
+recircula em vez de estacionar, e os três cenários do `CucumberTest` falhavam cada um no seu step
+do feature. Uma causa, quatro mensagens — quem topar com uma delas isolada não tem como adivinhar
+que o problema é um binário ausente. Nenhum arquivo do `extracao` foi tocado por este ticket.
 
 ## O que este ticket não entrega
 

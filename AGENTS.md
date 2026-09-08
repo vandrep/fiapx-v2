@@ -161,6 +161,28 @@ foi para `framework.configuration`. **A raiz de composição de qualquer serviç
 nenhuma passou a cobrar: a regra oitava só proíbe `framework.web` nos workers, e uma guarda que
 exigisse o pacote da configuração no `videos` cobraria layout que só tem um exemplo por serviço.
 
+Uma nona regra fecha a série, e ela é **mais velha que as quatro anteriores**: chegou no ticket
+031 e só foi escrita aqui pelo 084 — o ordinal é de registro, não de chegada.
+`bordaNaoPodeBuscarVideoSemDono` proíbe `Resource` e controller de chamar `.buscarPorId(`; na
+borda, só `.buscarPorIdEDono(`. O `VideoGateway` oferece as duas de propósito, porque o caminho
+de mensageria não carrega `Dono` e precisa da busca sem posse.
+
+O defeito que ela evita não é de camada, é de autorização: `GET /videos/{id}` recebe um `id`
+adivinhável do cliente e o `Dono` **só** do token (`docs/contratos/http-videos.md` — "o dono vem
+do token, nunca do request"). Uma borda que buscasse por id e devolvesse o que achou entregaria o
+Vídeo de outro usuário a quem digitasse o UUID certo, e o teste passaria: a busca sem posse é
+legítima em `core`, o tipo de retorno é o mesmo e nada no compilador distingue as duas. A regra é
+sintática porque o erro é sintático — uma chamada trocada, num arquivo em que a outra seria
+igualmente válida.
+
+Ela também guarda o `404` do contrato. Vídeo de outro usuário responde `404`, não `403`, para não
+confirmar que aquele id existe (`docs/contratos/http-videos.md` § *Vídeo de outro usuário*). Esse
+`404` só sai de graça enquanto a consulta filtra por dono no banco: com `buscarPorId`, a borda
+teria o Vídeo em mãos e precisaria comparar o dono ela mesma para então mentir — e é aí que
+alguém escreve `403`, ou esquece a comparação. Filtrando na consulta, "não é seu" e "não existe"
+chegam ao Resource como o mesmo `Optional.empty()`, e o não-vazamento é estrutural em vez de
+depender de disciplina na borda.
+
 ## As cópias deliberadas entre serviços
 
 Além dos records do contrato de mensagens, cinco implementações se repetem entre serviços:

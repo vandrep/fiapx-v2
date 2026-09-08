@@ -1041,6 +1041,17 @@ verificadas por teste, não são sugestão). Projeto original em
   `videos` fica para a borda HTTP de verdade. Nenhuma regra nova: a convenção entrou em prosa no
   `AGENTS.md`, porque uma guarda cobraria layout com um exemplo por serviço.
 
+- [`bordaNaoPodeBuscarVideoSemDono` ganha o
+  *porquê*](tickets/084-bordanaopodebuscarvideosemdono-sem-porque.md) — nona entrada da série do
+  § *As três cópias do teste arquitetural*, e a única sobre **autorização** em vez de dependência
+  entre camadas. O motivo não foi reconstruído: já existia partido entre o javadoc do
+  `VideoGateway` (o *o quê*, citando o 031) e `docs/contratos/http-videos.md` (o *por quê*, sem
+  nomear a regra). Ficou escrito o efeito mais forte, que nenhum dos dois dizia: filtrar por dono
+  **na consulta** faz "não é seu" e "não existe" chegarem à borda como o mesmo `Optional.empty()`,
+  então o `404` que não vaza existência é estrutural, e não disciplina de quem escreve o
+  `Resource`. O ordinal é de registro, não de chegada — a regra é mais velha que quatro das que a
+  precedem na série, e renumerar invalidaria o registro do 078.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

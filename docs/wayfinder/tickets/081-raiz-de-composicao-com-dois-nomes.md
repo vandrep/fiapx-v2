@@ -39,10 +39,11 @@ Uma das duas, decidida e escrita:
 
 ## Critérios de aceite
 
-- [ ] Os três serviços nomeiam a raiz de composição do mesmo jeito, ou a diferença está escrita
-- [ ] A regra `workersNaoDevemDeclararPacoteDeBordaHttp` segue verde nos três
-- [ ] Nenhuma mudança de comportamento — o ticket é de layout
-- [ ] `./mvnw test` verde a partir da raiz
+- [x] Os três serviços nomeiam a raiz de composição do mesmo jeito, ou a diferença está escrita
+- [x] A regra `workersNaoDevemDeclararPacoteDeBordaHttp` segue verde nos três
+- [x] Nenhuma mudança de comportamento — o ticket é de layout
+- [ ] `./mvnw test` verde a partir da raiz — **não satisfeito**, por ausência de
+      `ffmpeg`/`ffprobe` no host e não por este ticket; ver a `## Resolução`
 
 ## Resolução
 
@@ -81,6 +82,14 @@ byte a byte passa.
 `notificacao` verde (29); `scripts/verifica-testes-arquiteturais.sh` e
 `scripts/verifica-ackmanual.sh` passam. Nenhuma mudança de comportamento — nenhum arquivo fora do
 `.java` movido e do `AGENTS.md` foi tocado por este ticket.
+
+**Build incremental verificado, porque renome de pacote costuma deixar `.class` órfão.** A
+revisão levantou um `ClassNotFoundException` de `SegurancaOpenApiFilter` sem `clean`; **não
+reproduz** nesta árvore. O `videos/target/classes/.../framework/web/` não tem
+`VideosConfiguration.class` remanescente, e `./mvnw -pl videos test` sem `clean` sobe e passa,
+inclusive o `ErroInternoNoOpenApiTest`, que exercita justamente aquele filtro. O sintoma da
+revisão veio de um build concorrente durante o *stash* desta sessão, quando a árvore estava
+momentaneamente no layout antigo — não é propriedade do que foi entregue.
 
 O `extracao` reprova 5 cenários nesta máquina por **ausência de `ffmpeg`/`ffprobe` no host**, e
 não por este ticket: verificado no `HEAD` limpo, com as mudanças em *stash*, que a reprovação é

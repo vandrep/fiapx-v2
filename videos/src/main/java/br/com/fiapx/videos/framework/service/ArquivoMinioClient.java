@@ -44,7 +44,12 @@ import java.util.concurrent.Flow;
 public class ArquivoMinioClient {
 
     private static final int MAXIMO_DE_REPETICOES = 3;
-    /** Os 200 ms do default do {@code @Retry}, sobre os 2 s de espera: o Mutiny pede fracao. */
+    /**
+     * Fracao da espera, e nao valor absoluto: o Mutiny pede fracao. Os 10% vieram dos 200 ms de
+     * jitter que o {@code @Retry} do MicroProfile trazia por default sobre 2 s, e continuam
+     * amarrados a {@link #esperaEntreRepeticoes} — sobre a espera de producao dao os mesmos
+     * 200 ms; sobre a espera reduzida do perfil de teste dao proporcionalmente menos.
+     */
     private static final double JITTER = 0.1;
 
     @Inject

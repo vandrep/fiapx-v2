@@ -52,11 +52,12 @@ proteção que existe hoje e o que o cenário custa.
 
 ## Critérios de aceite
 
-- [ ] O custo atual do cenário do blip está medido e escrito
-- [ ] A escolha entre ajustar e pagar está registrada, com o motivo
-- [ ] Se a espera virar configurável, nenhuma chave de tolerância a falhas por interceptor volta
+- [x] O custo atual do cenário do blip está medido e escrito
+- [x] A escolha entre ajustar e pagar está registrada, com o motivo
+- [x] Se a espera virar configurável, nenhuma chave de tolerância a falhas por interceptor volta
       ao `.properties` — a guarda do 064 continua verde
-- [ ] `./mvnw test` verde a partir da raiz
+- [ ] `./mvnw test` verde a partir da raiz — **não satisfeito**, por ausência de
+      `ffmpeg`/`ffprobe` no host e não por este ticket; ver a `## Resolução`
 
 ## Resolução
 
@@ -114,11 +115,19 @@ e `scripts/verifica-ackmanual.sh` passam.
 **O critério "`./mvnw test` verde a partir da raiz" não foi satisfeito, e não por este ticket.**
 O `extracao` reprova 5 cenários nesta máquina — `SondagemSemFluxoDeVideoTest` e três do
 `CucumberTest`, mais o `ExtracaoEstacionamentoTest` — porque **`ffmpeg` e `ffprobe` não estão
-instalados no host**. Sem o binário, o `ProcessBuilder` falha ao arrancar e a falha é classificada
-como transitória em vez de permanente: a asserção lê
-`FalhaTransitoriaDeExtracaoException` onde espera `FalhaPermanenteDeExtracaoException`. Verificado
-que é pré-existente e alheio a este trabalho: com as mudanças em *stash*, no `HEAD` limpo, o
-`SondagemSemFluxoDeVideoTest` reprova igual. Nenhum arquivo do `extracao` foi tocado aqui.
+instalados no host**. Sem o binário, o `ProcessBuilder` falha ao arrancar e a falha, que deveria
+ser permanente, é classificada como transitória.
+
+**Raiz única, sintomas diferentes**, e vale registrar para quem for reproduzir: só o
+`SondagemSemFluxoDeVideoTest` falha pela assinatura direta
+(`FalhaTransitoriaDeExtracaoException` onde espera `FalhaPermanenteDeExtracaoException`); o
+`ExtracaoEstacionamentoTest` falha em `expected: not <null>`, porque a falha reclassificada
+recircula em vez de estacionar, e os três cenários do `CucumberTest` falham cada um no seu step
+do feature. Uma causa, quatro mensagens.
+
+Verificado que é pré-existente e alheio a este trabalho: com as mudanças em *stash*, no `HEAD`
+limpo, o `SondagemSemFluxoDeVideoTest` reprova igual. Nenhum arquivo do `extracao` foi tocado
+aqui.
 
 ## O que este ticket não entrega
 

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,7 +45,22 @@ class PostgresRetryTest {
     }
 
     @Test
-    void esgotaDepoisDeTresRetentativas() {
+    void naoRepeteErrorMesmoQuandoACausaPareceTransitoria() {
+        var tentativas = new AtomicInteger();
+        var retry = new PostgresRetry(Duration.ofMillis(1));
+
+        assertThrows(CompletionException.class, () -> retry.executar(() -> {
+            tentativas.incrementAndGet();
+            return Uni.createFrom().failure(
+                    new RuntimeException("invocacao falhou",
+                            new AssertionError("falha da JVM", new SQLException("conexao caiu", "08006"))));
+        }).subscribeAsCompletionStage().toCompletableFuture().join());
+
+        assertEquals(1, tentativas.get());
+    }
+
+    @Test
+    void esgotaDepoisDeTresTentativas() {
         var tentativas = new AtomicInteger();
         var retry = new PostgresRetry(Duration.ofMillis(1));
 
@@ -53,7 +69,7 @@ class PostgresRetryTest {
             return Uni.createFrom().failure(new SQLException("banco indisponivel", "08001"));
         }).subscribeAsCompletionStage().toCompletableFuture().join());
 
-        assertEquals(4, tentativas.get());
+        assertEquals(3, tentativas.get());
     }
 
     @Test

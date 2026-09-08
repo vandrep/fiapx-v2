@@ -54,7 +54,7 @@ Nenhuma. Pode começar imediatamente e não depende do ticket 056.
 
 **Implementado.** `VideoDataSourceAdapter` passou a executar todas as leituras, escritas,
 transições de estado e consultas da reconciliação por `PostgresRetry`. O executor usa retry
-reativo limitado a **3 retentativas**, com espera de **2 segundos**, e só repete falhas de
+reativo limitado a **3 tentativas totais**, com espera de **2 segundos**, e só repete falhas de
 conexão, timeout, lock/transação abortada ou SQLSTATE transitório (`08`, `40`, `53` e
 `57P01`). Violações permanentes, como `23505`, seguem imediatamente para o chamador.
 
@@ -66,7 +66,7 @@ condicionais continuam sendo as guardas de unicidade dos ADRs 0001/0002; as marc
 continuam sujeitas à reconciliação do ADR 0003.
 
 `PostgresRetryTest` fixa recuperação na terceira tentativa, não-repetição de erro permanente
-e esgotamento em quatro execuções totais. O teste integrado que exercita o adapter contra o
+e esgotamento em três execuções totais. O teste integrado que exercita o adapter contra o
 Postgres também ganhou a prova de que inserir o mesmo Vídeo duas vezes mantém uma única linha.
 
 Validações: o teste unitário do retry e o teste integrado do adapter contra Postgres passaram.

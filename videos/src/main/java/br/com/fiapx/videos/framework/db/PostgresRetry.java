@@ -20,14 +20,14 @@ import java.util.function.Supplier;
  * chamador monta dentro do {@code Supplier}. Reassinar uma operacao Panache ja criada depois
  * de uma falha reutilizaria o contexto que o Hibernate marcou como abortado.
  *
- * <p>Os tres retries e o intervalo de dois segundos sao a politica do ADR 0001. O intervalo
- * e configuravel para testes, mas o limite permanece fixo: uma indisponibilidade longa deve
- * voltar ao consumidor HTTP ou ao mecanismo de reentrega da fila.
+ * <p>As tres tentativas totais e o intervalo de dois segundos sao a politica do ADR 0001.
+ * O intervalo e configuravel para testes, mas o limite permanece fixo: uma indisponibilidade
+ * longa deve voltar ao consumidor HTTP ou ao mecanismo de reentrega da fila.
  */
 @ApplicationScoped
 public class PostgresRetry {
 
-    private static final int MAX_RETRIES = 3;
+    private static final int MAX_RETRIES = 2;
     private static final Duration DELAY = Duration.ofSeconds(2);
 
     private final Duration delay;
@@ -48,7 +48,11 @@ public class PostgresRetry {
     }
 
     static boolean transitoria(Throwable falha) {
-        for (Throwable atual = desembrulhar(falha); atual != null; atual = atual.getCause()) {
+        var raiz = desembrulhar(falha);
+        if (!(raiz instanceof Exception)) {
+            return false;
+        }
+        for (Throwable atual = raiz; atual instanceof Exception; atual = atual.getCause()) {
             if (atual instanceof ConnectException || atual instanceof TimeoutException) {
                 return true;
             }

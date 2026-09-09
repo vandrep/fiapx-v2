@@ -29,7 +29,8 @@ Falhas transitórias do trabalho continuam seguindo o nack com requeue e o
 `x-delivery-limit=3`.
 
 Emendado de novo no [ticket 061](../wayfinder/tickets/061-travamento-raro-com-o-sdk-desligado.md):
-a retentativa nos *adapters* de I/O continua sendo a mesma política — três tentativas, espera
+a retentativa nos *adapters* de I/O continua sendo a mesma política — três tentativas (leia
+*três chamadas ao recurso*: a palavra e a aritmética são as da emenda do 086, abaixo), espera
 de 2 s, só sobre `Exception` —, mas **deixou de ser o `@Retry`**. O interceptor do
 MicroProfile Fault Tolerance, numa operação verdadeiramente assíncrona, reagenda a chamada no
 contexto Vert.x do chamador; quando esse contexto só é liberado depois da própria chamada, o
@@ -37,6 +38,37 @@ reagendamento nunca roda e a Extração trava para sempre, sem thread, sem log e
 medido: 4 travamentos em ~60 ciclos com o interceptor, 0 em 90 sem ele. Onde este ADR diz
 `@Retry`, leia `onFailure().retry()` do Mutiny — e o `ArchitectureConstraintsTest` agora
 reprova o build que traga o interceptor de volta.
+
+Emendado de novo no
+[ticket 086](../wayfinder/tickets/086-contagem-de-repeticoes-em-dois-numeros.md), que é
+aritmética e vocabulário, e não mudança de política. Onde a emenda acima diz "três
+tentativas", leia **três chamadas ao recurso: a primeira mais duas repetições**. A palavra
+*tentativa* volta a ter aqui o sentido único que o [`CONTEXT.md`](../../CONTEXT.md) lhe dá —
+uma *entrega* do trabalho ao serviço `extracao` —, e a repetição de I/O dentro de uma dessas
+entregas passa a se chamar **repetição**.
+
+A aritmética é uma só e mora nesta seção: `atMost(n)` do Mutiny conta as repetições *depois*
+da primeira chamada, então três chamadas se escrevem `atMost(2)`. Ela vale nos quatro lugares
+que implementam esta política, e cada um cita esta frase em vez de recontar: as três cópias de
+`comRepeticao` — `videos` e `extracao` no MinIO, `notificacao` no SMTP — e o `PostgresRetry`
+do `videos`.
+
+**Por que três chamadas, e não quatro.** O número multiplica a espera de 2 s, e é ele que
+decide por quanto tempo um recurso que não volta segura quem o chamou: quatro chamadas
+prendem por 6 s antes de devolver a falha, três por 4 s. Atrás da borda HTTP do `videos` esses
+segundos são o cliente esperando um `500` que já está decidido; nos dois workers são a réplica
+com `max-outstanding-messages=1`, que não consome mais nada enquanto espera. Do outro lado, a
+quarta chamada só compra o blip que durou mais que duas esperas — e um blip de mais de 4 s já
+não é o que esta política tenta absorver: o que segura a indisponibilidade mais longa é o
+`x-delivery-limit=3` da fila, que reentrega o trabalho inteiro depois, e não uma repetição a
+mais dentro do adapter.
+
+Os dois números existiam porque as duas leituras estavam implementadas: as três cópias de
+`comRepeticao` faziam quatro chamadas, herdadas número por número do `@Retry(maxRetries=3)`
+que o ticket 061 removeu, enquanto o `PostgresRetry` já fazia três — o
+[ticket 057](../wayfinder/tickets/057-retry-transitorio-no-postgres.md) o levara de quatro a
+três lendo "três tentativas" como três chamadas. A escolha de agora é a do 057, aplicada aos
+quatro; o que muda no código são as três cópias de `comRepeticao`, que passam a `atMost(2)`.
 
 ## Considered Options
 
@@ -71,6 +103,9 @@ sem transactional outbox está no
 - **"Tentativa" passa a significar "entrega", não "erro".** Fila quorum conta reentregas, e
   um crash do worker consome uma delas sem que nada tenha dado errado. É desejável: um vídeo
   que derruba o processo três vezes é *poison message*. Mas muda o vocabulário.
+  Desde o ticket 086, este ADR não gasta mais a mesma palavra na outra contagem: a ida repetida
+  ao MinIO, ao SMTP ou ao Postgres dentro de uma entrega é **repetição**, e o que se conta ao
+  fim é **chamada ao recurso**.
 - **O e-mail é "pelo menos uma vez", não "exatamente uma vez".** Se o `notificacao` morre
   entre o retorno do SMTP e o ack, a mensagem é reentregue e o e-mail sai de novo. A janela
   é de milissegundos e só em caso de crash — é o preço de `notificacao` sem banco.

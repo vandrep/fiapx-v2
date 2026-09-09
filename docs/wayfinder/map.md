@@ -1103,6 +1103,23 @@ verificadas por teste, não são sugestão). Projeto original em
   § *As cópias deliberadas entre serviços*. A forma das três cópias voltou a ser a mesma, e a
   divergência de código que o 080 introduziu fechou.
 
+- [A contagem do ADR 0001 virou uma
+  só](tickets/086-contagem-de-repeticoes-em-dois-numeros.md) — quatro lugares citavam a mesma
+  frase do ADR ("três tentativas") e a implementavam em dois números: as três cópias de
+  `comRepeticao` faziam **4** chamadas ao recurso, o `PostgresRetry` fazia **3**. A raiz era
+  vocabular — o ADR gastava *tentativa*, que o `CONTEXT.md` reserva para a *entrega* do
+  trabalho ao `extracao`, para contar repetições de I/O. **Decidido: três chamadas ao recurso,
+  a primeira mais duas repetições, `atMost(2)` nos quatro**; as três cópias de `comRepeticao`
+  passaram de `MAXIMO_DE_REPETICOES = 3` para `2`. O motivo é o custo: o número multiplica a
+  espera de 2 s, e quatro chamadas seguram o chamador por 6 s contra 4 s — a quarta só compra o
+  blip que durou mais que duas esperas, e o que segura indisponibilidade mais longa é o
+  `x-delivery-limit=3` da fila. A aritmética está escrita **uma vez**, numa emenda nova do
+  ADR 0001, e os quatro javadocs a citam na mesma palavra; a frase antiga do 061 ficou de pé,
+  com um parêntese que manda ler *três chamadas ao recurso*. O `CONTEXT.md` não precisou de
+  emenda. `RepeticaoNoMinioTest`, `RepeticaoNoSmtpTest` e `PostgresRetryTest` cobram a contagem
+  decidida, e o comentário do Postgres no `application.properties` do `videos` passou a apontar
+  para `framework/db/PostgresRetry`, que é onde o limite mora.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

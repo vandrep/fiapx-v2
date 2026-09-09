@@ -48,15 +48,16 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
  * <h2>A protecao que existe hoje, e o que este cenario custa</h2>
  *
  * <p>A protecao e {@code onFailure().retry()} do Mutiny dentro do
- * {@link ArquivoMinioClient}: 3 repeticoes, jitter de 10%, so sobre {@code Exception}. Nenhum
- * interceptor participa — {@code @Retry} saiu no ticket 061 e as chaves que o configuravam
+ * {@link ArquivoMinioClient}: 3 chamadas ao MinIO — a primeira mais 2 repeticoes (ticket 086)
+ * —, jitter de 10%, so sobre {@code Exception}. Nenhum interceptor participa — {@code @Retry} saiu no ticket 061 e as chaves que o configuravam
  * sairam no 064.
  *
  * <p><b>A espera e configuravel por perfil, e aqui vale 1 ms</b>
  * ({@code fiapx.armazenamento.espera-entre-repeticoes}, ticket 080). Com os 2 s de producao
- * estes quatro cenarios ficavam <b>20 s parados</b> — 4 s em cada cenario de blip, 6 s em cada
- * um de armazenamento persistentemente fora — e a classe levava <b>26,5 s</b>; com 1 ms leva
- * <b>6,2 s</b>. O que esta sob teste e a repeticao <i>acontecer</i> e o desfecho que ela
+ * estes quatro cenarios ficariam <b>16 s parados</b> — 4 s em cada um dos quatro, que sao as
+ * duas esperas da politica. Os numeros medidos no ticket 080 eram 20 s parados e <b>26,5 s</b>
+ * de classe, com a espera de producao e uma repeticao a mais nos dois cenarios de
+ * armazenamento fora; com 1 ms a classe levava <b>6,2 s</b>, e e essa a configuracao daqui. O que esta sob teste e a repeticao <i>acontecer</i> e o desfecho que ela
  * produz, nao a duracao da espera, e foi essa a leitura do ticket 048 quando ele comprou o
  * mesmo efeito pela chave do interceptor.
  *
@@ -67,7 +68,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 @QuarkusTest
 class EnvioResisteABlipDoArmazenamentoTest {
 
-    /** O armazenamento que nao volta: falha em toda tentativa, nao so nas primeiras. */
+    /** O armazenamento que nao volta: falha em toda chamada, nao so nas primeiras. */
     private static final int SEMPRE = Integer.MAX_VALUE;
 
     private static final byte[] PACOTE = "pacote de frames para teste".getBytes();
@@ -160,7 +161,7 @@ class EnvioResisteABlipDoArmazenamentoTest {
     private static class S3QueFalhaAsPrimeiras implements S3AsyncClient {
 
         private final int falhasIniciais;
-        private final AtomicInteger tentativas = new AtomicInteger();
+        private final AtomicInteger chamadas = new AtomicInteger();
 
         private S3QueFalhaAsPrimeiras(int falhasIniciais) {
             this.falhasIniciais = falhasIniciais;
@@ -190,11 +191,11 @@ class EnvioResisteABlipDoArmazenamentoTest {
         }
 
         private boolean falharDestaVez() {
-            return tentativas.incrementAndGet() <= falhasIniciais;
+            return chamadas.incrementAndGet() <= falhasIniciais;
         }
 
         private static SdkClientException inalcancavel() {
-            return SdkClientException.create("MinIO inalcancavel nesta tentativa");
+            return SdkClientException.create("MinIO inalcancavel nesta chamada");
         }
 
         @Override

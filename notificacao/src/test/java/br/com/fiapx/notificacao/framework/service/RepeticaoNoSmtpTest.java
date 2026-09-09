@@ -23,6 +23,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <b>politica</b>, nao a anotacao que a implementava. Sem este teste, o `notificacao` seria o
  * unico dos tres com a politica reescrita e nenhuma trava sobre ela.
  *
+ * <p><b>Sao tres chamadas ao recurso — a primeira mais duas repeticoes</b>, que e a aritmetica
+ * unica do ADR 0001 desde o ticket 086. O cenario do blip falha as duas primeiras de proposito:
+ * assim ele sucede na ultima chamada que a politica permite, e reprova tanto se a repeticao
+ * sumir quanto se sobrar uma.
+ *
  * <p>Sem container: o bean e montado a mao, o que dispensa o boot do Quarkus e deixa a espera
  * entre repeticoes ser atribuida direto no campo.
  *
@@ -61,7 +66,7 @@ class RepeticaoNoSmtpTest {
 
         assertTrue(falha.getCause() instanceof IllegalStateException,
                 "a ultima falha do SMTP tinha de chegar ao chamador, e chegou " + falha.getCause());
-        assertEquals(4, mailer.chamadas(), "a primeira chamada mais as tres repeticoes do ADR 0001");
+        assertEquals(3, mailer.chamadas(), "a primeira chamada mais as duas repeticoes do ADR 0001");
     }
 
     private static MailerEmailClient clienteCom(ReactiveMailer mailer) {

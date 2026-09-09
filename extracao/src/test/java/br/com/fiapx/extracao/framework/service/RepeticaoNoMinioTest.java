@@ -33,7 +33,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * do {@code @Retry} do SmallRye Fault Tolerance. O ticket 061 tirou aquele interceptor daqui —
  * ele reagendava a chamada no contexto Vert.x do consumidor e a prendia la para sempre —, e o
  * que precisa continuar travado e a <b>politica</b>, nao a anotacao que a implementava: o
- * numero de repeticoes e o fato de a ultima falha chegar ao chamador.
+ * numero de chamadas ao MinIO e o fato de a ultima falha chegar ao chamador.
+ *
+ * <p><b>Sao tres chamadas ao recurso — a primeira mais duas repeticoes</b>, que e a aritmetica
+ * unica do ADR 0001 desde o ticket 086. O cenario do blip falha as duas primeiras de proposito:
+ * assim ele sucede na ultima chamada que a politica permite, e reprova tanto se a repeticao
+ * sumir quanto se sobrar uma.
  *
  * <p>Sem container de proposito: monta-lo a mao dispensa o boot do Quarkus e deixa a espera
  * entre repeticoes ser atribuida direto no campo.
@@ -84,7 +89,7 @@ class RepeticaoNoMinioTest {
 
         assertTrue(falha.getCause() instanceof SdkClientException,
                 "a ultima falha do MinIO tinha de chegar ao chamador, e chegou " + falha.getCause());
-        assertEquals(4, s3.chamadas(), "a primeira chamada mais as tres repeticoes do ADR 0001");
+        assertEquals(3, s3.chamadas(), "a primeira chamada mais as duas repeticoes do ADR 0001");
     }
 
     @Test

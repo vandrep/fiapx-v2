@@ -20,13 +20,21 @@ import java.util.function.Supplier;
  * chamador monta dentro do {@code Supplier}. Reassinar uma operacao Panache ja criada depois
  * de uma falha reutilizaria o contexto que o Hibernate marcou como abortado.
  *
- * <p>As tres tentativas totais e o intervalo de dois segundos sao a politica do ADR 0001.
- * O intervalo e configuravel para testes, mas o limite permanece fixo: uma indisponibilidade
- * longa deve voltar ao consumidor HTTP ou ao mecanismo de reentrega da fila.
+ * <p><b>Tres chamadas ao banco — a primeira mais duas repeticoes</b> — e o intervalo de dois
+ * segundos sao a politica do ADR 0001, na mesma aritmetica que as tres copias de
+ * {@code comRepeticao} usam desde o ticket 086. {@code atMost(n)} do Mutiny conta as
+ * repeticoes <i>depois</i> da primeira chamada, entao tres chamadas se escrevem
+ * {@code atMost(2)}. O intervalo e configuravel para testes, mas o limite permanece fixo: uma
+ * indisponibilidade longa deve voltar ao consumidor HTTP ou ao mecanismo de reentrega da fila.
+ *
+ * <p>O javadoc dizia "tres tentativas totais" e as irmas diziam "tres repeticoes" para numeros
+ * diferentes; o 086 deu a palavra <i>tentativa</i> de volta ao {@code CONTEXT.md}, onde ela e
+ * uma <i>entrega</i> do trabalho ao `extracao`, e aqui se conta chamada e repeticao.
  */
 @ApplicationScoped
 public class PostgresRetry {
 
+    /** Duas repeticoes depois da primeira chamada: as tres chamadas ao banco do ADR 0001. */
     private static final int MAX_RETRIES = 2;
     private static final Duration DELAY = Duration.ofSeconds(2);
 

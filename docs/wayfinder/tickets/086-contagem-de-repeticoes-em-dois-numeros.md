@@ -2,8 +2,8 @@
 
 - id: 086
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: vandrep
 - bloqueado-por:
 - prioridade: P2
 
@@ -88,15 +88,59 @@ caro de segurar, e há argumento para ele repetir menos —, então ela vale igu
 
 ## Critérios de aceite
 
-- [ ] As quatro constantes de repetição concordam com a mesma leitura do ADR 0001, ou a
+- [x] As quatro constantes de repetição concordam com a mesma leitura do ADR 0001, ou a
       diferença entre elas está escrita no ADR com o motivo
-- [ ] O ADR 0001 não usa mais *tentativa* para contar repetições de I/O
-- [ ] `CONTEXT.md` § *tentativa* continua valendo sem emenda: nenhuma frase nova disputa a
+- [x] O ADR 0001 não usa mais *tentativa* para contar repetições de I/O
+- [x] `CONTEXT.md` § *tentativa* continua valendo sem emenda: nenhuma frase nova disputa a
       palavra com ele
-- [ ] O javadoc do `PostgresRetry` e o das três cópias de `comRepeticao` declaram o mesmo número
+- [x] O javadoc do `PostgresRetry` e o das três cópias de `comRepeticao` declaram o mesmo número
       de chamadas ao recurso, na mesma palavra
-- [ ] O comentário do Postgres no `application.properties` do `videos` aponta para onde o limite
+- [x] O comentário do Postgres no `application.properties` do `videos` aponta para onde o limite
       mora, ou saiu
-- [ ] `PostgresRetryTest` e os dois testes de repetição (`RepeticaoNoMinioTest`,
+- [x] `PostgresRetryTest` e os dois testes de repetição (`RepeticaoNoMinioTest`,
       `RepeticaoNoSmtpTest`) afirmam a contagem decidida, e falham se ela mudar
-- [ ] `./mvnw test` verde a partir da raiz, com `ffmpeg` no host e o Keycloak do Compose parado
+- [x] `./mvnw test` verde a partir da raiz, com `ffmpeg` no host e o Keycloak do Compose parado
+
+## Resolução
+
+**A decisão: três chamadas ao recurso — a primeira mais duas repetições, `atMost(2)` nos
+quatro lugares.** É a leitura que o [057](057-retry-transitorio-no-postgres.md) já tinha
+aplicado ao `PostgresRetry`; o que muda no código são as três cópias de `comRepeticao`, que
+saíram de `MAXIMO_DE_REPETICOES = 3` para `2` e passaram de 4 chamadas ao recurso para 3.
+
+O motivo está escrito no ADR 0001, e é o peso que o próprio ticket mandou considerar: o número
+multiplica a espera de 2 s. Quatro chamadas seguram quem chamou por 6 s antes de devolver a
+falha, três por 4 s — atrás da borda HTTP do `videos` isso é o cliente esperando um `500` já
+decidido, e nos dois workers é a réplica com `max-outstanding-messages=1` sem consumir mais
+nada. A quarta chamada só compra o blip que durou mais que duas esperas, e a indisponibilidade
+mais longa que isso é assunto do `x-delivery-limit=3` da fila, que reentrega o trabalho
+inteiro, e não de uma repetição a mais dentro do adapter.
+
+O que entrou:
+
+- **O ADR 0001 ganhou uma emenda nova**, com a aritmética escrita uma vez (`atMost(n)` conta as
+  repetições *depois* da primeira chamada, logo três chamadas são `atMost(2)`), o motivo da
+  escolha e a lista dos quatro lugares que a citam. A frase antiga do 061 não foi reescrita:
+  ela ganhou um parêntese que manda ler *três chamadas ao recurso* e aponta para a emenda —
+  o registro do que se decidiu na época fica, e a palavra deixa de contar repetição sozinha.
+- **`CONTEXT.md` não foi tocado.** *Tentativa* continua sendo só a entrega do trabalho ao
+  `extracao`; o ADR é que parou de disputar a palavra.
+- **Os quatro javadocs falam a mesma aritmética na mesma palavra** — "3 chamadas ao recurso: a
+  primeira mais 2 repetições" —, e as três cópias de `comRepeticao` continuam idênticas entre
+  si. O `PostgresRetry` perdeu o "três tentativas totais"; o resto do vocabulário dele
+  (`MAX_RETRIES`, `DELAY`, inglês) é do [087](087-postgresretry-diverge-das-copias-de-comrepeticao.md)
+  e ficou de fora de propósito.
+- **O comentário do `application.properties` do `videos`** ficou, corrigido: diz 3 chamadas,
+  aponta para `framework/db/PostgresRetry` em vez do adapter e avisa que não configura chave
+  nenhuma.
+- **Os três testes travam a contagem.** `RepeticaoNoMinioTest` e `RepeticaoNoSmtpTest` passaram
+  a cobrar 3 chamadas no cenário do recurso persistentemente fora (cobravam 4); os cenários de
+  blip falham as duas primeiras chamadas, então sucedem na última que a política permite e
+  reprovam tanto se a repetição sumir quanto se sobrar uma. `PostgresRetryTest` já cobrava 3 e
+  ganhou a palavra: `esgotaDepoisDeTresChamadasAoBanco`, contador `chamadas`, mensagem em cada
+  asserção.
+
+Efeito colateral medido em relógio: os dois cenários de "armazenamento persistentemente fora"
+do `EnvioResisteABlipDoArmazenamentoTest` passaram a gastar uma espera a menos cada. Com a
+espera de 1 ms do perfil de teste isso não aparece na suíte; em produção são 2 s a menos por
+falha definitiva de I/O.

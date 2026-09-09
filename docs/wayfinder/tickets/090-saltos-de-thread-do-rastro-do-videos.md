@@ -2,8 +2,8 @@
 
 - id: 090
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente
 - bloqueado-por:
 - prioridade: P3
 
@@ -79,3 +79,47 @@ mesmo caminho de código que este ticket precisa mapear.
 - [ ] As cópias do `extracao` e do `notificacao` não foram tocadas para convergir
 - [ ] Nenhum span, nome de span ou atributo mudou
 - [ ] `./mvnw test` verde a partir da raiz
+
+## Resolução
+
+**A cadeia de `naMensagem` do `videos` não troca de thread.** Medido, não deduzido: o consumo
+inteiro — entrada do `@Incoming`, `UPDATE` de transição, publish do `VideoFalhou`, `UPDATE` da
+marca de publicação, fim da cadeia e ack — roda na **mesma event loop** que entregou a mensagem.
+
+A medição foi por sonda temporária (`Thread.currentThread().getName()` na entrada do
+`ExtracaoEventosConsumer`, dentro do `Rastro`, em volta de cada `RepeticaoNoPostgres.executar`,
+em volta do `emitter.send` e no ack) rodando o `ExtracaoRapidaPelaBordaTest`, que é o mais longo
+dos três consumos e o único que passa pelos três recursos. As dez linhas de sonda do consumo
+saíram todas em `vert.x-eventloop-thread-7`, e a entrada registrou `duplicado=true`. As sondas
+foram removidas depois; o que ficou no repositório é o javadoc.
+
+Os dois mecanismos citados caíram pelo motivo que o ticket suspeitava:
+
+- **`@Blocking`**: nenhum dos três consumidores tem a anotação — devolvem `Uni` com ack manual.
+- **SDK da AWS**: o `ArquivoGateway` só é alcançado por `BaixarPacoteUseCase` e por
+  `PublicarExtrairVideo` (borda HTTP e reconciliação), e nenhum `@Incoming` desemboca neles. A
+  inversão que o ticket levantou está dita no javadoc: quando o SDK aparece, o
+  `noContextoDeChamada` existe para **sair** da thread dele.
+
+**O achado que a medição acrescentou, e que salva a § seguinte.** Sem salto de thread, a
+pergunta vira "por que o contexto duplicado ainda importa aqui?". Importa porque a cadeia **se
+interrompe** sem mudar de thread: a repetição do `RepeticaoNoPostgres` espera 2 s antes de
+reassinar, e no intervalo não há quadro de pilha onde o contexto pudesse estar preso. Medido
+num `@QuarkusTest` temporário que rodou `executar` num contexto duplicado com uma falha
+transitória injetada: a continuação volta no **mesmo** contexto duplicado, com
+`isOnDuplicatedContext()` verdadeiro, e o span segue corrente do outro lado da espera. É por
+isso que o mecanismo geral fica de pé — é o contexto que guarda o span, e a thread é só onde ele
+calhou de rodar.
+
+O achado vizinho também foi corrigido: o javadoc de `ArquivoMinioAdapter.noContextoDeChamada`
+não fala mais em "thread do scheduler do fault tolerance" — esse scheduler saiu com o `@Retry`
+no [061](061-travamento-raro-com-o-sdk-desligado.md). No lugar ficou o que é conferível pela
+leitura: a repetição do `ArquivoMinioClient` fica **dentro** da operação que chega à ponte, então
+o `emitOn` a alcança seja qual for a thread em que ela retome.
+
+As cópias do `extracao` e do `notificacao` não foram tocadas. Nenhum span, nome de span ou
+atributo mudou.
+
+### Verificação
+
+`./mvnw test` verde a partir da raiz: 141 `videos`, 280 `extracao`, 29 `notificacao`.

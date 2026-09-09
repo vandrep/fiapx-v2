@@ -40,11 +40,31 @@ import java.util.function.Supplier;
  * </ol>
  *
  * Por isso {@link #naMensagem} pendura um span proprio no contexto da mensagem e o mantem
- * <b>corrente durante todo o trabalho assincrono</b>. Quem o carrega pelos saltos de thread da
- * cadeia (worker pool do {@code @Blocking}, thread do SDK da AWS) e o contexto duplicado do
+ * <b>corrente durante todo o trabalho assincrono</b>. Quem o carrega e o contexto duplicado do
  * Vert.x, onde o {@code QuarkusContextStorage} guarda o contexto do OpenTelemetry — o mesmo
  * mecanismo pelo qual o Panache acha a sessao. Ele nao esta sempre la, e a secao seguinte e
  * sobre isso.
+ *
+ * <p><b>Neste servico a cadeia do consumo nao troca de thread</b> (ticket 090), e isso foi
+ * medido, nao suposto. Do {@code @Incoming} ao ack, o trabalho roda inteiro na event loop que
+ * entregou a mensagem: os tres consumidores do {@code ExtracaoEventosConsumer} devolvem
+ * {@code Uni} com ack manual e <b>nenhum</b> deles anota {@code @Blocking}, o Postgres reativo
+ * devolve a continuacao ao contexto de quem chamou, e o publish do {@code VideoFalhou} tambem.
+ * O SDK da AWS nao aparece aqui: o {@code ArquivoGateway} so e alcancado por
+ * {@code BaixarPacoteUseCase} e por {@code PublicarExtrairVideo} — borda HTTP e reconciliacao —,
+ * e nenhum dos tres {@code @Incoming} desemboca neles. Quando ele aparece, no caminho da borda,
+ * o {@code ArquivoMinioAdapter.noContextoDeChamada} existe justamente para <b>sair</b> da thread
+ * do SDK. A medicao correu o mais longo dos tres consumos, o de {@code extracao.falhou} (UPDATE,
+ * publish, UPDATE), pelo {@code ExtracaoRapidaPelaBordaTest}: uma event loop so, da entrada ao
+ * ack.
+ *
+ * <p>Sem salto de thread, por que o contexto duplicado ainda e o que carrega o span? Porque a
+ * cadeia <b>se interrompe</b> mesmo sem mudar de thread: a repeticao do
+ * {@code RepeticaoNoPostgres} espera 2 s antes de reassinar a operacao, e no intervalo nao ha
+ * quadro de pilha nenhum onde o contexto pudesse estar preso. Medido junto: a continuacao volta
+ * no mesmo contexto duplicado, com {@code isOnDuplicatedContext()} verdadeiro, e o span segue
+ * corrente do outro lado da espera. E o contexto que guarda isso — a thread e so onde ele calhou
+ * de rodar.
  *
  * <h2>Onde o escopo pode atravessar thread, e onde nao (ticket 063)</h2>
  *

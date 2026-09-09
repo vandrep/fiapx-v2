@@ -75,12 +75,17 @@ public class ArquivoMinioAdapter implements ArquivoGateway {
     /**
      * Devolve a continuacao ao contexto Vert.x de quem chamou.
      *
-     * <p>O SDK da AWS completa seus futures na <b>propria</b> event loop — e o retry, quando
-     * dispara, retoma na thread do scheduler do fault tolerance —, e um passo seguinte que
-     * rode ali perde o contexto duplicado onde o Panache guarda a sessao: o
+     * <p>O SDK da AWS completa seus futures na <b>propria</b> event loop, e um passo seguinte
+     * que rode ali perde o contexto duplicado onde o Panache guarda a sessao: o
      * {@code EnviarVideoUseCase} grava no MinIO e so depois no banco, entao sem esta ponte o
      * INSERT morre com "No current Vertx context found". A alternativa seria o core saber a
      * ordem em que os gateways podem ser encadeados, que e exatamente o que ele nao deve saber.
+     *
+     * <p>A repeticao do {@link ArquivoMinioClient} fica <b>dentro</b> da {@code operacao} que
+     * chega aqui, entao seja qual for a thread em que ela retome, o {@code emitOn} desta ponte
+     * ainda a alcanca. Ate o ticket 090 este javadoc dizia que ela retomava "na thread do
+     * scheduler do fault tolerance": esse scheduler saiu com o {@code @Retry} no ticket 061, e a
+     * sexta regra do teste arquitetural proibe o interceptor desde entao.
      */
     private static <T> CompletableFuture<T> noContextoDeChamada(Uni<T> operacao) {
         Context contexto = Vertx.currentContext();

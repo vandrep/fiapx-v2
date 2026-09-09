@@ -1199,6 +1199,24 @@ verificadas por teste, não são sugestão). Projeto original em
   ficou **fora** do glossário de propósito, contra o pedido literal do ticket: ela mora no ADR,
   e o verbete aponta.
 
+- [O `Rastro` do `videos` passou a descrever os saltos de thread que ele de fato
+  dá](tickets/090-saltos-de-thread-do-rastro-do-videos.md) — e a resposta medida é que **não há
+  nenhum**. O achado que o 088 deixou de pé foi confirmado e ampliado: no `videos`, o consumo
+  inteiro (entrada do `@Incoming`, `UPDATE` de transição, publish do `VideoFalhou`, `UPDATE` da
+  marca, ack) roda na **mesma event loop**, medido por sonda temporária de nome de thread no
+  `ExtracaoRapidaPelaBordaTest`. Os dois mecanismos que o javadoc creditava caíram: nenhum dos
+  três consumidores tem `@Blocking`, e o SDK da AWS nem entra na cadeia — o `ArquivoGateway` só é
+  alcançado pela borda HTTP e pela reconciliação; quando ele aparece, o `noContextoDeChamada`
+  existe para **sair** da thread dele, que é quase o oposto do que a frase dizia. **O que a
+  medição acrescentou é o que salva a § seguinte**: sem salto de thread, o contexto duplicado
+  ainda é quem carrega o span porque a cadeia *se interrompe* sem mudar de thread — a espera de
+  2 s da repetição do `RepeticaoNoPostgres` retoma no mesmo contexto duplicado, medido, e no
+  intervalo não há pilha onde o contexto pudesse estar preso. As cópias do `extracao` e do
+  `notificacao` ficaram como estão, pela autorização do `AGENTS.md` § *As cópias deliberadas*.
+  Defeito de registro: nenhum span mudou. Foi junto o achado vizinho — o javadoc de
+  `ArquivoMinioAdapter.noContextoDeChamada` ainda citava "a thread do scheduler do fault
+  tolerance", que não existe desde o [061](tickets/061-travamento-raro-com-o-sdk-desligado.md).
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

@@ -67,14 +67,14 @@ números; este ticket só dá nome ao que ele decidiu.
 
 ## Critérios de aceite
 
-- [ ] `CONTEXT.md` define *repetição* e *chamada ao recurso*, e a definição concorda com o que o
+- [x] `CONTEXT.md` define *repetição* e *chamada ao recurso*, e a definição concorda com o que o
       ADR 0001 e os quatro javadocs fazem hoje
-- [ ] O verbete de *tentativa* continua valendo palavra por palavra: nada do texto novo disputa
+- [x] O verbete de *tentativa* continua valendo palavra por palavra: nada do texto novo disputa
       o sentido dele, e a relação entre os dois está dita
-- [ ] A coincidência dos dois limites em 3 está registrada como coincidência, com o ponteiro
+- [x] A coincidência dos dois limites em 3 está registrada como coincidência, com o ponteiro
       para o [086](086-contagem-de-repeticoes-em-dois-numeros.md)
-- [ ] Nenhuma constante, contagem ou teste mudou
-- [ ] `./mvnw test` verde a partir da raiz
+- [x] Nenhuma constante, contagem ou teste mudou
+- [x] `./mvnw test` verde a partir da raiz
 
 ## Resolução
 
@@ -118,3 +118,50 @@ constante, nenhuma contagem, nenhum teste.
 `scripts/verifica-testes-arquiteturais.sh` e `scripts/verifica-ackmanual.sh` passaram.
 `smoke.sh` e os ensaios de carga não foram executados: a mudança é de Markdown e não toca
 contrato, mensageria, Compose nem imagem.
+
+## Revisão
+
+Revisão de dois eixos sobre `c0bca90...d8a8f57`. Quatro achados aplicados, um recusado, um
+levado ao usuário.
+
+**Aplicados, os três do eixo Spec, e todos do mesmo tipo — o verbete afirmava mais do que o
+código faz:**
+
+1. *"dentro de uma tentativa" não vale no `videos`.* A borda HTTP não consome entrega nenhuma,
+   e o próprio `RepeticaoNoPostgres` diz que uma indisponibilidade longa "deve voltar ao
+   **consumidor HTTP** ou ao mecanismo de reentrega da fila". A frase passou a "dentro de uma
+   unidade de trabalho": uma tentativa onde há tentativa, a própria requisição na borda. O
+   defeito era herdado — os javadocs do `videos` dizem "dentro de uma tentativa" desde o 086, e
+   o verbete copiou a frase do serviço errado.
+2. *"repete do mesmo jeito ao falar com o MinIO e com o Postgres"* apagava exatamente a
+   divergência que o [087](087-postgresretry-diverge-das-copias-de-comrepeticao.md) registrou
+   como deliberada: o filtro de falha. Ganhou parágrafo próprio, com ponteiro para o `AGENTS.md`
+   § *As cópias deliberadas entre serviços*.
+3. *"falhou de forma transitória"* descrevia a intenção da política, não o filtro implementado —
+   as três cópias de `comRepeticao` repetem qualquer `Exception`. Resolvido pelo mesmo parágrafo
+   do ponto 2: o que conta como falha passageira é decisão de cada recurso.
+
+**Aplicado, do eixo Standards:** o parágrafo da coincidência citava `x-delivery-limit` e "o que
+um adapter faz antes de desistir" — implementação, que a linha 3 do próprio `CONTEXT.md` manda
+morar no mapa e nos ADRs. Saíram; a coincidência e o ponteiro para o 086 ficaram, porque o
+critério de aceite 3 os cobra nominalmente. Junto: as cinco caixas dos critérios foram marcadas,
+que é como o 084–088 fecham.
+
+**Recusado, do eixo Standards:** que o número "três chamadas" no verbete duplique o ADR. Ele é o
+valor do termo que a seção define, e o critério de aceite 1 cobra que a definição *concorde* com
+o ADR — concordar sem dizer o número deixaria o verbete sem conteúdo. O que ficou fora é a
+aritmética (`atMost(2)`, o porquê de três e não quatro), que continua só no ADR.
+
+**Levado ao usuário:** o eixo Spec observou que "O que entregar" item 2 pede literalmente
+"`atMost(2)` é como o Mutiny a escreve", e o verbete só aponta para o ADR. É redução consciente
+do mínimo pedido, pelo motivo do parágrafo acima, e fica declarada aqui em vez de silenciosa.
+
+**Um achado menor, conferido e não aplicado:** "não é observável de fora do serviço" foi
+questionado contra o ADR 0004 — spans poderiam expor a ida repetida. O `Rastro` do `videos`
+responde que não: "nenhum span de S3 chegou ao Tempo [...] vão mudo dentro do span do POST". A
+frase saiu mesmo assim, por outro motivo — foi substituída por três fatos conferíveis (não gasta
+tentativa, não aparece na fila, não muda o estado do Vídeo), que é o que ela queria dizer.
+
+**Revalidação.** `./mvnw test` não foi reexecutado depois desta revisão: os quatro ajustes são
+de Markdown, no mesmo arquivo de glossário, e nenhum arquivo Java ou `.properties` foi tocado em
+nenhum dos dois commits.

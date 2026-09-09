@@ -1188,7 +1188,16 @@ verificadas por teste, não são sugestão). Projeto original em
   **só** no ADR, porque este arquivo é glossário. O verbete de *tentativa* ficou intocado, e a
   relação entre os dois está dita: cada tentativa pode gastar várias chamadas ao recurso. Os
   dois limites valerem 3 está registrado como **coincidência**, com o ponteiro para o 086 — que
-  é o preço já pago por ela. Nenhuma constante, contagem ou teste mudou.
+  é o preço já pago por ela. Nenhuma constante, contagem ou teste mudou. **A revisão corrigiu o
+  verbete em três pontos, todos do mesmo tipo — ele afirmava mais do que o código faz:** "dentro
+  de uma tentativa" não vale na borda HTTP do `videos`, que não consome entrega nenhuma (virou
+  "dentro de uma unidade de trabalho", e o defeito era herdado dos javadocs do próprio serviço);
+  "repete do mesmo jeito" apagava o filtro de falha, que o 087 registrou como divergência
+  deliberada; e "falhou de forma transitória" descrevia a intenção da política, não o
+  `Exception` que as três cópias de fato repetem. O que conta como falha passageira ficou dito
+  como decisão **de cada recurso**. A aritmética (`atMost(2)`, o porquê de três e não quatro)
+  ficou **fora** do glossário de propósito, contra o pedido literal do ticket: ela mora no ADR,
+  e o verbete aponta.
 
 ## Ainda não especificado
 

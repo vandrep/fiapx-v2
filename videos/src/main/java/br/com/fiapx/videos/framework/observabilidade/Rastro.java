@@ -50,13 +50,15 @@ import java.util.function.Supplier;
  * entregou a mensagem: os tres consumidores do {@code ExtracaoEventosConsumer} devolvem
  * {@code Uni} com ack manual e <b>nenhum</b> deles anota {@code @Blocking}, o Postgres reativo
  * devolve a continuacao ao contexto de quem chamou, e o publish do {@code VideoFalhou} tambem.
- * O SDK da AWS nao aparece aqui: o {@code ArquivoGateway} so e alcancado por
- * {@code BaixarPacoteUseCase} e por {@code PublicarExtrairVideo} — borda HTTP e reconciliacao —,
- * e nenhum dos tres {@code @Incoming} desemboca neles. Quando ele aparece, no caminho da borda,
- * o {@code ArquivoMinioAdapter.noContextoDeChamada} existe justamente para <b>sair</b> da thread
- * do SDK. A medicao correu o mais longo dos tres consumos, o de {@code extracao.falhou} (UPDATE,
- * publish, UPDATE), pelo {@code ExtracaoRapidaPelaBordaTest}: uma event loop so, da entrada ao
- * ack.
+ * O SDK da AWS nao aparece aqui: as duas idas ao MinIO do {@code ArquivoGateway} —
+ * {@code gravarVideo} e {@code abrirPacote} — sao chamadas so pelo {@code EnviarVideoUseCase} e
+ * pelo {@code BaixarPacoteUseCase}, os dois da borda HTTP. O terceiro chamador do gateway,
+ * {@code PublicarExtrairVideo}, pede so a {@code chaveDoPacote}, que e string pura e nao toca o
+ * {@code S3AsyncClient}. Nenhum dos tres {@code @Incoming} desemboca em nada disso; e quando o
+ * SDK aparece, no caminho da borda, o {@code ArquivoMinioAdapter.noContextoDeChamada} existe
+ * justamente para <b>sair</b> da thread dele. A medicao correu o mais longo dos tres consumos, o
+ * de {@code extracao.falhou} (SELECT, UPDATE, publish, UPDATE), pelo
+ * {@code ExtracaoRapidaPelaBordaTest}: uma event loop so, da entrada ao ack.
  *
  * <p>Sem salto de thread, por que o contexto duplicado ainda e o que carrega o span? Porque a
  * cadeia <b>se interrompe</b> mesmo sem mudar de thread: a repeticao do

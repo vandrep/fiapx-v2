@@ -1205,9 +1205,11 @@ verificadas por teste, não são sugestão). Projeto original em
   inteiro (entrada do `@Incoming`, `UPDATE` de transição, publish do `VideoFalhou`, `UPDATE` da
   marca, ack) roda na **mesma event loop**, medido por sonda temporária de nome de thread no
   `ExtracaoRapidaPelaBordaTest`. Os dois mecanismos que o javadoc creditava caíram: nenhum dos
-  três consumidores tem `@Blocking`, e o SDK da AWS nem entra na cadeia — o `ArquivoGateway` só é
-  alcançado pela borda HTTP e pela reconciliação; quando ele aparece, o `noContextoDeChamada`
-  existe para **sair** da thread dele, que é quase o oposto do que a frase dizia. **O que a
+  três consumidores tem `@Blocking`, e o SDK da AWS nem entra na cadeia — as duas idas ao MinIO
+  só são chamadas pelo `EnviarVideoUseCase` e pelo `BaixarPacoteUseCase`, ambos da borda HTTP, e
+  o terceiro chamador do gateway (`PublicarExtrairVideo`, que a reconciliação também usa) pede só
+  a `chaveDoPacote`, string pura; quando o SDK aparece, o `noContextoDeChamada` existe para
+  **sair** da thread dele, que é quase o oposto do que a frase dizia. **O que a
   medição acrescentou é o que salva a § seguinte**: sem salto de thread, o contexto duplicado
   ainda é quem carrega o span porque a cadeia *se interrompe* sem mudar de thread — a espera de
   2 s da repetição do `RepeticaoNoPostgres` retoma no mesmo contexto duplicado, medido, e no

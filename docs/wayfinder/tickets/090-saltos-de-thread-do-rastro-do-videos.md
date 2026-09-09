@@ -70,15 +70,15 @@ mesmo caminho de código que este ticket precisa mapear.
 
 ## Critérios de aceite
 
-- [ ] A frase dos saltos de thread no `Rastro` do `videos` descreve o que a cadeia de
+- [x] A frase dos saltos de thread no `Rastro` do `videos` descreve o que a cadeia de
       `naMensagem` **deste** serviço faz, verificado e não suposto
-- [ ] Nenhuma menção a `@Blocking` sobrou no `Rastro` do `videos` sem que o `videos` use a
+- [x] Nenhuma menção a `@Blocking` sobrou no `Rastro` do `videos` sem que o `videos` use a
       anotação
-- [ ] O papel do contexto duplicado do Vert.x continua dito, e a § *Onde o escopo pode atravessar
+- [x] O papel do contexto duplicado do Vert.x continua dito, e a § *Onde o escopo pode atravessar
       thread* continua fazendo sentido depois da edição
-- [ ] As cópias do `extracao` e do `notificacao` não foram tocadas para convergir
-- [ ] Nenhum span, nome de span ou atributo mudou
-- [ ] `./mvnw test` verde a partir da raiz
+- [x] As cópias do `extracao` e do `notificacao` não foram tocadas para convergir
+- [x] Nenhum span, nome de span ou atributo mudou
+- [x] `./mvnw test` verde a partir da raiz
 
 ## Resolução
 
@@ -123,3 +123,39 @@ atributo mudou.
 ### Verificação
 
 `./mvnw test` verde a partir da raiz: 141 `videos`, 280 `extracao`, 29 `notificacao`.
+
+## Correção (revisão do 090)
+
+O `/code-review` da entrega achou o mesmo defeito nos dois eixos, e ele é **na frase acima e no
+javadoc**, não na conclusão. O parágrafo errado fica onde está, como manda o `TRACKER.md` § *O
+que pode mudar num ticket `fechado`*; o que ele diz de errado está aqui.
+
+**A enumeração dos chamadores do `ArquivoGateway` estava errada, e nos dois sentidos.** A
+`## Resolução` e o javadoc diziam que o gateway "só é alcançado por `BaixarPacoteUseCase` e por
+`PublicarExtrairVideo`". Falta um chamador e sobra outro:
+
+- **Falta o `EnviarVideoUseCase`**, que chama `gravarVideo` (linha 43) — é o caller real do SDK,
+  e o javadoc do próprio `ArquivoMinioAdapter.noContextoDeChamada`, no mesmo commit, o cita
+  nominalmente.
+- **Sobra o `PublicarExtrairVideo`**, que só chama `chaveDoPacote` (linha 33) — `idVideo + ".zip"`
+  puro, que nunca toca o `S3AsyncClient`. Citá-lo como via de acesso ao SDK inverte o fato.
+
+A frase veio copiada da § *O problema* deste ticket, que a escrevia como suspeita ("pelo que se
+vê"), em vez de ser refeita contra o código — que é exatamente o que a § *O que entregar*
+mandava fazer. A **conclusão não muda**: nenhum `@Incoming` desemboca no SDK, e o
+`EnviarVideoUseCase` é borda HTTP como os outros dois. O que muda é o argumento que a sustenta,
+e é ele que alguém vai reler daqui a três meses — o dano do 061 outra vez.
+
+O javadoc passou a nomear as **duas idas ao MinIO** (`gravarVideo`, `abrirPacote`) e quem as
+chama, em vez do gateway inteiro e de quem o toca. O mapa foi corrigido junto, pelo mesmo motivo.
+
+**Dois ajustes menores, da mesma família.** O caminho medido é `SELECT`, `UPDATE`, publish,
+`UPDATE` — o `TransicaoDeVideo.processar` lê antes de transicionar, e a descrição omitia o
+`SELECT`. E o `ExtracaoRapidaPelaBordaTest` foi chamado de "o mais longo dos três consumos"; o
+teste não é um consumo — ele exercita o mais longo dos três.
+
+**O que ficou como está, e por quê.** O critério 2 pede que nenhuma menção a `@Blocking` sobre
+no `Rastro` do `videos`; sobrou uma, e ela é a **negação** ("nenhum deles anota"). É a mesma
+forma que o [088](088-rastro-do-notificacao-descreve-recursos-alheios.md) deixou no
+`notificacao`, e ela existe para responder à pergunta que o javadoc antigo criou. Dizer que o
+consumo não é bloqueante é o conteúdo, não o resíduo.

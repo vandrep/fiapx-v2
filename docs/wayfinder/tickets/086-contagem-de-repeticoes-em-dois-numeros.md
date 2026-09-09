@@ -185,3 +185,6 @@ mudança, no mesmo commit:
 `./mvnw test` a partir da raiz, com `ffmpeg` no host e o `fiapx-v2-keycloak-1` do Compose
 parado: **BUILD SUCCESS em 3:42, 450 testes** (141 `videos`, 280 `extracao`, 29 `notificacao`),
 0 falhas.
+
+A lacuna de glossário virou o
+[089](089-repeticao-e-chamada-ao-recurso-sem-verbete.md).

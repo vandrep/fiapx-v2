@@ -2,8 +2,8 @@
 
 - id: 089
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: vandrep
 - bloqueado-por:
 - prioridade: P3
 
@@ -75,3 +75,46 @@ números; este ticket só dá nome ao que ele decidiu.
       para o [086](086-contagem-de-repeticoes-em-dois-numeros.md)
 - [ ] Nenhuma constante, contagem ou teste mudou
 - [ ] `./mvnw test` verde a partir da raiz
+
+## Resolução
+
+**Seção própria, e não um parágrafo em § *Extração*.** O ticket deixou a decisão para quem
+executasse, com o argumento pronto dos dois lados; escolhi a seção própria porque repetição
+não tem dono. O `videos` não executa Extração nenhuma e repete do mesmo jeito ao falar com o
+MinIO e com o Postgres — hospedar o conceito em § *Extração* daria a ele um dono que ele não
+tem, e a nota de rodapé que o ticket previa ("o conceito não é exclusivo dela") seria uma
+correção permanente do próprio lugar onde o texto estaria. A seção nova, `## Repetição e
+chamada ao recurso`, fica **entre** § *Extração* e § *Estacionamento*: adjacente a *tentativa*,
+que é de onde o leitor chega, sem ficar dentro dela.
+
+**O que o verbete diz.** Repetição é uma nova ida ao mesmo recurso externo — MinIO, SMTP,
+Postgres — dentro de **uma** tentativa, depois que a ida anterior falhou de forma transitória;
+não gasta tentativa, não aparece na fila, não é observável de fora do serviço. Chamada ao
+recurso é a unidade em que a política se conta: a primeira ida mais as repetições, três ao
+todo.
+
+**A aritmética não veio junto, de propósito.** O `CONTEXT.md` declara de si, na primeira linha,
+que é "só glossário". O verbete diz *o que* três chamadas ao recurso são e aponta para o
+[ADR 0001](../../adr/0001-politica-de-falhas.md) para a aritmética, o motivo do número e o
+`atMost(2)` do Mutiny — que é onde a emenda do 086 já os escreveu **uma vez**, e onde os quatro
+javadocs já vão buscá-los. Duplicá-los aqui recriaria, em outro arquivo, exatamente a
+duplicação que o 086 fechou.
+
+**A relação com *tentativa*, que ficou intocada.** Nenhuma palavra do verbete de *tentativa*
+mudou. O texto novo declara a relação por escala — uma tentativa é uma entrega ao `extracao`, e
+cada tentativa pode gastar várias chamadas ao recurso, inclusive uma tentativa que morre no
+meio — e registra os dois limites em 3 como **coincidência**, com o ponteiro para o
+[086](086-contagem-de-repeticoes-em-dois-numeros.md): três entregas é o `x-delivery-limit` da
+fila, três chamadas é o que um adapter faz antes de desistir, e um pode mudar sem o outro.
+
+**Nenhum código mudou.** `git diff --stat` contra o ponto de partida (`c0bca90`) traz três
+arquivos, todos Markdown: `CONTEXT.md`, `docs/wayfinder/map.md` e este ticket. Nenhuma
+constante, nenhuma contagem, nenhum teste.
+
+**Validação.** `./mvnw test` a partir da raiz: **BUILD SUCCESS**, 452 testes — 143 no
+`videos`, 280 no `extracao`, 29 no `notificacao`, com os quatro testes de repetição verdes
+(`RepeticaoNoPostgresTest`, `RepeticaoNoMinioTest`, `RepeticaoNoSmtpTest` e o
+`EnvioResisteABlipDoArmazenamentoTest`, dentro da suíte do `videos`).
+`scripts/verifica-testes-arquiteturais.sh` e `scripts/verifica-ackmanual.sh` passaram.
+`smoke.sh` e os ensaios de carga não foram executados: a mudança é de Markdown e não toca
+contrato, mensageria, Compose nem imagem.

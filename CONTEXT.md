@@ -49,6 +49,31 @@ worker morre no meio de uma Extração, aquela tentativa foi gasta, ainda que na
 errado com o Vídeo. Isso é deliberado: um Vídeo que derruba o worker repetidamente esgota
 suas tentativas e falha definitivamente.
 
+## Repetição e chamada ao recurso
+
+Uma **repetição** é uma nova ida ao mesmo recurso externo — MinIO, SMTP, Postgres — dentro de
+**uma** tentativa, depois que a ida anterior falhou de forma transitória. Ela não gasta
+tentativa nenhuma, não aparece na fila e não é observável de fora do serviço: quem chamou vê
+uma única operação, que demorou mais.
+
+Uma **chamada ao recurso** é a unidade em que a política de retentativa se conta: a primeira
+ida mais as repetições. Três chamadas ao recurso — a primeira mais duas repetições — é a
+política do [ADR 0001](docs/adr/0001-politica-de-falhas.md), e é lá que moram a aritmética, o
+motivo do número e a forma em que o Mutiny a escreve.
+
+O conceito **não é de Extração**, embora conviva com ela: o `videos`, que não executa Extração
+nenhuma, repete do mesmo jeito ao falar com o MinIO e com o Postgres. Onde há um recurso
+externo com falha transitória, há repetição.
+
+O verbete de *tentativa*, em § *Extração*, fica intocado, e a relação entre os dois é de
+escala: uma tentativa é uma **entrega** do trabalho ao `extracao`, e cada tentativa pode gastar
+várias chamadas ao recurso — uma tentativa que morre no meio já consumiu as chamadas que fez.
+Os dois limites valem 3, e isso é **coincidência**: três entregas é o `x-delivery-limit` da
+fila, três chamadas é o que um adapter faz antes de desistir. Um pode mudar sem o outro. Foi
+essa coincidência, somada à palavra *tentativa* usada nas duas contagens, que fez a mesma frase
+do ADR ser implementada em dois números e custou o
+[ticket 086](docs/wayfinder/tickets/086-contagem-de-repeticoes-em-dois-numeros.md).
+
 ## Estacionamento
 
 Uma fila terminal: destino de uma mensagem que esgotou o próprio fundo — inclusive o fundo

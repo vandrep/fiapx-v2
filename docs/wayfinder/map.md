@@ -1174,6 +1174,22 @@ verificadas por teste, não são sugestão). Projeto original em
   thread do `videos`, que é outra investigação — virou o
   [090](tickets/090-saltos-de-thread-do-rastro-do-videos.md).
 
+- [*Repetição* e *chamada ao recurso* ganharam
+  verbete](tickets/089-repeticao-e-chamada-ao-recurso-sem-verbete.md) — a lacuna que o 086 abriu
+  ao fechar: ele tirou *tentativa* de cima da contagem de I/O e pôs no lugar duas palavras que
+  já eram canônicas em nove arquivos (ADR 0001, quatro javadocs, `MAXIMO_DE_REPETICOES`, duas
+  chaves `espera-entre-repeticoes`, dois nomes de classe de teste e este mapa), sem verbete
+  nenhum. Quem chegasse pelo código encontrava três palavras para coisas próximas — *tentativa*,
+  *repetição*, *chamada* — e só a primeira explicada. **Decidido: seção própria no `CONTEXT.md`,
+  e não um parágrafo dentro de § *Extração*** — repetição acontece igual no `videos`, que não
+  executa Extração nenhuma, e hospedá-la lá daria ao conceito um dono que ele não tem. O verbete
+  define repetição como nova ida ao mesmo recurso externo dentro de **uma** tentativa, e chamada
+  ao recurso como a unidade em que o ADR 0001 conta a política; a aritmética continua morando
+  **só** no ADR, porque este arquivo é glossário. O verbete de *tentativa* ficou intocado, e a
+  relação entre os dois está dita: cada tentativa pode gastar várias chamadas ao recurso. Os
+  dois limites valerem 3 está registrado como **coincidência**, com o ponteiro para o 086 — que
+  é o preço já pago por ela. Nenhuma constante, contagem ou teste mudou.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

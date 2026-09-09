@@ -112,9 +112,10 @@ import java.util.function.Supplier;
  * opostos. A mensageria aparece sozinha: o conector RabbitMQ abre o span de recebimento por
  * conta propria, e o que falta nele e duracao, nao existencia — disso cuida {@link #naMensagem},
  * e nao este metodo. O que fica sem dono aqui e o SMTP do quarkus-mailer, ultimo trecho da
- * travessia de um Video que falhou: nao ha artefato de instrumentacao para o cliente de mail no
- * classpath deste servico — so a API do OpenTelemetry e a telemetria de runtime —, entao sem
- * {@code notificacao.enviar-email} o envio seria um vao mudo no fim do rastro (ticket 088).
+ * travessia de um Video que falhou: nao ha, no classpath deste servico, artefato nenhum de
+ * instrumentacao para o cliente de mail — o que vem junto do OpenTelemetry instrumenta outras
+ * coisas, e nenhuma delas e o SMTP —, entao sem {@code notificacao.enviar-email} o envio seria
+ * um vao mudo no fim do rastro (ticket 088).
  */
 @ApplicationScoped
 public class Rastro {

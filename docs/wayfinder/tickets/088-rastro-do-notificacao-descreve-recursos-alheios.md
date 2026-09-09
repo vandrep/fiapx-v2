@@ -118,3 +118,42 @@ achado, não como conserto.
 `./mvnw test` verde a partir da raiz: 141 `videos`, 280 `extracao`, 29 `notificacao`. O Compose
 da demo foi parado antes e religado depois, pelo motivo de sempre (Dev Services do Keycloak
 contra a porta 8081).
+
+## Correção (revisão do 088)
+
+O `/code-review` da entrega achou três erros **na `## Resolução` acima e no javadoc**, não no
+código. O parágrafo errado fica onde está, como manda o `TRACKER.md` § *O que pode mudar num
+ticket `fechado`*; o que ele diz de errado está aqui.
+
+**1. A frase sobre `@Blocking` é falsa, e o achado estava mal delimitado.** A `## Resolução` diz
+que "`@Blocking` não aparece em código de produção de nenhum dos três serviços". Aparece: o
+`ExtrairVideoConsumer` do `extracao` importa `io.smallrye.common.annotation.Blocking` e anota o
+consumidor na linha 86. O erro é de método — o `grep` que sustentou a frase foi truncado por um
+`head` e a conclusão saiu do pedaço visível.
+
+O achado corrigido é mais estreito, e mais útil: a menção ao worker pool do `@Blocking` no
+`Rastro` do **`extracao` está certa** e não precisa de investigação nenhuma. Só a do **`videos`**
+fica de pé como suspeita — lá `@Blocking` de fato não existe em produção. Continua sem conserto,
+e agora com um alvo só.
+
+**2. A evidência do classpath estava citada errada.** A `## Resolução` cita
+`dependency:list -DincludeGroupIds=io.opentelemetry.instrumentation` como prova de que não há
+`opentelemetry-aws-sdk-2.2` no `notificacao`. Esse comando **não discrimina**: o `aws-sdk-2.2` é
+dependência *condicional* da extensão da AWS, resolvida na augmentação, então ele some do
+`dependency:list` até no `extracao`, onde está presente de verdade. A prova certa é o app
+aumentado, e ela foi refeita:
+
+- `notificacao/target/quarkus-app/lib/main` — `instrumentation-api`, as `annotations`,
+  `runtime-telemetry` e `opentelemetry-jdbc`. Nada de mail, nada de `aws-sdk-2.2`.
+- `extracao/target/quarkus-app/lib/main` — os mesmos **mais**
+  `opentelemetry-aws-sdk-2.2-2.23.0-alpha.jar`.
+
+A conclusão não muda; ela fica mais forte, porque agora o contraste entre os dois serviços é
+visível no mesmo comando.
+
+**3. O javadoc enumerava o classpath, e errava por omissão.** A frase dizia que há "so a API do
+OpenTelemetry e a telemetria de runtime" — e há também o `opentelemetry-jdbc`, que é artefato de
+instrumentação. Num javadoc que existe justamente porque uma frase desatualizada custou uma
+hipótese inteira ao [061](061-travamento-raro-com-o-sdk-desligado.md), enumerar o classpath é
+assumir uma dívida sem necessidade. O texto passou a afirmar só o que sustenta o argumento e é
+estável: não há artefato de instrumentação **para o cliente de mail**.

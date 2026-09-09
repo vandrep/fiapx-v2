@@ -1155,7 +1155,10 @@ verificadas por teste, não são sugestão). Projeto original em
   recebimento sozinho; o que falta nele é duração, e disso cuida `naMensagem`), o SMTP do lado
   sem dono. A frase do SMTP ficou, e a medição alheia — "verificado no `smoke.sh`" — deu lugar a
   uma razão conferível **neste** serviço: não há artefato de instrumentação de mail no classpath
-  dele, e nenhum `opentelemetry-aws-sdk-2.2`, que é o que prova de onde o parágrafo veio. Mais
+  dele, e nenhum `opentelemetry-aws-sdk-2.2`, que é o que mostra de onde o parágrafo veio — e a
+  prova é o **app aumentado** (`target/quarkus-app/lib/main`), não o `dependency:list`: o
+  `aws-sdk-2.2` é dependência condicional da extensão da AWS e só aparece depois da augmentação,
+  então some do `dependency:list` até no `extracao`, onde ele de fato está. Mais
   dois trechos do mesmo arquivo descreviam serviço alheio e foram junto — o javadoc de `emTorno`
   prometia borda HTTP, e a frase dos saltos de thread citava `@Blocking`, SDK da AWS e a sessão
   do Panache. **A conferência que o ticket pediu virou dois achados.** No `videos`, o parágrafo
@@ -1164,9 +1167,11 @@ verificadas por teste, não são sugestão). Projeto original em
   o ticket não mandou conferir, e é a origem do parágrafo copiado — estava o **mesmo** defeito:
   "a mensageria e o Postgres aparecem sozinhos", num serviço cuja linha de banco também é
   nenhum. O ticket citou esse trecho como se fosse do serviço certo. Os dois foram corrigidos no
-  mesmo commit. **Fica um achado sem conserto:** `@Blocking` não aparece em código de produção de
-  serviço nenhum, só em javadoc; se a menção ao "worker pool do `@Blocking`" nas cópias do
-  `videos` e do `extracao` está tão desatualizada quanto a do `notificacao` é outra investigação.
+  mesmo commit. **Fica um achado sem conserto, e ele é só do `videos`:** o `extracao` **tem**
+  `@Blocking` no `ExtrairVideoConsumer`, então a menção ao worker pool na cópia dele está certa;
+  o `videos` não tem a anotação em produção nenhuma, e a mesma frase no `Rastro` dele pode estar
+  tão desatualizada quanto a que saiu do `notificacao`. Confirmar exige ler o roteamento de
+  thread do `videos`, que é outra investigação.
 
 ## Ainda não especificado
 

@@ -49,17 +49,18 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
  *
  * <p>A protecao e {@code onFailure().retry()} do Mutiny dentro do
  * {@link ArquivoMinioClient}: 3 chamadas ao MinIO — a primeira mais 2 repeticoes (ticket 086)
- * —, jitter de 10%, so sobre {@code Exception}. Nenhum interceptor participa — {@code @Retry} saiu no ticket 061 e as chaves que o configuravam
- * sairam no 064.
+ * —, jitter de 10%, so sobre {@code Exception}. Nenhum interceptor participa — {@code @Retry}
+ * saiu no ticket 061 e as chaves que o configuravam sairam no 064.
  *
  * <p><b>A espera e configuravel por perfil, e aqui vale 1 ms</b>
  * ({@code fiapx.armazenamento.espera-entre-repeticoes}, ticket 080). Com os 2 s de producao
  * estes quatro cenarios ficariam <b>16 s parados</b> — 4 s em cada um dos quatro, que sao as
  * duas esperas da politica. Os numeros medidos no ticket 080 eram 20 s parados e <b>26,5 s</b>
  * de classe, com a espera de producao e uma repeticao a mais nos dois cenarios de
- * armazenamento fora; com 1 ms a classe levava <b>6,2 s</b>, e e essa a configuracao daqui. O que esta sob teste e a repeticao <i>acontecer</i> e o desfecho que ela
- * produz, nao a duracao da espera, e foi essa a leitura do ticket 048 quando ele comprou o
- * mesmo efeito pela chave do interceptor.
+ * armazenamento fora; com 1 ms a classe levava <b>6,2 s</b>, e e essa a configuracao daqui.
+ * O que esta sob teste e a repeticao <i>acontecer</i> e o desfecho que ela produz, nao a
+ * duracao da espera, e foi essa a leitura do ticket 048 quando ele comprou o mesmo efeito pela
+ * chave do interceptor.
  *
  * <p>O que a espera curta <b>deixa</b> de cobrir, e esta registrado como escolha: que os 2 s do
  * ADR 0001 sejam os 2 s. Esse numero e guardado pelo default do {@code @ConfigProperty}, e nao

@@ -36,9 +36,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * numero de chamadas ao MinIO e o fato de a ultima falha chegar ao chamador.
  *
  * <p><b>Sao tres chamadas ao recurso — a primeira mais duas repeticoes</b>, que e a aritmetica
- * unica do ADR 0001 desde o ticket 086. O cenario do blip falha as duas primeiras de proposito:
- * assim ele sucede na ultima chamada que a politica permite, e reprova tanto se a repeticao
- * sumir quanto se sobrar uma.
+ * unica do ADR 0001 desde o ticket 086. Quem guarda esse numero e o cenario do recurso
+ * persistentemente fora, que conta as chamadas ate a desistencia; o cenario do blip falha as
+ * duas primeiras de proposito, entao sucede na ultima chamada que a politica permite e reprova
+ * se a repeticao sumir — uma repeticao a mais ele nao pegaria.
  *
  * <p>Sem container de proposito: monta-lo a mao dispensa o boot do Quarkus e deixa a espera
  * entre repeticoes ser atribuida direto no campo.

@@ -68,32 +68,22 @@ public class MailerEmailClient {
 
     /**
      * A repeticao do ADR 0001: <b>3 chamadas ao recurso — a primeira mais 2 repeticoes</b>,
-     * 2 s de espera, jitter de 10% (que e os 200 ms sobre 2 s do default do MicroProfile) e so
-     * sobre {@code Exception} — {@code Error} nao e repetido. {@code atMost(n)} do Mutiny conta
-     * as repeticoes <i>depois</i> da primeira chamada, entao 3 chamadas se escrevem
-     * {@code atMost(2)}. {@code withBackOff(x, x)} e como o Mutiny escreve espera constante;
-     * backoff crescente seria outra politica, que o ADR nao pediu.
+     * 2 s de espera, jitter de 10% e so sobre {@code Exception} — {@code Error} nao e repetido.
+     * A aritmetica, o motivo do numero e a lista dos quatro lugares que a implementam moram no
+     * ADR 0001, na emenda do ticket 086; aqui fica so o que o codigo precisa dizer:
+     * {@code atMost(n)} do Mutiny conta as repeticoes <i>depois</i> da primeira chamada, e
+     * {@code withBackOff(x, x)} e como ele escreve espera constante — backoff crescente seria
+     * outra politica, que o ADR nao pediu.
      *
-     * <p>A aritmetica e uma so e mora no ADR 0001, nao aqui: os quatro lugares que a
-     * implementam — as tres copias de {@code comRepeticao} e o {@code PostgresRetry} do
-     * `videos` — citam a mesma. Ate o ticket 086 esta copia fazia 4 chamadas, herdadas numero
-     * por numero do {@code @Retry(maxRetries=3)} que o ticket 061 removeu, enquanto o
-     * {@code PostgresRetry} fazia 3: o ADR dizia "tres tentativas" e as duas leituras estavam
-     * implementadas. O 086 escolheu 3 chamadas; o motivo — a quarta segura o chamador por mais
-     * 2 s sem comprar blip que ainda valha a pena chamar de transitorio — esta escrito la.
-     *
-     * <p>A contagem continua fixa e a espera virou {@link #esperaEntreRepeticoes}: o numero de
-     * chamadas e a politica, e a espera e o preco dela.
+     * <p>A contagem e fixa e a espera e {@link #esperaEntreRepeticoes}: o numero de chamadas e a
+     * politica, e a espera e o preco dela.
      *
      * <p><b>Repeticao, e nao "tentativa".</b> No {@code CONTEXT.md} tentativa e uma <i>entrega</i>
-     * da mensagem ao worker, e o limite dela e 3 — estas 3 aqui sao chamadas de I/O dentro de
-     * <b>uma</b> tentativa. Desde o 086 o ADR 0001 nao gasta mais a mesma palavra nas duas
-     * contagens.
+     * da mensagem ao worker; estas aqui sao chamadas de I/O dentro de <b>uma</b> tentativa.
      *
-     * <p>O que <b>nao</b> veio junto do {@code @Retry}: o {@code maxDuration} de 3 min. Ele
-     * nunca chegou a limitar nada — as repeticoes de 2 s ficam duas ordens de grandeza abaixo —,
-     * e o caso que ele parecia cobrir, a chamada que nao volta, ele nao cobria: era o
-     * travamento do ticket 061.
+     * <p>O que <b>nao</b> veio junto do {@code @Retry} removido no ticket 061: o
+     * {@code maxDuration} de 3 min. Ele nunca chegou a limitar nada, e o caso que parecia cobrir
+     * — a chamada que nao volta — era o travamento daquele ticket.
      */
     private <T> Uni<T> comRepeticao(Uni<T> chamada) {
         return chamada.onFailure(Exception.class::isInstance).retry()

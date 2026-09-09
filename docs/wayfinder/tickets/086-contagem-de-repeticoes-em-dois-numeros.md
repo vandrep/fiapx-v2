@@ -144,3 +144,44 @@ Efeito colateral medido em relógio: os dois cenários de "armazenamento persist
 do `EnvioResisteABlipDoArmazenamentoTest` passaram a gastar uma espera a menos cada. Com a
 espera de 1 ms do perfil de teste isso não aparece na suíte; em produção são 2 s a menos por
 falha definitiva de I/O.
+
+## Revisão
+
+O `/code-review` de `a9db71f..ff9d3da` rodou os dois eixos. O que ele achou e o que virou
+mudança, no mesmo commit:
+
+- **Corrigido — afirmação falsa sobre o cenário de blip.** A `## Resolução` acima e o javadoc
+  dos dois testes diziam que o blip "reprova tanto se a repetição sumir quanto se sobrar uma".
+  A segunda metade é falsa: com duas falhas iniciais, um `atMost(3)` ainda sucederia na terceira
+  chamada e o cenário passaria. Quem guarda o teto é o cenário do recurso persistentemente fora,
+  que conta as chamadas até a desistência. O javadoc dos dois testes passou a dizer isso.
+- **Corrigido — a aritmética estava recontada nas três cópias.** O javadoc de `comRepeticao`
+  repetia, nas três, a narrativa histórica do 086 e o cálculo inteiro, logo depois de afirmar
+  que a aritmética mora no ADR. O texto encolheu: fica o número, a leitura de `atMost(n)` que o
+  leitor do código precisa, e o ponteiro para o ADR. As três seguem idênticas entre si.
+- **Corrigido — três linhas passaram de 100 colunas** nas edições de javadoc
+  (`videos/.../ArquivoMinioClient`, `EnvioResisteABlipDoArmazenamentoTest`). Não há checkstyle
+  no build; a largura é convenção lida do código ao redor.
+- **Verificado, e o achado não procede.** O eixo Standards questionou a frase do ADR de que o
+  057 levou o `PostgresRetry` "de quatro chamadas a três", por não estar no ticket 057. Está no
+  commit: `61ac28d` muda `MAX_RETRIES` de 3 para 2, que é exatamente 4 chamadas para 3.
+- **Mantido, com o motivo.** A frase antiga do 061 ganhou um parêntese em vez de ficar intocada.
+  O ticket pedia que a emenda não fosse "reescrita silenciosa da frase antiga": ela não é
+  silenciosa — o parêntese diz que a palavra mudou e aponta para a emenda —, e sem ela o ADR
+  continuaria contando repetição de I/O com *tentativa* na frase mais lida do documento.
+- **Mantido, com o motivo.** Sobraram duas ocorrências de *tentativa* no ADR (linhas 7 e 76):
+  as duas contam **entregas** — a citação da pesquisa do 003 e o backoff durável por TTL/DLX
+  nas *Considered Options* —, que é o sentido do `CONTEXT.md`. O critério é sobre contar
+  repetição de I/O, e nenhuma das duas faz isso.
+- **Registrado como lacuna, não resolvido aqui.** *Repetição* e *chamada ao recurso* viraram
+  vocabulário canônico do ADR e do código, e o `CONTEXT.md` não tem verbete para nenhum dos
+  dois. O critério de aceite proibia disputar a palavra *tentativa*, e não disputamos; dar
+  verbete próprio aos dois termos é trabalho de `domain-modeling` e precisa de ticket.
+- **Escopo além dos quatro entregáveis, e por quê.** `EnvioResisteABlipDoArmazenamentoTest`
+  não está nomeado no ticket, mas o javadoc dele afirmava "3 repeticoes" e contava o custo de
+  relógio com uma espera a mais nos cenários de armazenamento fora — os dois viravam falsos com
+  a decisão. Mesmo motivo para o javadoc de `abrirSeExistir`, que dizia "gasta tentativa".
+
+`./mvnw test` a partir da raiz, com `ffmpeg` no host e o `fiapx-v2-keycloak-1` do Compose
+parado: **BUILD SUCCESS em 3:42, 450 testes** (141 `videos`, 280 `extracao`, 29 `notificacao`),
+0 falhas.

@@ -268,9 +268,14 @@ sistema saudável.
 
 | Dashboard da imagem | Serve? | Por quê |
 |---|---|---|
-| *RED Metrics (classic histogram)* | **sim** | taxa, erro e duração do HTTP dos três serviços |
+| *RED Metrics (classic histogram)* | **sim** | taxa e duração do HTTP dos três serviços |
 | *JVM Overview (OpenTelemetry)* | **sim** | heap, threads, classes e GC, uma série por container |
 | *RED Metrics (native histogram)* | **não** | consulta histograma nativo; o Quarkus exporta clássico |
+
+O painel de **erro** do primeiro é o único que continua podendo aparecer vazio, e isso não é
+defeito: ele conta `http_response_status_code=~"5.."`, e num ciclo saudável não há nenhum. As
+demais séries dos dois dashboards que servem foram conferidas com as variáveis em "All" — GC
+inclusive, que tem `jvm_gc_duration_seconds_sum` por container.
 
 Os dois que servem passaram a servir porque as séries ganharam `instance`. O mecanismo é o
 oposto do intuitivo: quem traduz OTLP→Prometheus **não é o coletor, é o próprio Prometheus**, no

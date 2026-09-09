@@ -55,8 +55,8 @@ processors:
   # servicos ficam SEM a etiqueta `instance`, e os tres dashboards de fabrica da imagem
   # filtram TODA query por instance=~".+" (o allValue das variaveis), que exige a etiqueta
   # existir e nao ser vazia — entao eles respondiam "No data" sobre um sistema saudavel.
-  # host.name ja esta em toda serie e e o id do container, unico por replica, que e a
-  # condicao que o `extracao` impoe ao subir com duas.
+  # host.name ja esta em toda serie e e o id do container: UNICO POR REPLICA, que e a
+  # condicao que o `extracao` impoe por subir com duas replicas, e nao uma.
   #
   # A guarda `== nil` preserva quem ja traz a sua: as series de scrape do `rabbitmq` e do
   # `otelcol-contrib` setam `instance` nativamente, e nao podem ser reescritas.

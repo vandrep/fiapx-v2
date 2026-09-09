@@ -116,9 +116,9 @@ pendência.
 ## Resolução
 
 O processador `transform/instancia` já estava no `develop` quando o ticket foi aberto, ensaiado
-mas não conferido. Esta sessão fechou as três linhas que faltavam — o cabeçalho, o `ADR 0004` e o
-`smoke.sh` — e **remediu tudo do zero** contra a stack recém-subida, porque um ensaio de sessão
-anterior não é uma verificação.
+mas não conferido. Esta sessão fechou as três linhas que faltavam — **editou** o cabeçalho e o
+`ADR 0004`, e **rodou** o `smoke.sh`, que não precisou mudar — e **remediu tudo do zero** contra
+a stack recém-subida, porque um ensaio de sessão anterior não é uma verificação.
 
 ### O que mudou
 
@@ -155,6 +155,8 @@ as duas variáveis no `allValue` — `job=~".+", instance=~".+"`, que é a sele�
 | JVM · *Heap utilization* (All/All) | 4 séries, uma por container |
 | JVM · *Threads* (All/All) | `48 / 42 / 40 / 29` |
 | JVM · *Classes* (All/All) | 4 séries |
+| JVM · *GC* (All/All) | `jvm_gc_duration_seconds_sum` presente nos 4 containers |
+| RED · *Error Rate* (All/All) | vazio, e **corretamente**: ele conta `5..` e o ciclo não teve nenhum |
 | `scripts/smoke.sh` | verde de ponta a ponta, **incluindo o passo 11** |
 
 As expressões não foram inventadas: foram lidas dos próprios dashboards, pela API do Grafana

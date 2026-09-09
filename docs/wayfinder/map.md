@@ -1219,9 +1219,9 @@ verificadas por teste, não são sugestão). Projeto original em
   `ArquivoMinioAdapter.noContextoDeChamada` ainda citava "a thread do scheduler do fault
   tolerance", que não existe desde o [061](tickets/061-travamento-raro-com-o-sdk-desligado.md).
 
-- [Os três dashboards de fábrica da imagem passaram a enxergar os três
-  serviços](tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md) — dois
-  deles, e o terceiro não tem conserto por etiqueta. A `grafana/otel-lgtm` provisiona três
+- [Dois dos três dashboards de fábrica da imagem passaram a enxergar os três
+  serviços](tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md) — e o
+  terceiro não tem conserto por etiqueta. A `grafana/otel-lgtm` provisiona três
   dashboards que ninguém tinha registrado, e os três respondiam **"No data"** sobre um sistema
   saudável: eles filtram toda query por `instance=~"$instance"` com `allValue: ".+"`, um matcher
   que **exige a etiqueta existir**, e nenhuma série nossa a tinha. O mecanismo é o oposto do

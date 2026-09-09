@@ -1145,6 +1145,29 @@ verificadas por teste, não são sugestão). Projeto original em
   guarda**: `verifica-ackmanual.sh` compara texto e exige identidade, e o que diverge aqui
   diverge de propósito.
 
+- [Cada `Rastro` passou a descrever os recursos do seu
+  serviço](tickets/088-rastro-do-notificacao-descreve-recursos-alheios.md) — o `AGENTS.md` §
+  *As cópias deliberadas* já dava o `Rastro` como exemplo de cópia que "documenta recursos
+  externos diferentes", e a do `notificacao` não tinha feito essa parte: a seção *Onde `emTorno`
+  vale a pena* chegou do `extracao` inteira, com Postgres e MinIO num serviço que não tem nem um
+  nem outro. Defeito de registro — nenhum span mudou. A seção foi reescrita para os dois
+  recursos que o serviço alcança: a mensageria do lado coberto (o conector abre o span de
+  recebimento sozinho; o que falta nele é duração, e disso cuida `naMensagem`), o SMTP do lado
+  sem dono. A frase do SMTP ficou, e a medição alheia — "verificado no `smoke.sh`" — deu lugar a
+  uma razão conferível **neste** serviço: não há artefato de instrumentação de mail no classpath
+  dele, e nenhum `opentelemetry-aws-sdk-2.2`, que é o que prova de onde o parágrafo veio. Mais
+  dois trechos do mesmo arquivo descreviam serviço alheio e foram junto — o javadoc de `emTorno`
+  prometia borda HTTP, e a frase dos saltos de thread citava `@Blocking`, SDK da AWS e a sessão
+  do Panache. **A conferência que o ticket pediu virou dois achados.** No `videos`, o parágrafo
+  estava certo por edição e não por acidente (ele cita `POST /videos` e o vão mudo do upload de
+  200 MB), mas o javadoc de `emTorno` prometia SMTP, que o `videos` não fala. No `extracao` — que
+  o ticket não mandou conferir, e é a origem do parágrafo copiado — estava o **mesmo** defeito:
+  "a mensageria e o Postgres aparecem sozinhos", num serviço cuja linha de banco também é
+  nenhum. O ticket citou esse trecho como se fosse do serviço certo. Os dois foram corrigidos no
+  mesmo commit. **Fica um achado sem conserto:** `@Blocking` não aparece em código de produção de
+  serviço nenhum, só em javadoc; se a menção ao "worker pool do `@Blocking`" nas cópias do
+  `videos` e do `extracao` está tão desatualizada quanto a do `notificacao` é outra investigação.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

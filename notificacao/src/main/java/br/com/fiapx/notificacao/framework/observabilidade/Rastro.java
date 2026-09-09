@@ -41,10 +41,9 @@ import java.util.function.Supplier;
  *
  * Por isso {@link #naMensagem} pendura um span proprio no contexto da mensagem e o mantem
  * <b>corrente durante todo o trabalho assincrono</b>. Quem o carrega pelos saltos de thread da
- * cadeia (worker pool do {@code @Blocking}, thread do SDK da AWS) e o contexto duplicado do
- * Vert.x, onde o {@code QuarkusContextStorage} guarda o contexto do OpenTelemetry — o mesmo
- * mecanismo pelo qual o Panache acha a sessao. Ele nao esta sempre la, e a secao seguinte e
- * sobre isso.
+ * cadeia — aqui, os do cliente de mail reativo, ja que o consumo nao tem {@code @Blocking} — e o
+ * contexto duplicado do Vert.x, onde o {@code QuarkusContextStorage} guarda o contexto do
+ * OpenTelemetry. Ele nao esta sempre la, e a secao seguinte e sobre isso.
  *
  * <h2>Onde o escopo pode atravessar thread, e onde nao (ticket 063)</h2>
  *
@@ -65,10 +64,12 @@ import java.util.function.Supplier;
  *       e so quando ha contexto duplicado. Sem ele, degrada de proposito: nem escopo nem MDC, e um
  *       WARN. Perder o encadeamento e ruim, e ainda assim e melhor que pendurar contexto numa
  *       thread que ninguem limpa — e, pela medicao, o ramo nao e alcancado em servico nenhum.</li>
- *   <li>{@link #emTorno} <b>nao precisa</b>. Quem le o contexto corrente e a instrumentacao que
- *       monta a requisicao — MinIO, SMTP —, e ela roda no disparo; ja o {@code ffmpeg} nao tem
- *       instrumentacao nenhuma dentro, entao ali o escopo aberto nao servia a ninguem. O escopo
- *       abre e fecha na mesma thread, em volta do disparo, e o span segue vivo ate a conclusao.</li>
+ *   <li>{@link #emTorno} <b>nao precisa</b>. Quem leria o contexto corrente e a instrumentacao
+ *       que monta a requisicao, e ela roda no disparo — que acontece aqui dentro, na mesma
+ *       thread. O SMTP deste servico nem isso pede: o {@code quarkus-mailer} nao traz
+ *       instrumentacao, entao o span de {@code emTorno} e todo o rastro daquele trecho. Nos dois
+ *       casos o escopo abre e fecha na mesma thread, em volta do disparo, e o span segue vivo
+ *       ate a conclusao.</li>
  * </ul>
  *
  * <p>O que a regressao trava esta em {@code EscopoNaoAtravessaThreadTest}, no {@code extracao}
@@ -107,11 +108,13 @@ import java.util.function.Supplier;
  * <h2>Onde {@link #emTorno} vale a pena, e onde nao</h2>
  *
  * So no I/O que a auto-instrumentacao nao cobre — e quem decide isso e a medicao, nao o
- * catalogo de extensoes. A mensageria e o Postgres aparecem sozinhos. O MinIO <b>nao</b>: a
- * extensao da AWS arrasta o {@code opentelemetry-aws-sdk-2.2} e monta o
- * {@code AwsSdkTelemetry}, mas <b>nenhum span de S3 chegou ao Tempo</b> num ciclo completo de
- * Video (ticket 059, verificado no {@code smoke.sh}). O que fica sem dono aqui e o SMTP do quarkus-mailer,
- * ultimo trecho da travessia de um Video que falhou.
+ * catalogo de extensoes. Este servico alcanca dois recursos externos, e eles caem em lados
+ * opostos. A mensageria aparece sozinha: o conector RabbitMQ abre o span de recebimento por
+ * conta propria, e o que falta nele e duracao, nao existencia — disso cuida {@link #naMensagem},
+ * e nao este metodo. O que fica sem dono aqui e o SMTP do quarkus-mailer, ultimo trecho da
+ * travessia de um Video que falhou: nao ha artefato de instrumentacao para o cliente de mail no
+ * classpath deste servico — so a API do OpenTelemetry e a telemetria de runtime —, entao sem
+ * {@code notificacao.enviar-email} o envio seria um vao mudo no fim do rastro (ticket 088).
  */
 @ApplicationScoped
 public class Rastro {
@@ -181,10 +184,10 @@ public class Rastro {
     }
 
     /**
-     * Envolve uma ida a um recurso externo num adapter de I/O — MinIO, SMTP. Filho do que
-     * estiver corrente, que e o span de {@link #naMensagem} no worker ou o span de servidor
-     * HTTP da borda. Sem {@code idVideo}: o adapter de I/O nao o conhece, e o span pai que o
-     * carrega ja esta logo acima.
+     * Envolve uma ida a um recurso externo num adapter de I/O — aqui, o SMTP. Filho do que
+     * estiver corrente, que e sempre o span de {@link #naMensagem}: este servico nao tem borda
+     * HTTP, entao todo trabalho dele comeca no consumo de uma mensagem. Sem {@code idVideo}: o
+     * adapter de I/O nao o conhece, e o span pai que o carrega ja esta logo acima.
      */
     public <T> CompletableFuture<T> emTorno(String nome, Supplier<CompletableFuture<T>> trabalho) {
         var span = tracer.spanBuilder(nome).startSpan();

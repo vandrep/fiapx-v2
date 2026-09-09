@@ -66,9 +66,10 @@ import java.util.function.Supplier;
  *       WARN. Perder o encadeamento e ruim, e ainda assim e melhor que pendurar contexto numa
  *       thread que ninguem limpa — e, pela medicao, o ramo nao e alcancado em servico nenhum.</li>
  *   <li>{@link #emTorno} <b>nao precisa</b>. Quem le o contexto corrente e a instrumentacao que
- *       monta a requisicao — MinIO, SMTP —, e ela roda no disparo; ja o {@code ffmpeg} nao tem
- *       instrumentacao nenhuma dentro, entao ali o escopo aberto nao servia a ninguem. O escopo
- *       abre e fecha na mesma thread, em volta do disparo, e o span segue vivo ate a conclusao.</li>
+ *       monta a requisicao — aqui, o SDK da AWS em volta do MinIO —, e ela roda no disparo; ja o
+ *       {@code ffmpeg} do {@code extracao}, medido junto naquele ticket, nao tem instrumentacao
+ *       nenhuma dentro, e la o escopo aberto nao servia a ninguem. O escopo abre e fecha na mesma
+ *       thread, em volta do disparo, e o span segue vivo ate a conclusao.</li>
  * </ul>
  *
  * <p>O que a regressao trava esta em {@code EscopoNaoAtravessaThreadTest}, no {@code extracao}
@@ -182,7 +183,7 @@ public class Rastro {
     }
 
     /**
-     * Envolve uma ida a um recurso externo num adapter de I/O — MinIO, SMTP. Filho do que
+     * Envolve uma ida a um recurso externo num adapter de I/O — aqui, o MinIO. Filho do que
      * estiver corrente, que e o span de {@link #naMensagem} no worker ou o span de servidor
      * HTTP da borda. Sem {@code idVideo}: o adapter de I/O nao o conhece, e o span pai que o
      * carrega ja esta logo acima.

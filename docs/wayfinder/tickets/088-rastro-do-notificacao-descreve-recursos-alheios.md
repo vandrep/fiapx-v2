@@ -2,8 +2,8 @@
 
 - id: 088
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente
 - bloqueado-por:
 - prioridade: P3
 
@@ -50,12 +50,71 @@ Postgres e MinIO, então o parágrafo pode estar certo lá por acidente e não p
 
 ## Critérios de aceite
 
-- [ ] O javadoc do `Rastro` do `notificacao` não afirma nada sobre Postgres nem sobre MinIO
-- [ ] A frase sobre o SMTP como trecho sem dono continua, e continua sendo o que justifica o uso
+- [x] O javadoc do `Rastro` do `notificacao` não afirma nada sobre Postgres nem sobre MinIO
+- [x] A frase sobre o SMTP como trecho sem dono continua, e continua sendo o que justifica o uso
       de `emTorno` na classe
-- [ ] Nenhuma afirmação de medição ("verificado no `smoke.sh`") é atribuída a um serviço em que a
+- [x] Nenhuma afirmação de medição ("verificado no `smoke.sh`") é atribuída a um serviço em que a
       medição não foi feita
-- [ ] O `Rastro` do `videos` foi conferido contra os recursos do `videos`
-- [ ] As três cópias continuam divergindo só no que o `AGENTS.md` autoriza divergir; nada de
+- [x] O `Rastro` do `videos` foi conferido contra os recursos do `videos`
+- [x] As três cópias continuam divergindo só no que o `AGENTS.md` autoriza divergir; nada de
       comportamento mudou
-- [ ] `./mvnw test` verde a partir da raiz
+- [x] `./mvnw test` verde a partir da raiz
+
+## Resolução
+
+Os três `Rastro` passaram a descrever cada um os recursos externos do seu próprio serviço.
+Nenhum span mudou: a alteração é toda de javadoc.
+
+### `notificacao`
+
+A seção *Onde `emTorno` vale a pena, e onde não* foi reescrita para os dois recursos que o
+serviço alcança. A mensageria fica do lado coberto — o conector RabbitMQ abre o span de
+recebimento sozinho, e o que falta nele é duração, do que cuida `naMensagem` e não `emTorno`. O
+SMTP fica do lado sem dono, com a frase original preservada e agora com uma razão verificável no
+lugar da medição alheia: **não há artefato de instrumentação para o cliente de mail no classpath
+deste serviço**. Conferido por `dependency:list -DincludeGroupIds=io.opentelemetry.instrumentation`
+no `notificacao` — só `instrumentation-api`, as `annotations`, `runtime-telemetry` e um
+`opentelemetry-jdbc` que nada usa. Nenhum `opentelemetry-aws-sdk-2.2`, que é o que confirma que
+o parágrafo sobre o MinIO era do `extracao`.
+
+Mais dois trechos do mesmo arquivo descreviam recursos alheios, e foram junto:
+
+- o javadoc de `emTorno` prometia "MinIO, SMTP" e um "span de servidor HTTP da borda" — o
+  `notificacao` não tem borda HTTP, então o pai é **sempre** o span de `naMensagem`;
+- a frase sobre quem carrega o span pelos saltos de thread citava o worker pool do `@Blocking` e
+  a thread do SDK da AWS. O consumo deste serviço **não tem** `@Blocking` — o próprio
+  `VideoFalhouConsumer` diz isso no javadoc dele —, e não há SDK da AWS. Ficou o cliente de mail
+  reativo. A analogia com a sessão do Panache saiu no mesmo movimento: o banco deste serviço é
+  nenhum.
+
+O bullet do ticket 063 manteve a regra e perdeu os exemplos alheios: aqui nada dentro de
+`emTorno` lê o contexto corrente, porque não há instrumentação de mail para lê-lo.
+
+### `videos` (o que o ticket mandou conferir de passagem)
+
+O parágrafo estava certo **por edição, não por acidente** — ele cita `POST /videos`,
+`INSERT video`, `SELECT video` e o vão mudo do upload de 200 MB, que são deste serviço e de
+nenhum outro. Mas o javadoc de `emTorno` prometia "MinIO, SMTP", e o `videos` não fala SMTP:
+ficou só o MinIO. No bullet do 063, o `ffmpeg` passou a vir atribuído ao `extracao`.
+
+### `extracao` (achado fora do escopo do ticket, corrigido junto)
+
+O parágrafo de origem tinha o **mesmo defeito**: "A mensageria e o Postgres aparecem sozinhos" —
+e o `extracao` também tem "nenhum" na linha do banco em `AGENTS.md` § *O que difere*. O ticket
+não notou porque citou esse trecho como se fosse do serviço certo. Ficou "A mensageria aparece
+sozinha". O javadoc de `emTorno` de lá também prometia SMTP e borda HTTP, que o `extracao` não
+tem; ficaram o MinIO e o `ffmpeg`.
+
+### O que não foi tocado
+
+`@Blocking` não aparece em código de produção de **nenhum** dos três serviços — só em javadoc, e
+no `extracao` e no `notificacao` numa negação. A menção ao "worker pool do `@Blocking`" nas
+cópias do `videos` e do `extracao` pode estar tão desatualizada quanto a do `notificacao`, mas
+confirmar isso exige ler o roteamento de thread dos dois, que é outra investigação. Fica como
+achado, não como conserto.
+
+### Verificação
+
+`./mvnw test` verde a partir da raiz: 141 `videos`, 280 `extracao`, 29 `notificacao`. O Compose
+da demo foi parado antes e religado depois, pelo motivo de sempre (Dev Services do Keycloak
+contra a porta 8081).

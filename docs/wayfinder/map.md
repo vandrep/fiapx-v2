@@ -1219,6 +1219,26 @@ verificadas por teste, não são sugestão). Projeto original em
   `ArquivoMinioAdapter.noContextoDeChamada` ainda citava "a thread do scheduler do fault
   tolerance", que não existe desde o [061](tickets/061-travamento-raro-com-o-sdk-desligado.md).
 
+- [Os três dashboards de fábrica da imagem passaram a enxergar os três
+  serviços](tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md) — dois
+  deles, e o terceiro não tem conserto por etiqueta. A `grafana/otel-lgtm` provisiona três
+  dashboards que ninguém tinha registrado, e os três respondiam **"No data"** sobre um sistema
+  saudável: eles filtram toda query por `instance=~"$instance"` com `allValue: ".+"`, um matcher
+  que **exige a etiqueta existir**, e nenhuma série nossa a tinha. O mecanismo é o oposto do
+  intuitivo — quem traduz OTLP→Prometheus **não é o coletor, é o próprio Prometheus**, em
+  `/api/v1/otlp`, mapeando `service.name`→`job` e `service.instance.id`→`instance`; o primeiro
+  chegava, o segundo não era emitido por ninguém. A correção é uma **segunda** adição ao
+  `otelcol-config.yaml` derivado da imagem (a primeira é o receiver do RabbitMQ, do 058): um
+  processador `transform` que copia `host.name` — id do container, único por réplica — para
+  `service.instance.id`, com guarda `== nil` que preserva a `instance` nativa das séries de
+  *scrape*. Medido contra a stack: as duas réplicas do `extracao` dão **duas** `instance`
+  distintas, *RED Metrics (classic)* e *JVM Overview* respondem com as variáveis em "All", e
+  `rabbitmq` e `otelcol-contrib` ficam inalterados. *RED Metrics (native histogram)* **continua
+  morto e é estrutural**: ele consulta histograma nativo e o Quarkus exporta clássico — fato
+  conhecido, não pendência. O ADR 0004 ganhou a seção que faltava; a recusa de painel curado
+  **não** foi reaberta aqui, e é o [092](tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md)
+  que a discute.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

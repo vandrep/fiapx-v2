@@ -258,6 +258,43 @@ remove o bean `Meter` e derruba o build do `extracao`, pela mesma
   próprio consumidor. Está fechado, e o rótulo "com o SDK desligado" no título daquele ticket
   é o nome de uma correlação que a medição desfez.
 
+## Os três dashboards de fábrica, e o que cada um responde
+
+A imagem `grafana/otel-lgtm` **provisiona três dashboards sozinha**, e este documento os ignorou
+até o [ticket 091](../wayfinder/tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md)
+— a camada foi registrada como se a exploração ad-hoc no *Explore* fosse a única superfície de
+leitura. Não era: havia três telas na home do Grafana, e as três respondiam *"No data"* sobre um
+sistema saudável.
+
+| Dashboard da imagem | Serve? | Por quê |
+|---|---|---|
+| *RED Metrics (classic histogram)* | **sim** | taxa, erro e duração do HTTP dos três serviços |
+| *JVM Overview (OpenTelemetry)* | **sim** | heap, threads, classes e GC, uma série por container |
+| *RED Metrics (native histogram)* | **não** | consulta histograma nativo; o Quarkus exporta clássico |
+
+Os dois que servem passaram a servir porque as séries ganharam `instance`. O mecanismo é o
+oposto do intuitivo: quem traduz OTLP→Prometheus **não é o coletor, é o próprio Prometheus**, no
+`/api/v1/otlp`, e ele mapeia `service.name` → `job` e `service.instance.id` → `instance`. O
+primeiro chega; o segundo não era emitido por ninguém, e as três telas filtram toda query por
+`instance=~"$instance"` com `allValue: ".+"` — um matcher que **exige a etiqueta existir**. As
+únicas séries que a tinham eram as de *scrape* (`rabbitmq` e `otelcol-contrib`), que a setam
+nativamente. O conserto é um processador `transform` na pipeline de métrica do
+`docker/observabilidade/otelcol-config.yaml`, copiando `host.name` — que já está em toda série e
+é o id do container, portanto único por réplica — para `service.instance.id`, com uma guarda
+`== nil` que preserva quem já traz a sua.
+
+O terceiro **continua morto, e é estrutural**: ele consulta
+`http_server_request_duration_seconds` como histograma nativo, sem sufixo, e o Quarkus exporta
+clássico (`_bucket`/`_count`/`_sum`). Nenhuma etiqueta conserta isso; só ligar histograma
+exponencial no exportador dos três serviços, para atender um dashboard que ninguém pediu. Fica
+registrado como fato conhecido, não como pendência.
+
+Isto **não reabre** a recusa de painel curado abaixo — é o argumento dela levado a sério. Dois
+dashboards mantidos pela imagem respondem HTTP e JVM a custo zero de manutenção, que é
+exatamente o que aquela recusa prefere a um painel nosso. O que o ticket 091 corrigiu foi a
+camada estar entregando esse ganho **desligado**, e o custo disso ser maior que o de não tê-lo:
+uma tela que diz "não há dados" quando há é pior que uma tela que não existe.
+
 ## Considered Options
 
 **Não instrumentar, e continuar registrando a ausência como limitação** era a posição até

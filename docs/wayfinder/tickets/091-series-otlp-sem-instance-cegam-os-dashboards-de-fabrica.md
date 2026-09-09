@@ -2,8 +2,8 @@
 
 - id: 091
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-09)
 - bloqueado-por:
 - prioridade: P2
 
@@ -105,10 +105,74 @@ pendência.
 
 ## Critérios de aceite
 
-- [ ] As séries dos três serviços chegam ao Prometheus com `instance`, uma por container
-- [ ] O `extracao` com duas réplicas produz **duas** `instance` distintas
-- [ ] `rabbitmq` e `otelcol-contrib` mantêm a `instance` que já tinham
-- [ ] *RED Metrics (classic histogram)* e *JVM Overview* devolvem série com as variáveis em "All"
-- [ ] O cabeçalho do `otelcol-config.yaml` diz que são duas adições, e quais
-- [ ] O `ADR 0004` registra que os dashboards de fábrica existem, quais servem e qual não serve
-- [ ] `scripts/smoke.sh` continua verde, incluindo o passo 11
+- [x] As séries dos três serviços chegam ao Prometheus com `instance`, uma por container
+- [x] O `extracao` com duas réplicas produz **duas** `instance` distintas
+- [x] `rabbitmq` e `otelcol-contrib` mantêm a `instance` que já tinham
+- [x] *RED Metrics (classic histogram)* e *JVM Overview* devolvem série com as variáveis em "All"
+- [x] O cabeçalho do `otelcol-config.yaml` diz que são duas adições, e quais
+- [x] O `ADR 0004` registra que os dashboards de fábrica existem, quais servem e qual não serve
+- [x] `scripts/smoke.sh` continua verde, incluindo o passo 11
+
+## Resolução
+
+O processador `transform/instancia` já estava no `develop` quando o ticket foi aberto, ensaiado
+mas não conferido. Esta sessão fechou as três linhas que faltavam — o cabeçalho, o `ADR 0004` e o
+`smoke.sh` — e **remediu tudo do zero** contra a stack recém-subida, porque um ensaio de sessão
+anterior não é uma verificação.
+
+### O que mudou
+
+| Arquivo | Mudança |
+|---|---|
+| `docker/observabilidade/otelcol-config.yaml` | cabeçalho passa a declarar **duas** adições, quais são e de que ticket vem cada uma; a instrução de rederivar no upgrade da imagem manda reaplicar as duas. O comentário do processador dizia *"EXPERIMENTO (nao commitado ainda)"* e mentia — foi reescrito como *"SEGUNDA adicao (ticket 091)"*, dizendo o que o `== nil` preserva e por quê |
+| `docs/adr/0004-camada-de-observabilidade.md` | seção nova *Os três dashboards de fábrica, e o que cada um responde*, antes de *Considered Options* |
+| `docs/wayfinder/map.md` | linha em *Decisões até aqui* |
+
+Nenhuma linha de YAML executável mudou: o processador já estava certo. O que faltava era o
+registro e a prova.
+
+### A seção do ADR, e onde ela **não** encosta
+
+Ela põe os três dashboards numa tabela (quais dois servem, qual não serve e por quê), explica o
+mapeamento OTLP→Prometheus e fecha dizendo que **isto não reabre a recusa de painel curado** —
+é o argumento dela levado a sério: dois dashboards mantidos pela imagem, a custo zero de
+manutenção, é exatamente o que aquela recusa prefere a um painel nosso. A reversão parcial da
+recusa continua sendo assunto do [092](092-painel-do-vao-e-a-reversao-parcial-da-recusa.md), e a
+frase *"Painel curado no Grafana foi recusado e continua fora"* **não foi tocada** aqui.
+
+### Medido nesta sessão, contra o Compose de pé
+
+Consultas pelo proxy de datasource do Grafana (o Prometheus não publica porta, ticket 058), com
+as duas variáveis no `allValue` — `job=~".+", instance=~".+"`, que é a seleção "All":
+
+| Verificação | Resultado |
+|---|---|
+| `count by (job, instance) (jvm_class_count)` | 4 séries: `fiapx-videos=21a71b37d77a`, `fiapx-notificacao=ec3ece40f6a9`, `fiapx-extracao=7c2ae164345b` **e** `e8ebb0d3a29f` |
+| `extracao` com duas réplicas | **duas** `instance` distintas, uma por container |
+| `rabbitmq` / `otelcol-contrib` | `rabbitmq:15692` e os dois uuids do coletor — inalterados |
+| RED · *Request Rate* (All/All) | `0.321` |
+| RED · *Duration p95* (All/All) | `0.0178 s` |
+| JVM · *Heap utilization* (All/All) | 4 séries, uma por container |
+| JVM · *Threads* (All/All) | `48 / 42 / 40 / 29` |
+| JVM · *Classes* (All/All) | 4 séries |
+| `scripts/smoke.sh` | verde de ponta a ponta, **incluindo o passo 11** |
+
+As expressões não foram inventadas: foram lidas dos próprios dashboards, pela API do Grafana
+(`/api/dashboards/uid/…`), e rodadas com `$job` e `$instance` substituídos pelo `.+` do
+`allValue`.
+
+O coletor foi reiniciado depois da edição do cabeçalho e voltou `healthy`, sem erro de
+configuração no log — os comentários não quebraram o YAML.
+
+### Um achado vizinho, que não é defeito
+
+Sobram **12 famílias de métrica sem `job` nem `instance`** na base: `traces_spanmetrics_*` e
+`traces_service_graph_*`. Elas são do **Tempo**, geradas a partir dos spans, e não passam pelo
+coletor — nenhum processador as alcança. Não afetam os três dashboards, que também filtram por
+`job=~"$job"`: sem `job`, elas nem entram na lista da variável.
+
+### O que continua fora
+
+*RED Metrics (native histogram)* segue morto, como o corpo do ticket previu, e por motivo
+estrutural: histograma nativo contra um exportador clássico. Registrado no ADR como fato
+conhecido, não como pendência.

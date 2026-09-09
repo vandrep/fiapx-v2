@@ -1,10 +1,11 @@
 # Config do coletor da stack de observabilidade (ticket 058).
 #
-# DERIVADA de `/otel-lgtm/otelcol-config.yaml` da imagem `grafana/otel-lgtm:0.32.1`, com uma
-# unica adicao: o receiver `prometheus/rabbitmq`. A imagem nao oferece mecanismo de inclusao,
-# so substituicao do arquivo inteiro — entao subir a versao da imagem exige rederivar este
-# arquivo e conferir o diff, do mesmo jeito que o ticket 035 fez com os campos privados do
-# SmallRye. O `docker-compose.yml` fixa a versao justamente para que isso nao aconteca sozinho.
+# DERIVADA de `/otel-lgtm/otelcol-config.yaml` da imagem `grafana/otel-lgtm:0.32.1`, com DUAS
+# adicoes: o receiver `prometheus/rabbitmq` (ticket 058) e o processador `transform/instancia`
+# (ticket 091). A imagem nao oferece mecanismo de inclusao, so substituicao do arquivo inteiro
+# — entao subir a versao da imagem exige rederivar este arquivo e reaplicar as DUAS adicoes,
+# conferindo o diff, do mesmo jeito que o ticket 035 fez com os campos privados do SmallRye. O
+# `docker-compose.yml` fixa a versao justamente para que isso nao aconteca sozinho.
 #
 # O broker e raspado em `/metrics/detailed`, e nao no `/metrics` padrao: o padrao devolve
 # metrica AGREGADA, sem rotulo de fila, e os tres alertas do ticket 058 sao todos por fila
@@ -48,12 +49,17 @@ extensions:
 
 processors:
   batch:
-  # EXPERIMENTO (nao commitado ainda): dar `service.instance.id` as series que chegam por OTLP.
+  # SEGUNDA adicao (ticket 091): da `service.instance.id` as series que chegam por OTLP.
   # Quem traduz OTLP->Prometheus e o proprio Prometheus, em /api/v1/otlp, e ele mapeia
   # service.name->job e service.instance.id->instance. Sem o segundo, as series dos tres
-  # servicos ficam SEM a etiqueta `instance`, e os dashboards de fabrica da imagem filtram
-  # por instance=~".+" (allValue), que exige a etiqueta existir. host.name ja esta em toda
-  # serie e e o id do container, unico por replica.
+  # servicos ficam SEM a etiqueta `instance`, e os tres dashboards de fabrica da imagem
+  # filtram TODA query por instance=~".+" (o allValue das variaveis), que exige a etiqueta
+  # existir e nao ser vazia — entao eles respondiam "No data" sobre um sistema saudavel.
+  # host.name ja esta em toda serie e e o id do container, unico por replica, que e a
+  # condicao que o `extracao` impoe ao subir com duas.
+  #
+  # A guarda `== nil` preserva quem ja traz a sua: as series de scrape do `rabbitmq` e do
+  # `otelcol-contrib` setam `instance` nativamente, e nao podem ser reescritas.
   transform/instancia:
     error_mode: ignore
     metric_statements:

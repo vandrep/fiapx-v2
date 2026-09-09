@@ -204,11 +204,45 @@ e nenhum `@QuarkusTest` desses dois serviços injeta blip — um `%test.` neles 
 (ticket 085). O código das três continua com a mesma forma; o que diverge é onde o teste baixa a
 espera.
 
+A sexta família é a única que se repete **dentro** de um serviço, e não entre eles: o `videos`
+carrega duas implementações da mesma forma reativa — `RepeticaoNoPostgres.executar` em
+`framework/db` e `comRepeticao` no `ArquivoMinioClient`. Elas não se fundem porque repetem por
+motivos diferentes: uma absorve blip de I/O no MinIO, a outra indisponibilidade transitória do
+Postgres. O ticket 087 alinhou tudo o que não tinha motivo para divergir — o vocabulário (o
+nome da classe, `MAXIMO_DE_REPETICOES`, `esperaEntreRepeticoes`), a aritmética do ticket 086, o
+jitter de 10% e a costura da espera, que nas quatro é `@ConfigProperty` no namespace `fiapx.`
+com o default de 2 s no próprio código.
+
+Sobrou uma divergência, e ela é a razão de as duas existirem: **o filtro de falha**. O
+`comRepeticao` repete qualquer `Exception`, porque do S3 quase toda falha é o blip que a
+política quer absorver. O `RepeticaoNoPostgres` repete **só** indisponibilidade transitória —
+conexão, timeout, as duas exceções do Hibernate e os SQLSTATE `08`, `40`, `53` e `57P01` —,
+porque uma violação de constraint repetida três vezes dá três vezes o mesmo erro e ainda segura
+a borda HTTP por 4 s. O `deferred(Supplier)` é consequência disso: cada repetição do banco
+reabre a sessão ou a transação que o Hibernate marcou como abortada, e o MinIO não tem nada
+equivalente para reabrir. Não force nenhuma das duas para a forma da outra.
+
+As três travessias de `getCause()` do repositório **não** são uma família, e o ticket 087
+decidiu isso em vez de unificá-las: elas fazem perguntas diferentes. O `desembrulhar` do
+`RepeticaoNoPostgres` tira envelopes de `CompletionStage` até o primeiro não-envelope; o
+`causaRaiz` do `ProcessarExtracaoUseCase` tira **um** nível; o `metadadosDoNack` do
+`ExtrairVideoConsumer`
+varre a cadeia inteira procurando um tipo. O que o 087 unificou foi a única repetição de fato —
+o `causaRaiz` estava escrito duas vezes na mesma classe. As duas primeiras também vivem em
+serviços diferentes, e uma delas em `core`, onde `framework` não alcança.
+
 Não há guarda automática de divergência para quatro dessas cinco famílias — `Rastro`,
 `JsonObjectPayloadConverter`, `comRepeticao` e `MotivoFalha.doCodigo`. Nenhuma delas tem
 identidade byte a byte como invariante, e uma comparação parcial confundiria diferença local
 legítima com esquecimento. Os testes de cada serviço guardam o comportamento; a revisão
 coordenada guarda a parte comum.
+
+A sexta fica **declaradamente sem guarda**, e não por dívida: ela não cabe no
+`scripts/verifica-ackmanual.sh` nem em nenhuma variante dele. Aquele script compara texto, e o
+que ele exige é identidade — o par do parágrafo acima diverge de propósito no filtro de falha,
+que é justamente o que uma comparação de texto acusaria. Quem guarda o número de chamadas e o
+que cada uma repete são os quatro testes de comportamento: `RepeticaoNoPostgresTest`,
+`RepeticaoNoMinioTest`, `RepeticaoNoSmtpTest` e `EnvioResisteABlipDoArmazenamentoTest`.
 
 `ArchitectureConstraintsTest` e `AckManual` são as exceções explícitas: nada no desenho de
 nenhum dos dois sugere divergência local legítima, e por isso têm guarda do agregador. As três

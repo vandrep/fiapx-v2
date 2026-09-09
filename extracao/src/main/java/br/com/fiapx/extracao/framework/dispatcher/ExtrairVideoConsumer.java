@@ -104,6 +104,13 @@ public class ExtrairVideoConsumer {
                 .eventually(dreno::sair);
     }
 
+    /**
+     * Percorre a cadeia de causas inteira procurando <b>um tipo</b>, e por isso nao e o mesmo
+     * que o {@code causaRaiz} do {@code ProcessarExtracaoUseCase}, que tira um envelope so, nem
+     * que o {@code desembrulhar} do `videos`, que para no primeiro nao-envelope. Aqui a falha
+     * chega embrulhada pelo dispatcher em profundidade que nao se conhece de antemao, e o que
+     * decide o requeue e a presenca do tipo em qualquer nivel (ticket 087).
+     */
     private static Metadata metadadosDoNack(Message<?> mensagem, Throwable falha) {
         for (var causa = falha; causa != null; causa = causa.getCause()) {
             if (causa instanceof FalhaAoPublicarExtracaoFalhouException) {

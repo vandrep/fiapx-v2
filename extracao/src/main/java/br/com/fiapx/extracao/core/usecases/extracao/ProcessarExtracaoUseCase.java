@@ -84,7 +84,7 @@ public class ProcessarExtracaoUseCase {
     }
 
     private CompletableFuture<Void> tratarFalha(UUID idVideo, Throwable erro) {
-        var causa = erro instanceof CompletionException ? erro.getCause() : erro;
+        var causa = causaRaiz(erro);
         if (causa instanceof FalhaPermanenteDeExtracaoException falha) {
             return extracaoEventosSender.enviarFalhou(idVideo, falha.motivo(), falha.detalheTecnico(), Instant.now())
                     .exceptionallyCompose(falhaDePublicacao -> CompletableFuture.failedFuture(
@@ -93,6 +93,17 @@ public class ProcessarExtracaoUseCase {
         return CompletableFuture.failedFuture(causa);
     }
 
+    /**
+     * Tira o envelope que o {@code CompletionStage} poe por cima da falha de verdade, e so ele:
+     * um nivel, e nao a cadeia inteira. Quem decide o motivo da Extracao e quem decide se o nack
+     * requeue precisam da falha que o adapter lancou, e nao do {@code CompletionException} que a
+     * composicao acrescentou.
+     *
+     * <p>Estava escrito duas vezes nesta classe ate o ticket 087. Ele <b>nao</b> e a mesma coisa
+     * que o percurso de causas do {@code ExtrairVideoConsumer} nem que o {@code desembrulhar} do
+     * `videos`; o porque de os tres nao convergirem esta no `AGENTS.md`
+     * § <i>As copias deliberadas entre servicos</i>.
+     */
     private Throwable causaRaiz(Throwable falha) {
         return falha instanceof CompletionException ? falha.getCause() : falha;
     }

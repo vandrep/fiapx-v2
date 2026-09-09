@@ -1120,6 +1120,31 @@ verificadas por teste, não são sugestão). Projeto original em
   decidida, e o comentário do Postgres no `application.properties` do `videos` passou a apontar
   para `framework/db/PostgresRetry`, que é onde o limite mora.
 
+- [A segunda cópia da repetição do ADR 0001 ficou
+  registrada](tickets/087-postgresretry-diverge-das-copias-de-comrepeticao.md) — o `videos`
+  carrega **duas** implementações da mesma forma reativa, e nenhum registro dizia isso. Os cinco
+  pontos do ticket foram decididos um a um. **Convergiram quatro:** o vocabulário (a classe virou
+  `RepeticaoNoPostgres`, o teste `RepeticaoNoPostgresTest` ao lado de `RepeticaoNoMinioTest` e
+  `RepeticaoNoSmtpTest`, e os campos passaram a `MAXIMO_DE_REPETICOES` e
+  `esperaEntreRepeticoes`); a costura de configuração, que virou
+  `@ConfigProperty("fiapx.banco.espera-entre-repeticoes")` com default de 2 s no código, no lugar
+  do construtor package-private que só o teste chamava; o jitter de 10%, que faltava e que pesa
+  mais aqui do que no MinIO, porque um pool de conexões compartilhado é onde repetições
+  sincronizadas se empilham; e a classificação de falha, que decidia por
+  `getClass().getName().endsWith(...)` e passou a `instanceof` com import — as duas exceções do
+  Hibernate estavam no classpath o tempo todo, e a terceira,
+  `CannotCreateTransactionException`, é do **Spring** e nunca esteve, então o ramo dela era
+  morto. Um teste novo fixa isso: uma classe homônima de outro pacote não é mais tratada como
+  falha transitória. **Ficou registrada uma divergência**, que é a razão de as duas existirem: o
+  filtro de falha — o MinIO repete qualquer `Exception`, o Postgres só a indisponibilidade
+  transitória, e o `deferred(Supplier)` existe para reabrir a sessão que o Hibernate abortou.
+  **As três travessias de `getCause()` não viraram família:** elas fazem perguntas diferentes
+  (tirar envelopes até o fim, tirar um nível, varrer procurando um tipo); o que havia de
+  repetição de fato era o `causaRaiz` escrito duas vezes dentro do
+  `ProcessarExtracaoUseCase`, e essa unificou. A sexta família fica **declaradamente sem
+  guarda**: `verifica-ackmanual.sh` compara texto e exige identidade, e o que diverge aqui
+  diverge de propósito.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

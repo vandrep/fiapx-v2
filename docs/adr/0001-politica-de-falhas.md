@@ -50,8 +50,9 @@ entregas passa a se chamar **repetição**.
 A aritmética é uma só e mora nesta seção: `atMost(n)` do Mutiny conta as repetições *depois*
 da primeira chamada, então três chamadas se escrevem `atMost(2)`. Ela vale nos quatro lugares
 que implementam esta política, e cada um cita esta frase em vez de recontar: as três cópias de
-`comRepeticao` — `videos` e `extracao` no MinIO, `notificacao` no SMTP — e o `PostgresRetry`
-do `videos`.
+`comRepeticao` — `videos` e `extracao` no MinIO, `notificacao` no SMTP — e o
+`RepeticaoNoPostgres` do `videos`, que se chamava `PostgresRetry` até o
+[ticket 087](../wayfinder/tickets/087-postgresretry-diverge-das-copias-de-comrepeticao.md).
 
 **Por que três chamadas, e não quatro.** O número multiplica a espera de 2 s, e é ele que
 decide por quanto tempo um recurso que não volta segura quem o chamou: quatro chamadas
@@ -65,7 +66,7 @@ mais dentro do adapter.
 
 Os dois números existiam porque as duas leituras estavam implementadas: as três cópias de
 `comRepeticao` faziam quatro chamadas, herdadas número por número do `@Retry(maxRetries=3)`
-que o ticket 061 removeu, enquanto o `PostgresRetry` já fazia três — o
+que o ticket 061 removeu, enquanto o `RepeticaoNoPostgres` já fazia três — o
 [ticket 057](../wayfinder/tickets/057-retry-transitorio-no-postgres.md) o levara de quatro a
 três lendo "três tentativas" como três chamadas. A escolha de agora é a do 057, aplicada aos
 quatro; o que muda no código são as três cópias de `comRepeticao`, que passam a `atMost(2)`.

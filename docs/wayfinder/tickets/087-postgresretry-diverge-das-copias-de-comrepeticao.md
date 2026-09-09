@@ -2,8 +2,8 @@
 
 - id: 087
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: vandrep
 - bloqueado-por: 086
 - prioridade: P3
 
@@ -90,15 +90,71 @@ considerar se ela cabe no `scripts/verifica-ackmanual.sh` ou se fica declaradame
 
 ## Critérios de aceite
 
-- [ ] O vocabulário do `PostgresRetry` concorda com o das três cópias, ou a diferença está
+- [x] O vocabulário do `PostgresRetry` concorda com o das três cópias, ou a diferença está
       escrita
-- [ ] A costura que baixa a espera sob teste é a mesma nas quatro, ou a diferença está escrita
-- [ ] A decisão sobre jitter no Postgres está escrita, qualquer que seja
-- [ ] `transitoria` não classifica por `endsWith` sobre nome de classe, ou a razão de classificar
+- [x] A costura que baixa a espera sob teste é a mesma nas quatro, ou a diferença está escrita
+- [x] A decisão sobre jitter no Postgres está escrita, qualquer que seja
+- [x] `transitoria` não classifica por `endsWith` sobre nome de classe, ou a razão de classificar
       assim está no javadoc
-- [ ] As três travessias de `getCause()` estão unificadas onde a arquitetura permite, e o que
+- [x] As três travessias de `getCause()` estão unificadas onde a arquitetura permite, e o que
       sobrar está registrado como família de cópia deliberada
-- [ ] Nenhuma chave de tolerância a falhas por interceptor entra em `.properties` nenhum:
+- [x] Nenhuma chave de tolerância a falhas por interceptor entra em `.properties` nenhum:
       `toleranciaAFalhasNaoPodeSerConfigurada` segue verde nos três
-- [ ] `scripts/verifica-testes-arquiteturais.sh` e `scripts/verifica-ackmanual.sh` passam
-- [ ] `./mvnw test` verde a partir da raiz
+- [x] `scripts/verifica-testes-arquiteturais.sh` e `scripts/verifica-ackmanual.sh` passam
+- [x] `./mvnw test` verde a partir da raiz
+
+## Resolução
+
+**Implementado.** Dos cinco pontos, quatro convergiram com as três cópias de `comRepeticao` e
+um ficou registrado no `AGENTS.md`.
+
+**1. Vocabulário — convergiu.** `PostgresRetry` virou `RepeticaoNoPostgres`, e
+`PostgresRetryTest` virou `RepeticaoNoPostgresTest`, que é o nome que as irmãs já usavam
+(`RepeticaoNoMinioTest`, `RepeticaoNoSmtpTest`). `MAX_RETRIES` virou `MAXIMO_DE_REPETICOES`, e
+`DELAY`/`delay` viraram `esperaEntreRepeticoes`. O campo do `VideoDataSourceAdapter`, o
+comentário do `application.properties` e as duas citações do ADR 0001 acompanharam; a primeira
+citação do ADR diz o nome antigo entre parênteses, para quem chegar pelo histórico.
+
+**2. Costura de configuração — convergiu.** Os dois construtores saíram e a espera passa a
+vir de `@ConfigProperty(name = "fiapx.banco.espera-entre-repeticoes", defaultValue = "2s")`,
+como nas três irmãs — default no código, para sobreviver a `.properties` incompleto
+(ticket 080). Nenhum `%test.` foi acrescentado, pelo mesmo motivo do `extracao` e do
+`notificacao` (ticket 085): o único teste que exercita a repetição monta o bean à mão e
+atribui o campo direto, então a chave não teria leitor.
+
+**3. Jitter — convergiu.** `withJitter(0.1)`, os mesmos 10% das três cópias. O javadoc diz por
+que ele pesa mais aqui: o Postgres está atrás de um pool de conexões compartilhado, que é
+exatamente onde repetições sincronizadas se empilham.
+
+**4. Classificação por nome de classe — convergiu, e um dos três ramos era morto.** As duas
+exceções do Hibernate passaram a `instanceof` com import: `hibernate-core` já está no classpath
+de compilação pelo `quarkus-hibernate-reactive-panache`, então a razão que teria justificado o
+`endsWith` não existia. A terceira, `CannotCreateTransactionException`, é
+`org.springframework.transaction.*` — não há Spring neste repositório, e o ramo nunca casou
+nada além de um homônimo; saiu. O teste novo
+`naoConfundeUmaClasseHomonimaDeOutroPacoteComADoHibernate` fixa a diferença, e falhava contra o
+código anterior.
+
+**5. As três travessias de `getCause()` — não são uma família, e isso ficou escrito.** Elas
+fazem perguntas diferentes: `desembrulhar` tira envelopes de `CompletionStage` até o primeiro
+não-envelope, `causaRaiz` tira **um** nível, `metadadosDoNack` varre a cadeia inteira
+procurando um tipo. O que havia de repetição de fato era o `causaRaiz` escrito duas vezes
+dentro do `ProcessarExtracaoUseCase`, e essa unificou. Os três pontos ganharam javadoc
+apontando para o registro.
+
+**O registro.** O `AGENTS.md` § *As cópias deliberadas entre serviços* ganhou a sexta família —
+a única que se repete **dentro** de um serviço —, o que convergiu, a divergência que sobrou (o
+filtro de falha: qualquer `Exception` no MinIO contra só indisponibilidade transitória no
+Postgres, e o `deferred(Supplier)` que reabre a sessão abortada) e o parágrafo sobre as
+travessias de `getCause()`.
+
+**Guarda: declaradamente nenhuma.** Não cabe no `scripts/verifica-ackmanual.sh` nem em variante
+dele — aquele script compara texto e exige identidade, e o que diverge aqui diverge de
+propósito, então uma comparação de texto acusaria exatamente a decisão. Quem guarda o
+comportamento são os quatro testes de repetição.
+
+**Validações.** `./mvnw test` a partir da raiz: **BUILD SUCCESS**, 143 testes no `videos`, 280
+no `extracao`, 29 no `notificacao`. `scripts/verifica-testes-arquiteturais.sh` e
+`scripts/verifica-ackmanual.sh` passaram, e o `ArchitectureConstraintsTest` — que é quem roda
+`toleranciaAFalhasNaoPodeSerConfigurada` — passou nos três serviços. `smoke.sh` e os ensaios de
+carga não foram executados: a mudança não toca contrato, mensageria, Compose nem imagem.

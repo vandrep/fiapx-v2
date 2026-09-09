@@ -142,6 +142,14 @@ procurando um tipo. O que havia de repetição de fato era o `causaRaiz` escrito
 dentro do `ProcessarExtracaoUseCase`, e essa unificou. Os três pontos ganharam javadoc
 apontando para o registro.
 
+**Desvio declarado, no ponto 5.** O critério de aceite pede "o que sobrar está registrado como
+família de cópia deliberada", e o corpo do ticket admite que "a resposta certa [pode ser]
+registrar a sexta família". O que ficou escrito é o contrário disso: que as três travessias
+**não** são uma família. A razão está acima — elas fazem perguntas diferentes, e chamá-las de
+cópia mandaria a próxima sessão convergi-las. O que o ticket pede de fato, e foi entregue, é que
+o estado deixe de ser "três cópias existem e nenhum registro as conhece"; a sexta família que o
+`AGENTS.md` ganhou é o par `RepeticaoNoPostgres`/`comRepeticao`, não as travessias.
+
 **O registro.** O `AGENTS.md` § *As cópias deliberadas entre serviços* ganhou a sexta família —
 a única que se repete **dentro** de um serviço —, o que convergiu, a divergência que sobrou (o
 filtro de falha: qualquer `Exception` no MinIO contra só indisponibilidade transitória no

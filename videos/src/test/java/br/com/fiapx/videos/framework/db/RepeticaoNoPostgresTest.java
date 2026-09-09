@@ -37,9 +37,9 @@ class RepeticaoNoPostgresTest {
     @Test
     void repeteFalhaTransitoriaComNovaOperacaoAteRecuperar() {
         var chamadas = new AtomicInteger();
-        var banco = repeticao();
+        var repeticao = repeticaoNoPostgres();
 
-        var resultado = banco.executar(() -> {
+        var resultado = repeticao.executar(() -> {
             if (chamadas.incrementAndGet() < 3) {
                 return Uni.createFrom().failure(new SQLException("conexao caiu", "08006"));
             }
@@ -53,9 +53,9 @@ class RepeticaoNoPostgresTest {
     @Test
     void naoRepeteFalhaPermanente() {
         var chamadas = new AtomicInteger();
-        var banco = repeticao();
+        var repeticao = repeticaoNoPostgres();
 
-        assertThrows(Exception.class, () -> banco.executar(() -> {
+        assertThrows(Exception.class, () -> repeticao.executar(() -> {
             chamadas.incrementAndGet();
             return Uni.createFrom().failure(new SQLException("violacao", "23505"));
         }).subscribeAsCompletionStage().toCompletableFuture().join());
@@ -66,9 +66,9 @@ class RepeticaoNoPostgresTest {
     @Test
     void naoRepeteErrorMesmoQuandoACausaPareceTransitoria() {
         var chamadas = new AtomicInteger();
-        var banco = repeticao();
+        var repeticao = repeticaoNoPostgres();
 
-        assertThrows(CompletionException.class, () -> banco.executar(() -> {
+        assertThrows(CompletionException.class, () -> repeticao.executar(() -> {
             chamadas.incrementAndGet();
             return Uni.createFrom().failure(
                     new RuntimeException("invocacao falhou",
@@ -81,9 +81,9 @@ class RepeticaoNoPostgresTest {
     @Test
     void esgotaDepoisDeTresChamadasAoBanco() {
         var chamadas = new AtomicInteger();
-        var banco = repeticao();
+        var repeticao = repeticaoNoPostgres();
 
-        assertThrows(Exception.class, () -> banco.executar(() -> {
+        assertThrows(Exception.class, () -> repeticao.executar(() -> {
             chamadas.incrementAndGet();
             return Uni.createFrom().failure(new SQLException("banco indisponivel", "08001"));
         }).subscribeAsCompletionStage().toCompletableFuture().join());
@@ -113,10 +113,10 @@ class RepeticaoNoPostgresTest {
                 "classificar por nome simples repetiria qualquer classe com o nome certo");
     }
 
-    private static RepeticaoNoPostgres repeticao() {
-        var repeticao = new RepeticaoNoPostgres();
-        repeticao.esperaEntreRepeticoes = ESPERA_DO_TESTE;
-        return repeticao;
+    private static RepeticaoNoPostgres repeticaoNoPostgres() {
+        var repeticaoNoPostgres = new RepeticaoNoPostgres();
+        repeticaoNoPostgres.esperaEntreRepeticoes = ESPERA_DO_TESTE;
+        return repeticaoNoPostgres;
     }
 
     /**

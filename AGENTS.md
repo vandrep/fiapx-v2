@@ -190,7 +190,8 @@ Além dos records do contrato de mensagens, cinco implementações se repetem en
 `MotivoFalha.doCodigo` em `videos` e `notificacao`, e `AckManual` nos três
 (`framework/dispatcher/`). As cópias são deliberadas. Cada serviço continua dono do próprio
 código e do próprio artefato; um módulo `shared` transformaria coincidência de implementação
-em acoplamento de build e de evolução entre os três serviços.
+em acoplamento de build e de evolução entre os três serviços. Há ainda uma **sexta**, e ela é a
+exceção ao título desta seção: se repete dentro de um serviço só, e está no fim.
 
 Ao mudar a parte comum de uma dessas implementações, inspecione todas as cópias e aplique em
 cada uma somente o que preserva o mesmo contrato. Não as force a convergir: o `Rastro`, por
@@ -211,13 +212,15 @@ motivos diferentes: uma absorve blip de I/O no MinIO, a outra indisponibilidade 
 Postgres. O ticket 087 alinhou tudo o que não tinha motivo para divergir — o vocabulário (o
 nome da classe, `MAXIMO_DE_REPETICOES`, `esperaEntreRepeticoes`), a aritmética do ticket 086, o
 jitter de 10% e a costura da espera, que nas quatro é `@ConfigProperty` no namespace `fiapx.`
-com o default de 2 s no próprio código.
+com o default de 2 s no próprio código. O `%test.` do parágrafo anterior continua sendo só do
+`comRepeticao` do `videos`: a espera do banco não tem quem a baixe por `.properties`, porque
+quem exercita a repetição monta o bean à mão.
 
 Sobrou uma divergência, e ela é a razão de as duas existirem: **o filtro de falha**. O
 `comRepeticao` repete qualquer `Exception`, porque do S3 quase toda falha é o blip que a
 política quer absorver. O `RepeticaoNoPostgres` repete **só** indisponibilidade transitória —
-conexão, timeout, as duas exceções do Hibernate e os SQLSTATE `08`, `40`, `53` e `57P01` —,
-porque uma violação de constraint repetida três vezes dá três vezes o mesmo erro e ainda segura
+conexão, timeout, as duas exceções do Hibernate e um punhado de SQLSTATE, cuja lista é do
+código e só de lá —, porque uma violação de constraint repetida três vezes dá três vezes o mesmo erro e ainda segura
 a borda HTTP por 4 s. O `deferred(Supplier)` é consequência disso: cada repetição do banco
 reabre a sessão ou a transação que o Hibernate marcou como abortada, e o MinIO não tem nada
 equivalente para reabrir. Não force nenhuma das duas para a forma da outra.
@@ -231,7 +234,7 @@ varre a cadeia inteira procurando um tipo. O que o 087 unificou foi a única rep
 o `causaRaiz` estava escrito duas vezes na mesma classe. As duas primeiras também vivem em
 serviços diferentes, e uma delas em `core`, onde `framework` não alcança.
 
-Não há guarda automática de divergência para quatro dessas cinco famílias — `Rastro`,
+Não há guarda automática de divergência para quatro das cinco famílias entre serviços — `Rastro`,
 `JsonObjectPayloadConverter`, `comRepeticao` e `MotivoFalha.doCodigo`. Nenhuma delas tem
 identidade byte a byte como invariante, e uma comparação parcial confundiria diferença local
 legítima com esquecimento. Os testes de cada serviço guardam o comportamento; a revisão

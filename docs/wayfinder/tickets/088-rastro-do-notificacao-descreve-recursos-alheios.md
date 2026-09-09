@@ -157,3 +157,6 @@ instrumentação. Num javadoc que existe justamente porque uma frase desatualiza
 hipótese inteira ao [061](061-travamento-raro-com-o-sdk-desligado.md), enumerar o classpath é
 assumir uma dívida sem necessidade. O texto passou a afirmar só o que sustenta o argumento e é
 estável: não há artefato de instrumentação **para o cliente de mail**.
+
+O achado do `@Blocking` no `videos`, que esta seção estreitou, virou o
+[090](090-saltos-de-thread-do-rastro-do-videos.md).

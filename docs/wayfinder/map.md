@@ -1171,7 +1171,8 @@ verificadas por teste, não são sugestão). Projeto original em
   `@Blocking` no `ExtrairVideoConsumer`, então a menção ao worker pool na cópia dele está certa;
   o `videos` não tem a anotação em produção nenhuma, e a mesma frase no `Rastro` dele pode estar
   tão desatualizada quanto a que saiu do `notificacao`. Confirmar exige ler o roteamento de
-  thread do `videos`, que é outra investigação.
+  thread do `videos`, que é outra investigação — virou o
+  [090](tickets/090-saltos-de-thread-do-rastro-do-videos.md).
 
 ## Ainda não especificado
 

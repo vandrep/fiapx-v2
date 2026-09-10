@@ -364,6 +364,16 @@ defeitos de correção que ele reprovava de propósito (terminal fora de ordem, 
 foram corrigidos no ticket 027; remedido contra o código atual no ticket 073, ele passa: 400/400
 em `limpo`, 41/41 em `mata-videos` com o `videos` derrubado no meio da rajada.
 
+`scripts/trafego.sh` é o único script deste repositório que **não reprova nada**, e isso é o
+desenho dele: ele gera tráfego sintético contra o Compose principal — blocos de 5 min alternando
+chegada sustentada e rajada, mais um ciclo de listagem/consulta/download e erros de borda
+deliberados — só para que os painéis tenham dado. Rode-o quando quiser **olhar** os painéis
+(ticket 092 e os dois de fábrica do 091), nunca para medir escala: medição é dos scripts de
+`scripts/carga/`, que rodam sob `docker-compose.carga.yml` e portanto com a observabilidade
+zerada e o SDK desligado. É por exigir o oposto daquele overlay que este script mora em
+`scripts/` e não ao lado deles — e ele aborta, com mensagem acionável, se a stack estiver ausente
+ou o SDK desligado, porque nessa configuração ele geraria zero métrica e pareceria funcionar.
+
 ## Commits
 
 Conventional Commits em português, sem acentos na linha de assunto:

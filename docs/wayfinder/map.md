@@ -1265,6 +1265,29 @@ verificadas por teste, não são sugestão). Projeto original em
   Extração do fixture leva ~0,19 s — todo mundo cai no primeiro bucket, e um quantil ali é
   interpolação, não medida.
 
+- [Tráfego sintético para alimentar os painéis](tickets/093-trafego-sintetico-para-alimentar-os-paineis.md)
+  — o painel do 092 e os dois de fábrica do 091 existem, mas numa stack recém-subida o que eles
+  mostram é um Vídeo. `scripts/trafego.sh` + `scripts/trafego.js` geram uso da API **contra o
+  Compose principal, com a observabilidade de pé** — o oposto exato do
+  `docker-compose.carga.yml`, e é por isso que eles moram em `scripts/` e não ao lado dos scripts
+  de carga. É o **primeiro script executável do repositório que não reprova nada**: ele produz
+  sinal e relata, e a única falha que se permite é a da infraestrutura que o tornaria inútil —
+  duas guardas, o ambiente dos containers (acusa o overlay de carga pelo nome) e a pergunta ao
+  Prometheus. Vinte minutos em blocos de 5 min que **alternam** chegada sustentada (6 Vídeo/min,
+  38% da capacidade medida no 026) e rajada (tudo em t=0, o resto do bloco drenando — a drenagem
+  é o sinal dos painéis de fila), começando pela sustentada porque a rajada sem linha de base não
+  significa nada; em paralelo, pela corrida inteira, o ciclo de quem está olhando (listagem
+  filtrada e paginada, consulta, download inteiro do Pacote em 30% dos `CONCLUIDO`) e um cenário
+  de erro com as quatro rejeições de borda. Mistura de três fixtures para espalhar a duração e
+  produzir `resultado=falhou`; dois donos; censo e amostra pelo `oraculo.sh` **intocado**. Medido
+  em 20 min: 203 aceitos e 0 recusados, 194 `CONCLUIDO` e 9 `FALHOU`, os seis status no
+  Prometheus (202, 200, 404, 400, 415, 409), `extracao.extrair` em 32 mensagens de pico, os dois
+  valores de `resultado` povoados (média 1,00 s contra os 0,19 s do 092 — é a mistura funcionando)
+  e Estacionamento e DLQs em zero, que é a leitura correta. Três suposições caíram ao rodar: o
+  409 não é determinístico (a Extração de 3 s cabe entre o `202` e o `GET`), a amostra pela API
+  acusava o contrato funcionando nos Vídeos do outro dono, e dois defeitos do caminho de relatar
+  escondiam em silêncio em vez de quebrar. Nada em `scripts/carga/` foi tocado.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

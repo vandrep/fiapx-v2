@@ -113,6 +113,11 @@ não estão nele de propósito — são dos dois dashboards que a própria image
 topo. Os alertas **não têm canal de notificação**, então só são vistos por quem abre a tela. A
 retenção é efêmera: o histórico morre no `docker compose down`.
 
+Numa stack recém-subida o painel mostra pouco, porque não houve trabalho. `scripts/trafego.sh`
+[duração em minutos] gera tráfego sintético para preenchê-lo: envio, listagem, consulta, download
+de Pacote e as rejeições de borda, em blocos que alternam chegada sustentada e rajada. Ele relata
+e não reprova nada — é instrumento de demonstração, não de medição.
+
 Para derrubar preservando os dados: `docker compose down`. O próximo `docker compose up -d`
 reutiliza os volumes do mesmo projeto Compose: banco, buckets, uploads, mensagens do
 RabbitMQ e dados do Keycloak. O broker usa o volume `fiapx-rabbitmq-data` em

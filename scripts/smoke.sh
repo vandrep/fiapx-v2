@@ -361,14 +361,14 @@ passo "12. Nenhuma query do painel curado devolve série vazia"
 # legitimamente vazia ate a primeira Extracao — 88 nomes de metrica na base, zero com `durac`,
 # medido numa stack recem-subida. Um passo posto cedo demais reprovaria um sistema saudavel.
 #
-# UM painel escapa deste passo, e escapa de propósito: o `count(...) or vector(0)` das filas sem
+# UM painel escapa deste passo, e escapa de proposito: o `count(...) or vector(0)` das filas sem
 # consumidor nunca volta vazio, porque sem o `or vector(0)` ele diria "No data" justamente com o
 # sistema saudavel. O que sobraria descoberto sao as duas metricas que ele usa, e as duas estao
 # cobertas cruas por outros dois paineis (`..._messages_ready` e `..._consumers`): renomeada
 # qualquer uma no upgrade do broker, quem reprova sao eles.
 
 painel="docker/observabilidade/painel-infraestrutura.json"
-[[ -f "$painel" ]] || falha "$painel nao existe"
+[[ -f "$painel" ]] || falha "$painel não existe"
 
 # O passo 11 acabou de reiniciar o container; o Grafana leva alguns segundos ate responder.
 inicio=$SECONDS
@@ -394,16 +394,41 @@ for uid in prometheus loki tempo; do
 done
 ok "os três datasources do painel existem: prometheus, loki, tempo"
 
+# Os dois links do topo do painel apontam para os dashboards que a IMAGEM mantem — o RED e o
+# JVM que o ticket 091 fez enxergar os tres servicos —, e o painel os identifica por `uid`
+# fixo. Esse uid e o unico lugar do repositorio onde aqueles dois dashboards sao nomeados, e
+# quem os mantem muda sozinho no upgrade da imagem. Link morto RENDERIZA COMO LINK NORMAL: e a
+# mesma mentira silenciosa que este passo existe para pegar, e vale ainda mais aqui, porque e
+# do lado de la deste link que moram o HTTP e a JVM que o painel deliberadamente nao repete.
+links=0
+while read -r uid_link; do
+    [[ -n "$uid_link" ]] || continue
+    links=$(( links + 1 ))
+    curl -sf "$grafana_url/api/dashboards/uid/$uid_link" > /dev/null \
+        || falha "o painel linka para o dashboard '$uid_link', que não existe nesta imagem"
+done <<< "$(jq -r '.links[]? | select(.url != null) | .url | ltrimstr("/d/")' "$painel" || true)"
+(( links == 2 )) \
+    || falha "o painel deveria linkar os dois dashboards de fábrica do 091, e linka $links"
+ok "os $links links para os dashboards de fábrica resolvem"
+
 # As variaveis do painel nao chegam ate aqui resolvidas — resolve-las e o trabalho do browser.
 # `$servico` vira o `allValue` LIDO DO ARQUIVO, e `$idVideo` vira o Video que CONCLUIU: e o
 # unico que tem span do ffmpeg, que e o que o segundo spanset da busca exige. Variavel nova no
 # painel sem tratamento aqui nao passa em silencio — a guarda logo abaixo reprova.
-servico_all="$(jq -r '.templating.list[] | select(.name == "servico") | .allValue' "$painel")"
+servico_all="$(jq -r '.templating.list[] | select(.name == "servico") | .allValue' "$painel" || true)"
 [[ -n "$servico_all" && "$servico_all" != null ]] \
     || falha "a variável 'servico' do painel não tem allValue; o passo não sabe resolvê-la"
+# O valor entra como REPLACEMENT de `sed`, entao `/`, `&` e `\` mudariam o comando em vez de
+# entrar nele — e a query corrompida seria julgada como se fosse a do painel. Reprovar aqui e
+# dizer o que houve custa uma linha; descobrir depois custa um passo que mente.
+[[ "$servico_all" != *[/\&\\]* ]] \
+    || falha "o allValue de 'servico' tem caractere que este passo não sabe substituir: $servico_all"
 
+# `\b` depois do nome: sem ele, uma variavel futura chamada `$servicos` seria comida pela
+# substituicao de `$servico` e sobraria um `s` solto no meio da query — que a guarda de `$`
+# remanescente, logo abaixo, NAO pegaria, porque o cifrao ja teria sumido.
 resolve_variaveis() {
-    sed -e "s/\\\$servico/$servico_all/g" -e "s/\\\$idVideo/$id/g"
+    sed -e "s/\\\$servico\\b/$servico_all/g" -e "s/\\\$idVideo\\b/$id/g"
 }
 
 agora=$(date +%s)
@@ -411,13 +436,20 @@ desde=$(( agora - 3600 ))
 consultadas=0
 
 # `.panels[].targets[]` e nao uma travessia recursiva: o painel e plano de proposito, sem row
-# colapsavel, e uma travessia recursiva esconderia o dia em que alguem aninhar um painel novo.
+# colapsavel. Uma travessia recursiva ESCONDERIA o dia em que alguem aninhar um painel — e a
+# forma plana, sozinha, o PULARIA em silencio, que e o mesmo defeito com outra roupa. Dai a
+# guarda abaixo: aninhou, reprova, e quem reprovar decide se ensina o laco ou desaninha.
 #
 # `join` num separador de unidade, e nao `@tsv`: o `@tsv` do jq escapa a contrabarra, e a
 # expressao da DLQ tem uma (`queue=~".+\\.dlq"`) — com ela dobrada, a query nao casa fila
 # nenhuma, e o passo reprovaria um painel correto.
+# Row colapsavel guarda os paineis filhos em `.panels[].panels`, fora do alcance do laco.
+aninhados="$(jq '[.panels[] | select(.panels != null)] | length' "$painel" || true)"
+[[ "$aninhados" == 0 ]] \
+    || falha "$painel tem painel aninhado dentro de row; o passo 12 só enxerga o primeiro nível"
+
 consultas="$(jq -r '.panels[] | .title as $t | .targets[]
-    | [$t, .refId, .datasource.uid, (.expr // .query)] | join("\u001f")' "$painel")"
+    | [$t, .refId, .datasource.uid, (.expr // .query)] | join("\u001f")' "$painel" || true)"
 [[ -n "$consultas" ]] || falha "nenhuma query lida de $painel"
 
 while IFS=$'\037' read -r titulo refid uid consulta; do

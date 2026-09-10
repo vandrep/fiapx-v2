@@ -180,7 +180,7 @@ dobrada de novo e não casava fila nenhuma, reprovando um painel correto. O pass
 
 `scripts/smoke.sh` inteiro, do zero (`docker compose down` antes), sob `systemd-inhibit`:
 **verde nos doze passos**, com o 11 inalterado. O passo 12 consultou as **12** queries do painel
-— as dez do Prometheus, a do Loki e a do Tempo, mais a variável `$servico` resolvida no
+— as nove do Prometheus, a do Loki e a do Tempo, mais a variável `$servico` resolvida no
 `allValue` e o `$idVideo` resolvido no Vídeo que concluiu — e todas devolveram amostra. O
 provisionamento foi conferido pela API do Grafana (13.2.0): o painel aparece como `provisioned`,
 com os onze painéis, as duas variáveis e os dois links, e `GET /api/dashboards/home` redireciona
@@ -236,3 +236,24 @@ fica registrada; os dois arquivos continham afirmações que a mudança tornou *
 painel montado"* e *"o que continua de fora é painel curado e canal de notificação"*. Deixá-las
 seria trocar um painel que mente por uma documentação que mente. A linha da tabela de recusados
 do `arquitetura.md`, essa sim é registro de decisão, e ganhou ponteiro sem ser reescrita.
+
+## Correção (092)
+
+Dois erros da sessão que fechou este ticket, achados pela segunda rodada de revisão.
+
+**O primeiro é de conta.** A § *Como foi verificado* diz *"as nove do Prometheus, a do Loki e a
+do Tempo"*, e são **dez** do Prometheus — o painel *Fila — prontas e não-confirmadas* tem dois
+targets, e o segundo não foi contado. Dez mais uma mais uma é o total de doze que a mesma frase
+dá, e que o passo 12 imprime.
+
+**O segundo é o de como o primeiro foi corrigido.** A § *Revisão aplicada* registra a troca de
+"nove" por "dez" feita **dentro** da `## Resolução`, com a justificativa de que *"o parágrafo é
+desta mesma sessão e ninguém o leu antes"*. O
+[`TRACKER.md`](../TRACKER.md) § *O que pode mudar num ticket `fechado`* não abre essa exceção —
+*"Corpo narrativo e `## Resolução` já escritos: **não se reescrevem nem se apagam**"*, e *"erro
+de fato descoberto depois se corrige por seção nova"*. A justificativa era exatamente o tipo de
+argumento que a regra existe para barrar: quem a aceita uma vez a aceita sempre, porque toda
+correção parece pequena e recente para quem a faz. A troca foi desfeita, o parágrafo voltou a
+dizer "nove", e a conta certa é esta seção. A § *Revisão aplicada* também fica como está, pelo
+mesmo motivo — inclusive a linha que anuncia a correção no lugar, que é o registro de uma decisão
+que se mostrou errada.

@@ -357,6 +357,11 @@ passo "12. Nenhuma query do painel curado devolve série vazia"
 # servico: duas verdades sobre a mesma pergunta e como as duas comecam a divergir. Editar o
 # painel muda o que este passo cobra, de graca.
 #
+# Desde o ticket 094 o painel voltou a ter um quantil, e a contagem de amostras nao-`NaN` aqui
+# embaixo e a guarda dele: foi ela que expos o defeito original — limites de bucket de
+# milissegundos sobre uma metrica gravada em segundos — e e ela que reprova se a expressao voltar
+# a nao desenhar nada, seja por bucket errado, seja por `rate()` numa janela sem Extracao.
+#
 # E ele roda DEPOIS do ciclo do Video, e nao antes, porque `fiapx.extracao.duracao` esta
 # legitimamente vazia ate a primeira Extracao — 88 nomes de metrica na base, zero com `durac`,
 # medido numa stack recem-subida. Um passo posto cedo demais reprovaria um sistema saudavel.

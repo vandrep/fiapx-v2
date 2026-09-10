@@ -531,7 +531,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Extração — duração média, por resultado",
-      "description": "A única métrica nossa (ADR 0004): fiapx.extracao.duracao, em segundos, cronometrando o trecho que roda fora do JVM e que nenhuma auto-instrumentação enxerga. O corte por `resultado` não é decoração — sem ele, uma Extração que morre no teto de 300 s entra na mesma distribuição das que terminaram, e a média passa a medir a mistura de duas populações. É média, e não quantil, por duas medições: os limites de bucket são os default do OpenTelemetry (0, 5, 10, 25 … 10000), pensados para milissegundos, e a Extração do fixture leva ~0,19 s — toda observação cai no primeiro bucket, então um histogram_quantile aqui devolveria interpolação, não medida; e um quantil sobre rate() devolve NaN no volume da demo, porque a série nasce já com a contagem e não há incremento dentro da janela. A soma e a contagem são exatas nos dois casos.",
+      "description": "A única métrica nossa (ADR 0004): fiapx.extracao.duracao, em segundos, cronometrando o trecho que roda fora do JVM e que nenhuma auto-instrumentação enxerga. O corte por `resultado` não é decoração — sem ele, uma Extração que morre no teto de 300 s entra na mesma distribuição das que terminaram, e a média passa a medir a mistura de duas populações. Média por _sum / _count, que é exata e não depende de bucket nenhum: o painel de quantil, mais abaixo, responde a outra pergunta, a da cauda, e os dois convivem de propósito. Foi esta expressão que contornou o defeito do ticket 092 — limites de bucket de milissegundos sobre uma métrica em segundos —, corrigido no 094; ela fica porque continua sendo a leitura exata da duração típica.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -686,6 +686,74 @@
       ]
     },
     {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Extração — p95 e p99 da duração, por resultado",
+      "description": "A cauda, que a média acima não responde: a partir dos buckets de fiapx.extracao.duracao, cujos limites são de segundos desde o ticket 094 — doze deles, de 0,1 s a 420 s, com o porquê de cada faixa no javadoc de DuracaoDaExtracao — e não os default do OpenTelemetry, que são de milissegundos e faziam toda observação cair no primeiro bucket. Sobre o contador ACUMULADO, e não sobre rate(): a retenção desta stack é efêmera e morre no `down`, então o acumulado já é 'desde que a demo começou' — e um quantil sobre rate() devolve NaN no volume da demo, porque numa janela sem Extração nenhuma todos os buckets rendem zero. Por isso o que se lê aqui é o p95/p99 desde que a réplica subiu, e não da janela do gráfico. Um degrau até perto de 420 s no `falhou` é Extração morrendo no teto do ffmpeg — mas o quantil não distingue quem morreu no teto de quem passou dele: 330 s interpola dentro de (300, 420] e o caso +Inf devolve exatamente 420, porque é assim que o Prometheus responde quando o quantil cai no último bucket. Quem separa os dois é a série crua (fiapx_extracao_duracao_seconds_bucket com le='420' contra le='+Inf'), e é para ela que existe o 12º limite; aqui em cima, leia qualquer coisa perto de 420 como 'bateu no teto ou passou dele' e vá conferir lá. E leia o `falhou` baixo como teto, não como medida: recusa do ffprobe leva ~0,05 s e cai inteira no primeiro bucket, então o que o quantil diz ali é 'menos de 0,1 s'.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "always",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, resultado) (fiapx_extracao_duracao_seconds_bucket))",
+          "legendFormat": "p95 {{resultado}}",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le, resultado) (fiapx_extracao_duracao_seconds_bucket))",
+          "legendFormat": "p99 {{resultado}}",
+          "range": true
+        }
+      ]
+    },
+    {
       "id": 11,
       "type": "logs",
       "title": "Log dos três serviços",
@@ -698,7 +766,7 @@
         "h": 11,
         "w": 24,
         "x": 0,
-        "y": 29
+        "y": 36
       },
       "fieldConfig": {
         "defaults": {},

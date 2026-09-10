@@ -418,10 +418,18 @@ Três decisões de forma que o arquivo carrega, e o porquê de cada uma:
   *`idVideo` é a chave que o humano digita*, acima — sem a âncora a busca casa dezenas de traces
   de uma linha, e num spanset só ela não casaria nada, porque o span do `ffmpeg` não carrega
   `idVideo`.
-- **A duração aparece como média por `resultado`, e não como quantil.** Medido: os limites de
-  bucket são os default do OpenTelemetry (0, 5, 10, 25 … 10000), pensados para milissegundos, e
-  a Extração do fixture leva ~0,19 s — toda observação cai no primeiro bucket, então
-  `histogram_quantile` devolveria interpolação, não medida. E um quantil sobre `rate()` devolve
-  `NaN` no volume da demo: a série nasce já com a contagem, sem incremento dentro da janela. A
-  soma e a contagem são exatas nos dois casos, e o corte por `resultado` — que é o ponto da
-  métrica — sobrevive inteiro.
+- **A duração aparece como média por `resultado` — e, desde o
+  [ticket 094](../wayfinder/tickets/094-limites-de-bucket-da-duracao-da-extracao.md), também como
+  quantil.** A média por `_sum / _count` é exata e não depende de bucket nenhum; ela nasceu como
+  contorno e fica por mérito, porque responde a duração típica. O quantil não cabia quando o 092
+  mediu: os limites de bucket eram os default do OpenTelemetry (0, 5, 10, 25 … 10000), pensados
+  para **milissegundos** sobre uma métrica gravada em **segundos**, e toda observação caía no
+  primeiro bucket — `histogram_quantile` ali é interpolação dentro de `[0, 5]`, e devolveu `NaN`
+  em todas as amostras de uma janela de uma hora. O 094 deu ao instrumento limites de segundos,
+  por `setExplicitBucketBoundariesAdvice` no `DuracaoDaExtracao` — a advice viaja com o
+  instrumento, e uma *view* no `application.properties` teria de nomear a métrica num arquivo
+  onde nada mais fala dela. A segunda medição do 092 continua de pé e moldou a expressão do
+  painel: quantil sobre `rate()` devolve `NaN` no volume da demo, porque numa janela sem Extração
+  nenhuma todos os buckets rendem zero — então o painel consulta o **contador acumulado**, e o
+  que se lê é o p95/p99 desde que a réplica subiu, não o da janela do gráfico. O corte por
+  `resultado` — que é o ponto da métrica — sobrevive inteiro nas duas leituras.

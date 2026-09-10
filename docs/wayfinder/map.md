@@ -1288,6 +1288,29 @@ verificadas por teste, não são sugestão). Projeto original em
   acusava o contrato funcionando nos Vídeos do outro dono, e dois defeitos do caminho de relatar
   escondiam em silêncio em vez de quebrar. Nada em `scripts/carga/` foi tocado.
 
+- [Os limites de bucket da duração da
+  Extração](tickets/094-limites-de-bucket-da-duracao-da-extracao.md) — `fiapx.extracao.duracao` é
+  gravada em **segundos** e herdava os limites *default* do OpenTelemetry, que são de
+  **milissegundos**: toda observação caía no primeiro bucket e o `histogram_quantile` devolveu
+  `NaN` em todas as amostras de uma janela de uma hora (medido no 092, contornado lá com
+  `_sum / _count`). Agora são doze limites próprios, por `setExplicitBucketBoundariesAdvice` no
+  `DuracaoDaExtracao` — no instrumento, e não numa *view* do `application.properties`, que teria
+  de nomear a métrica num arquivo onde nada mais fala dela. A escala é `0,1 · 0,25 · 0,5 · 1 ·
+  2,5 · 5 · 10 · 30 · 60 · 120 · 300 · 420`, e os dois extremos são decisão: o piso em 0,1 deixa a
+  recusa do ffprobe (~0,05 s) inteira no primeiro bucket, porque um limite em 0,05 partiria a moda
+  daquela população — o preço é que quantil de `falhou` ali é teto, não medida, e o painel diz
+  isso —; e o topo ganhou 420 (o `dreno-timeout-segundos`) porque com 300 no topo quem morre no
+  teto do ffmpeg cai no `+Inf` junto com quem passou de todo teto conhecido — separação que mora
+  na **série**, não no quantil, porque `histogram_quantile` devolve 420 cravado nos dois casos. O painel **ganhou** o
+  quantil de volta, ao lado da média, que fica: a média é exata e responde a duração típica, o
+  quantil responde a cauda. Sobre o contador **acumulado** e não sobre `rate()` — a outra medição
+  do 092 continua de pé —, então o que se lê é o p95/p99 desde que a réplica subiu. O passo 12 do
+  `smoke.sh` não precisou de código: ele já contava amostras não-`NaN` sobre as queries do
+  arquivo. Medido com os limites novos, numa corrida de 20 min do `trafego.sh`: 193 concluídas em
+  **seis** buckets, p50 0,42 s, p90 5,2 s, p95 7,6 s, p99 9,5 s, contra o `NaN` de antes. As 10
+  falhas ficaram todas no primeiro bucket e os cinco limites acima de 10 s ficaram vazios — os dois
+  são o esperado, e estão registrados como tal em vez de corrigidos.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

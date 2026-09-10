@@ -5,7 +5,7 @@
   "tags": [
     "fiapx"
   ],
-  "editable": true,
+  "editable": false,
   "graphTooltip": 1,
   "schemaVersion": 41,
   "version": 1,
@@ -155,7 +155,7 @@
       "id": 2,
       "type": "stat",
       "title": "DLQs",
-      "description": "As três DLQs do contrato. A do extracao TEM consumidor próprio, então acúmulo nela significa que a republicação também está falhando — o próximo salto é o Estacionamento. As de videos e notificacao são terminais por desenho, e mensagem nelas só sai por intervenção humana. Mesma expressão do alerta fiapx-dlq-extracao-com-mensagem, generalizada às três.",
+      "description": "As três DLQs do contrato. É a união de dois alertas, e não a cópia de um: o alerta fiapx-dlq-extracao-com-mensagem nomeia só a extracao.extrair.dlq, porque ela é a única DLQ do contrato com consumidor próprio — acúmulo nela significa que a republicação também está falhando, e o próximo salto é o Estacionamento. As de videos e notificacao são terminais por desenho e quem as cobra é o alerta fiapx-fila-sem-consumidor, que vale para qualquer fila sem enumerar nome. Um stat que mostrasse só a primeira deixaria mensagem parada nas outras duas fora da tela, e mensagem em fila terminal é sempre trabalho humano pendente.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -219,7 +219,7 @@
       "id": 3,
       "type": "stat",
       "title": "Filas com mensagem e zero consumidores",
-      "description": "O incidente de 06/09/2026, contado como número: por 14 minutos a extracao.extrair teve mensagem pronta e nenhum consumidor, e todo Vídeo enviado ficou em RECEBIDO. Derivado do alerta fiapx-fila-sem-consumidor, que vale para qualquer fila sem enumerar nome. O `or vector(0)` não é enfeite: sem ele o count() de um conjunto vazio some, e o painel diria No data justamente quando o sistema está saudável — que é a mentira que este painel existe para não contar.",
+      "description": "O incidente de 06/09/2026, contado como número: por 14 minutos a extracao.extrair teve mensagem pronta e nenhum consumidor, e todo Vídeo enviado ficou em RECEBIDO. Derivado do alerta fiapx-fila-sem-consumidor, que vale para qualquer fila sem enumerar nome. O `or vector(0)` não é enfeite: sem ele o count() de um conjunto vazio some, e o painel diria No data justamente quando o sistema está saudável — que é a mentira que este painel existe para não contar. O preço é que este é o único painel daqui que o passo 12 do smoke.sh não consegue cobrar, porque ele nunca volta vazio; o que ficaria descoberto são as duas métricas que ele usa, e as duas aparecem cruas nos painéis de prontas/não-confirmadas e de consumidores por fila, que o passo cobra.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -283,7 +283,7 @@
       "id": 4,
       "type": "stat",
       "title": "Consumidores da extracao.extrair",
-      "description": "Quantos consumidores estão pendurados na fila de comando do worker. O Compose sobe o extracao com duas réplicas desde o ticket 049, então o número saudável é dois — um por réplica. Zero aqui, com mensagem do outro lado, é o incidente de 06/09.",
+      "description": "Quantos consumidores estão pendurados na fila de comando do worker. Este é o único painel que nomeia uma fila sem ter alerta que a nomeie, e é deliberado: o Compose sobe o extracao com duas réplicas desde o ticket 049, então o número saudável é dois — um por réplica —, e esse é um número que só quem conhece a topologia sabe conferir. A pergunta sem nome de fila é a do painel ao lado, derivada do alerta fiapx-fila-sem-consumidor; a lista completa está em Consumidores por fila. Zero aqui, com mensagem do outro lado, é o incidente de 06/09.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -643,7 +643,7 @@
     {
       "id": 10,
       "type": "table",
-      "title": "Trace da travessia, por idVideo",
+      "title": "Trace da travessia — preencha o idVideo no topo",
       "description": "Preencha o idVideo no topo — é o que o POST /videos devolveu no 202. Dois spansets ligados por &&, e não duas condições dentro de um: o span do ffmpeg NÃO carrega idVideo (o adapter não conhece o Vídeo, e não deve), então a forma de um spanset só exigiria os dois atributos no MESMO span e não casaria nunca. A âncora em resource.service.name é o outro defeito medido no ADR 0004: sem ela, a busca casa dezenas de traces de uma linha, porque o atributo marca também o span de cada GET de acompanhamento.",
       "datasource": {
         "type": "tempo",

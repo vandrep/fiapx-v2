@@ -17,6 +17,8 @@ o tempo do CI/CD, que é requisito. A premissa expirou: o CI/CD está entregue (
 fronteira ficou vazia e restam 23 dias. Pela regra do wayfinder, trabalho fora de escopo não
 gradua — ele só volta se o destino for redesenhado, e então como esforço novo. É o que esta
 linha faz. O que **não** entra continua fora: painel curado e canal de notificação de alerta.
+*O painel curado voltou em parte no [ticket 092](tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md),
+e como esforço novo, pela mesma regra que esta linha invoca. O canal de notificação continua fora.*
 
 Este mapa carrega **decisões e execução**: as decisões de arquitetura vêm primeiro, e os
 tickets de implementação graduam da névoa conforme cada decisão fecha.

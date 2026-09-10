@@ -344,7 +344,7 @@ religa_observabilidade
 ok "observabilidade de volta"
 
 # ---------------------------------------------------------------------------------------
-passo "12. Nenhuma query do painel curado devolve serie vazia"
+passo "12. Nenhuma query do painel curado devolve série vazia"
 
 # O passo que impede o painel de envelhecer (ticket 092). O ADR 0004 recusou painel curado com
 # dois argumentos, e um deles continua de pe depois da reversao: um painel e a parte que
@@ -353,12 +353,19 @@ passo "12. Nenhuma query do painel curado devolve serie vazia"
 # "No data" sobre um sistema saudavel, que e exatamente a mentira que o ticket 091 achou nos
 # tres dashboards de fabrica. Este passo transforma esse silencio em reprovacao.
 #
-# Ele le as queries DO ARQUIVO, e nao de uma copia aqui: duas verdades sobre a mesma pergunta e
-# como as duas comecam a divergir. Editar o painel muda o que este passo cobra, de graca.
+# Ele le as queries DO ARQUIVO, e nao de uma copia aqui — inclusive o `allValue` da variavel de
+# servico: duas verdades sobre a mesma pergunta e como as duas comecam a divergir. Editar o
+# painel muda o que este passo cobra, de graca.
 #
 # E ele roda DEPOIS do ciclo do Video, e nao antes, porque `fiapx.extracao.duracao` esta
 # legitimamente vazia ate a primeira Extracao — 88 nomes de metrica na base, zero com `durac`,
 # medido numa stack recem-subida. Um passo posto cedo demais reprovaria um sistema saudavel.
+#
+# UM painel escapa deste passo, e escapa de propósito: o `count(...) or vector(0)` das filas sem
+# consumidor nunca volta vazio, porque sem o `or vector(0)` ele diria "No data" justamente com o
+# sistema saudavel. O que sobraria descoberto sao as duas metricas que ele usa, e as duas estao
+# cobertas cruas por outros dois paineis (`..._messages_ready` e `..._consumers`): renomeada
+# qualquer uma no upgrade do broker, quem reprova sao eles.
 
 painel="docker/observabilidade/painel-infraestrutura.json"
 [[ -f "$painel" ]] || falha "$painel nao existe"
@@ -366,33 +373,37 @@ painel="docker/observabilidade/painel-infraestrutura.json"
 # O passo 11 acabou de reiniciar o container; o Grafana leva alguns segundos ate responder.
 inicio=$SECONDS
 until curl -sf "$grafana_url/api/health" > /dev/null 2>&1; do
-    (( SECONDS - inicio > 120 )) && falha "Grafana nao voltou 120s depois do religa do passo 11"
+    (( SECONDS - inicio > 120 )) && falha "Grafana não voltou 120s depois do religa do passo 11"
     printf '    ... aguardando o Grafana voltar\n'
     sleep 3
 done
 
 # O painel e a home: abrir localhost:3000 cai nele sem navegar. Sem isso ele e mais um item
 # numa lista de quatro, e o avaliador abre o RED por engano.
-home="$(curl -sS "$grafana_url/api/dashboards/home" | jq -r '.redirectUri // empty')"
+home="$(curl -sS "$grafana_url/api/dashboards/home" | jq -r '.redirectUri // empty' || true)"
 [[ "$home" == *infraestrutura* ]] \
-    || falha "a home do Grafana e '$home', e nao o painel de infraestrutura"
-ok "a home do Grafana e o painel: $home"
+    || falha "a home do Grafana é '$home', e não o painel de infraestrutura"
+ok "a home do Grafana é o painel: $home"
 
 # Os tres uids de datasource que o painel fixa precisam existir de verdade — se a imagem
 # renomear um deles no upgrade, todo painel que o usa vira "Datasource not found", e o erro
 # aparece na tela em vez de aqui.
 for uid in prometheus loki tempo; do
     curl -sf "$grafana_url/api/datasources/uid/$uid" > /dev/null \
-        || falha "o painel aponta para o datasource '$uid', que nao existe neste Grafana"
+        || falha "o painel aponta para o datasource '$uid', que não existe neste Grafana"
 done
-ok "os tres datasources do painel existem: prometheus, loki, tempo"
+ok "os três datasources do painel existem: prometheus, loki, tempo"
 
 # As variaveis do painel nao chegam ate aqui resolvidas — resolve-las e o trabalho do browser.
-# `$__rate_interval` vira 5m (o painel roda em janela de 1h, onde o Grafana calcula algo dessa
-# ordem), `$servico` vira o allValue da variavel, e `$idVideo` vira o Video que CONCLUIU: e o
-# unico que tem span do ffmpeg, que e o que o segundo spanset da busca exige.
+# `$servico` vira o `allValue` LIDO DO ARQUIVO, e `$idVideo` vira o Video que CONCLUIU: e o
+# unico que tem span do ffmpeg, que e o que o segundo spanset da busca exige. Variavel nova no
+# painel sem tratamento aqui nao passa em silencio — a guarda logo abaixo reprova.
+servico_all="$(jq -r '.templating.list[] | select(.name == "servico") | .allValue' "$painel")"
+[[ -n "$servico_all" && "$servico_all" != null ]] \
+    || falha "a variável 'servico' do painel não tem allValue; o passo não sabe resolvê-la"
+
 resolve_variaveis() {
-    sed -e 's/\$__rate_interval/5m/g' -e 's/\$servico/fiapx-.+/g' -e "s/\\\$idVideo/$id/g"
+    sed -e "s/\\\$servico/$servico_all/g" -e "s/\\\$idVideo/$id/g"
 }
 
 agora=$(date +%s)
@@ -401,52 +412,66 @@ consultadas=0
 
 # `.panels[].targets[]` e nao uma travessia recursiva: o painel e plano de proposito, sem row
 # colapsavel, e uma travessia recursiva esconderia o dia em que alguem aninhar um painel novo.
+#
+# `join` num separador de unidade, e nao `@tsv`: o `@tsv` do jq escapa a contrabarra, e a
+# expressao da DLQ tem uma (`queue=~".+\\.dlq"`) — com ela dobrada, a query nao casa fila
+# nenhuma, e o passo reprovaria um painel correto.
+consultas="$(jq -r '.panels[] | .title as $t | .targets[]
+    | [$t, .refId, .datasource.uid, (.expr // .query)] | join("\u001f")' "$painel")"
+[[ -n "$consultas" ]] || falha "nenhuma query lida de $painel"
+
 while IFS=$'\037' read -r titulo refid uid consulta; do
     consulta="$(resolve_variaveis <<< "$consulta")"
     consultadas=$(( consultadas + 1 ))
+
+    # Variavel do Grafana que ninguem resolveu chegaria ao datasource como literal e casaria
+    # zero — o passo reprovaria o painel por um defeito DELE PROPRIO. Melhor dizer qual e.
+    [[ "$consulta" != *'$'* ]] \
+        || falha "painel '$titulo' ($refid) usa variável que este passo não sabe resolver: $consulta"
 
     case "$uid" in
         prometheus)
             # `query_range`, e nao `query` instantanea: e assim que o painel consulta, e uma
             # janela cobre o instante da Extracao mesmo que ela tenha sido ha mais de 5 min.
-            # `values` e nao `result`: uma serie so de NaN volta como resultado nao-vazio, e
-            # um quantil sobre histograma parado e exatamente isso.
+            # Conta AMOSTRA nao-NaN, e nao serie: uma serie so de NaN volta como resultado
+            # nao-vazio, e foi assim que a primeira versao deste passo aprovou um quantil que
+            # nao desenhava nada.
             amostras="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/prometheus/api/v1/query_range" \
                 --data-urlencode "query=$consulta" \
                 --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
                 --data-urlencode "step=15" \
-                | jq '[.data.result[]?.values[]? | select(.[1] != "NaN")] | length')"
+                | jq '[.data.result[]?.values[]? | select(.[1] != "NaN")] | length' || true)"
             ;;
         loki)
             amostras="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/loki/loki/api/v1/query_range" \
                 --data-urlencode "query=$consulta" \
                 --data-urlencode "start=${desde}000000000" --data-urlencode "end=${agora}000000000" \
                 --data-urlencode "limit=5" \
-                | jq '[.data.result[]?.values[]?] | length')"
+                | jq '[.data.result[]?.values[]?] | length' || true)"
             ;;
         tempo)
             amostras="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/tempo/api/search" \
                 --data-urlencode "q=$consulta" \
                 --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
                 --data-urlencode "limit=20" \
-                | jq '[.traces[]?] | length')"
+                | jq '[.traces[]?] | length' || true)"
             ;;
         *)
             falha "painel '$titulo' usa datasource desconhecido '$uid'"
             ;;
     esac
 
-    [[ "${amostras:-0}" -gt 0 ]] \
-        || falha "painel '$titulo' ($refid) nao devolveu nada num sistema que acabou de processar um Video: $consulta"
+    # Nao-numerico e datasource fora do ar ou resposta que o jq nao entendeu, e o `-gt` de um
+    # nao-numero derrubaria o script sem dizer por que. As duas saidas sao reprovacao, e sao
+    # defeitos diferentes.
+    [[ "$amostras" =~ ^[0-9]+$ ]] \
+        || falha "painel '$titulo' ($refid): o datasource '$uid' não respondeu um número consultável"
+    (( amostras > 0 )) \
+        || falha "painel '$titulo' ($refid) não devolveu nada num sistema que acabou de processar um Vídeo: $consulta"
     printf '    %6s amostras  %s\n' "$amostras" "$titulo [$refid]"
-#
-# `join` num separador de unidade, e nao `@tsv`: o `@tsv` do jq escapa a contrabarra, e a
-# expressao da DLQ tem uma (`queue=~".+\\.dlq"`) — com ela dobrada, a query nao casa fila
-# nenhuma, e o passo reprovaria um painel correto.
-done < <(jq -r '.panels[] | .title as $t | .targets[] | [$t, .refId, .datasource.uid, (.expr // .query)] | join("\u001f")' "$painel")
+done <<< "$consultas"
 
-(( consultadas > 0 )) || falha "nenhuma query lida de $painel"
-ok "$consultadas queries do painel, todas com serie"
+ok "$consultadas queries do painel, todas com série"
 
 # ---------------------------------------------------------------------------------------
 echo

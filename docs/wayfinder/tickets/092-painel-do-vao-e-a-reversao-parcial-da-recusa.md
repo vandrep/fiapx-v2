@@ -180,8 +180,59 @@ dobrada de novo e não casava fila nenhuma, reprovando um painel correto. O pass
 
 `scripts/smoke.sh` inteiro, do zero (`docker compose down` antes), sob `systemd-inhibit`:
 **verde nos doze passos**, com o 11 inalterado. O passo 12 consultou as **12** queries do painel
-— as nove do Prometheus, a do Loki e a do Tempo, mais a variável `$servico` resolvida no
+— as dez do Prometheus, a do Loki e a do Tempo, mais a variável `$servico` resolvida no
 `allValue` e o `$idVideo` resolvido no Vídeo que concluiu — e todas devolveram amostra. O
 provisionamento foi conferido pela API do Grafana (13.2.0): o painel aparece como `provisioned`,
 com os onze painéis, as duas variáveis e os dois links, e `GET /api/dashboards/home` redireciona
 para ele.
+
+## Revisão aplicada
+
+Revisão em dois eixos (padrões e spec) sobre o commit de implementação. Nove achados viraram
+mudança; três foram respondidos com registro em vez de código, e um foi recusado.
+
+**Mudou o `smoke.sh`, passo 12.** Quatro defeitos reais, nesta ordem de gravidade:
+
+- **Aborto silencioso.** As quatro atribuições `x="$(curl … | jq …)"` rodavam sem `|| true` sob
+  `set -euo pipefail`: datasource fora do ar matava o script sem uma linha de `falha`. Os passos
+  2 e 10 já faziam certo, e o 12 agora faz igual — e distingue "não respondeu um número" de
+  "respondeu vazio", que são defeitos diferentes.
+- **Duas verdades.** O passo resolvia `$servico` para `fiapx-.+` escrito à mão, contra o
+  argumento do comentário três linhas acima. Ele lê o `allValue` **do arquivo do painel**.
+- **Ramo morto.** A substituição de `$__rate_interval` sobreviveu à troca de quantil por média e
+  não casava nada, com uma justificativa de aparência viva. No lugar dela entrou uma guarda que
+  vale mais: query que chegue ao datasource ainda com `$` reprova, dizendo qual variável o passo
+  não sabe resolver — variável nova no painel não passa mais em silêncio.
+- **Comentário fora de lugar** e mensagens sem acento, ao contrário das dos passos 10 e 11.
+
+**Mudou o painel.** `editable` era `true` com `allowUiUpdates: false` no provider — prometia um
+botão de salvar que não existe. E o painel de trace passou a se chamar *Trace da travessia —
+preencha o idVideo no topo*: com o textbox vazio na primeira abertura, a tabela vazia lia como
+painel quebrado em vez de campo por preencher.
+
+**Não mudou, e ficou escrito por quê.** Três achados eram de registro, não de código:
+
+- *"As expressões de fila são derivadas das do `alertas.yaml`"* — dois painéis divergem dos
+  alertas de propósito, e a divergência agora está no `description` de cada um em vez de
+  implícita. O de DLQs é a **união** de dois alertas (o segundo nomeia só a do `extracao`, que é
+  a única com consumidor; as terminais são do terceiro), porque um stat que mostrasse só uma
+  deixaria mensagem parada nas outras duas fora da tela. O de consumidores da `extracao.extrair`
+  nomeia a fila sem ter alerta que a nomeie, porque o número saudável é **dois** — um por réplica
+  — e isso é o que ninguém de fora sabe conferir; a pergunta sem nome de fila é a do painel ao
+  lado.
+- *"reprova query que devolve vazio"* — o `count(…) or vector(0)` **nunca** volta vazio e
+  portanto escapa do passo 12. Medido: `sum(…{queue="fila-que-nao-existe"})` e um seletor de fila
+  inexistente voltam vazios e reprovam; só o `or vector(0)` não. O que ficaria descoberto são as
+  duas métricas que ele usa, e as duas aparecem **cruas** em dois outros painéis que o passo
+  cobra — renomeada qualquer uma no upgrade do broker, quem reprova são eles. Está no
+  `description` do painel e no cabeçalho do passo.
+- Erro de conta na § *Como foi verificado*: eram **dez** queries do Prometheus, não nove.
+  Corrigido no lugar, e não por seção nova, porque o parágrafo é desta mesma sessão e ninguém o
+  leu antes.
+
+**Recusado:** a observação de que editar `docs/arquitetura.md` e `README.md` extrapola os "três
+lugares" da § *Onde a reversão fica registrada*. Aqueles três lugares são onde a **reversão**
+fica registrada; os dois arquivos continham afirmações que a mudança tornou **falsas** — *"Não há
+painel montado"* e *"o que continua de fora é painel curado e canal de notificação"*. Deixá-las
+seria trocar um painel que mente por uma documentação que mente. A linha da tabela de recusados
+do `arquitetura.md`, essa sim é registro de decisão, e ganhou ponteiro sem ser reescrita.

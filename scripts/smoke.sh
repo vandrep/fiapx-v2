@@ -20,6 +20,11 @@
 # decoracao: o 10 e a UNICA coisa no repositorio que exercita a correlacao ponta a ponta —
 # nenhum @QuarkusTest publica mensagem entre servicos, e a suite roda com o SDK desligado —, e
 # o 11 e o que impede a observabilidade de virar, ela propria, uma causa de indisponibilidade.
+#
+# O passo 12 e do ticket 092 e julga o PAINEL: ele le as queries do arquivo versionado e
+# reprova a que devolver serie vazia num sistema que acabou de processar um Video. E o preco
+# que a reversao da recusa de painel curado paga ao argumento que dela sobrou de pe — um painel
+# e a parte que envelhece primeiro, e envelhecer, aqui, e mostrar "No data" e nao quebrar nada.
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -339,9 +344,114 @@ religa_observabilidade
 ok "observabilidade de volta"
 
 # ---------------------------------------------------------------------------------------
+passo "12. Nenhuma query do painel curado devolve serie vazia"
+
+# O passo que impede o painel de envelhecer (ticket 092). O ADR 0004 recusou painel curado com
+# dois argumentos, e um deles continua de pe depois da reversao: um painel e a parte que
+# envelhece primeiro. Uma query que deixou de casar serie nenhuma — porque a metrica mudou de
+# nome, porque o rotulo sumiu, porque a fila foi renomeada — nao quebra nada; ela so mostra
+# "No data" sobre um sistema saudavel, que e exatamente a mentira que o ticket 091 achou nos
+# tres dashboards de fabrica. Este passo transforma esse silencio em reprovacao.
+#
+# Ele le as queries DO ARQUIVO, e nao de uma copia aqui: duas verdades sobre a mesma pergunta e
+# como as duas comecam a divergir. Editar o painel muda o que este passo cobra, de graca.
+#
+# E ele roda DEPOIS do ciclo do Video, e nao antes, porque `fiapx.extracao.duracao` esta
+# legitimamente vazia ate a primeira Extracao — 88 nomes de metrica na base, zero com `durac`,
+# medido numa stack recem-subida. Um passo posto cedo demais reprovaria um sistema saudavel.
+
+painel="docker/observabilidade/painel-infraestrutura.json"
+[[ -f "$painel" ]] || falha "$painel nao existe"
+
+# O passo 11 acabou de reiniciar o container; o Grafana leva alguns segundos ate responder.
+inicio=$SECONDS
+until curl -sf "$grafana_url/api/health" > /dev/null 2>&1; do
+    (( SECONDS - inicio > 120 )) && falha "Grafana nao voltou 120s depois do religa do passo 11"
+    printf '    ... aguardando o Grafana voltar\n'
+    sleep 3
+done
+
+# O painel e a home: abrir localhost:3000 cai nele sem navegar. Sem isso ele e mais um item
+# numa lista de quatro, e o avaliador abre o RED por engano.
+home="$(curl -sS "$grafana_url/api/dashboards/home" | jq -r '.redirectUri // empty')"
+[[ "$home" == *infraestrutura* ]] \
+    || falha "a home do Grafana e '$home', e nao o painel de infraestrutura"
+ok "a home do Grafana e o painel: $home"
+
+# Os tres uids de datasource que o painel fixa precisam existir de verdade — se a imagem
+# renomear um deles no upgrade, todo painel que o usa vira "Datasource not found", e o erro
+# aparece na tela em vez de aqui.
+for uid in prometheus loki tempo; do
+    curl -sf "$grafana_url/api/datasources/uid/$uid" > /dev/null \
+        || falha "o painel aponta para o datasource '$uid', que nao existe neste Grafana"
+done
+ok "os tres datasources do painel existem: prometheus, loki, tempo"
+
+# As variaveis do painel nao chegam ate aqui resolvidas — resolve-las e o trabalho do browser.
+# `$__rate_interval` vira 5m (o painel roda em janela de 1h, onde o Grafana calcula algo dessa
+# ordem), `$servico` vira o allValue da variavel, e `$idVideo` vira o Video que CONCLUIU: e o
+# unico que tem span do ffmpeg, que e o que o segundo spanset da busca exige.
+resolve_variaveis() {
+    sed -e 's/\$__rate_interval/5m/g' -e 's/\$servico/fiapx-.+/g' -e "s/\\\$idVideo/$id/g"
+}
+
+agora=$(date +%s)
+desde=$(( agora - 3600 ))
+consultadas=0
+
+# `.panels[].targets[]` e nao uma travessia recursiva: o painel e plano de proposito, sem row
+# colapsavel, e uma travessia recursiva esconderia o dia em que alguem aninhar um painel novo.
+while IFS=$'\037' read -r titulo refid uid consulta; do
+    consulta="$(resolve_variaveis <<< "$consulta")"
+    consultadas=$(( consultadas + 1 ))
+
+    case "$uid" in
+        prometheus)
+            # `query_range`, e nao `query` instantanea: e assim que o painel consulta, e uma
+            # janela cobre o instante da Extracao mesmo que ela tenha sido ha mais de 5 min.
+            # `values` e nao `result`: uma serie so de NaN volta como resultado nao-vazio, e
+            # um quantil sobre histograma parado e exatamente isso.
+            amostras="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/prometheus/api/v1/query_range" \
+                --data-urlencode "query=$consulta" \
+                --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
+                --data-urlencode "step=15" \
+                | jq '[.data.result[]?.values[]? | select(.[1] != "NaN")] | length')"
+            ;;
+        loki)
+            amostras="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/loki/loki/api/v1/query_range" \
+                --data-urlencode "query=$consulta" \
+                --data-urlencode "start=${desde}000000000" --data-urlencode "end=${agora}000000000" \
+                --data-urlencode "limit=5" \
+                | jq '[.data.result[]?.values[]?] | length')"
+            ;;
+        tempo)
+            amostras="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/tempo/api/search" \
+                --data-urlencode "q=$consulta" \
+                --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
+                --data-urlencode "limit=20" \
+                | jq '[.traces[]?] | length')"
+            ;;
+        *)
+            falha "painel '$titulo' usa datasource desconhecido '$uid'"
+            ;;
+    esac
+
+    [[ "${amostras:-0}" -gt 0 ]] \
+        || falha "painel '$titulo' ($refid) nao devolveu nada num sistema que acabou de processar um Video: $consulta"
+    printf '    %6s amostras  %s\n' "$amostras" "$titulo [$refid]"
+#
+# `join` num separador de unidade, e nao `@tsv`: o `@tsv` do jq escapa a contrabarra, e a
+# expressao da DLQ tem uma (`queue=~".+\\.dlq"`) — com ela dobrada, a query nao casa fila
+# nenhuma, e o passo reprovaria um painel correto.
+done < <(jq -r '.panels[] | .title as $t | .targets[] | [$t, .refId, .datasource.uid, (.expr // .query)] | join("\u001f")' "$painel")
+
+(( consultadas > 0 )) || falha "nenhuma query lida de $painel"
+ok "$consultadas queries do painel, todas com serie"
+
+# ---------------------------------------------------------------------------------------
 echo
 echo "${negrito}${verde}Smoke completo.${normal} Video concluido: $id | Video falho: $id_falha"
 echo "    Swagger UI:  $videos_url/q/swagger-ui"
 echo "    MailHog:     $mailhog_url"
-echo "    Grafana:     $grafana_url"
+echo "    Grafana:     $grafana_url  (o painel de infraestrutura e a home)"
 $derruba || echo "    A stack continua de pe. Para encerrar: docker compose down"

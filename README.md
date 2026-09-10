@@ -106,9 +106,12 @@ Quanto isso rende foi medido até 6 réplicas (eficiência de escala 0,88; 15,6 
 
 O Grafana traz log, métrica e trace dos três serviços, correlacionados pelo `idVideo`, e três
 alertas sobre as filas — Estacionamento não-vazio, DLQ do `extracao` com mensagem, e fila com
-mensagem e zero consumidores. **Não há painel montado**: a exploração é pelo *Explore*, e os
-alertas não têm canal de notificação, então só são vistos por quem abre a tela. A retenção é
-efêmera: o histórico morre no `docker compose down`.
+mensagem e zero consumidores. Abrir http://localhost:3000 cai direto em **FIAP X — a
+infraestrutura está saudável?**, o único painel montado: fila, Estacionamento, DLQ,
+consumidores e a duração da Extração, mais o log e a busca de trace por `idVideo`. HTTP e JVM
+não estão nele de propósito — são dos dois dashboards que a própria imagem mantém, linkados no
+topo. Os alertas **não têm canal de notificação**, então só são vistos por quem abre a tela. A
+retenção é efêmera: o histórico morre no `docker compose down`.
 
 Para derrubar preservando os dados: `docker compose down`. O próximo `docker compose up -d`
 reutiliza os volumes do mesmo projeto Compose: banco, buckets, uploads, mensagens do

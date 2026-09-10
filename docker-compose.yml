@@ -138,6 +138,16 @@ services:
       # O Grafana desta imagem roda com cwd em `/otel-lgtm/grafana` e le provisionamento
       # relativo a ele — nao em `/data/grafana`, que so guarda dados e plugins.
       - ./docker/observabilidade/alertas.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/alertas.yaml:ro
+      # O painel do ticket 092 custa DOIS mounts, e nao um: `provisioning/dashboards/` guarda
+      # PROVIDERS, nao dashboards — um JSON solto ali e ignorado. O provider aponta para o
+      # subdiretorio `fiapx/`, onde o JSON entra.
+      - ./docker/observabilidade/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/dashboards.yaml:ro
+      - ./docker/observabilidade/painel-infraestrutura.json:/otel-lgtm/grafana/conf/provisioning/dashboards/fiapx/painel-infraestrutura.json:ro
+    environment:
+      # Sem isto o painel e mais um item numa lista de quatro, e quem abre localhost:3000 cai
+      # na home de fabrica do Grafana — ou abre o RED por engano. O caminho e o do arquivo
+      # montado acima, e nao o uid: esta variavel le dashboard do disco.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /otel-lgtm/grafana/conf/provisioning/dashboards/fiapx/painel-infraestrutura.json
     # `test -f /tmp/ready`, e nao um `wget` na porta do Grafana: a imagem nao traz `wget` nem
     # `curl`, e cria `/tmp/ready` quando as cinco pecas terminaram de subir — e a marca de
     # prontidao que ela propria publica, e cobre o conjunto, nao so o Grafana.

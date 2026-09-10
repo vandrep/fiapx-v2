@@ -314,6 +314,8 @@ argumento.
 responde as mesmas perguntas sem manutenção, e um painel é a parte que envelhece primeiro. Na
 demo ele seria pior ainda — um painel vazio prova menos que uma busca por `idVideo` que
 devolve os três serviços.
+*Revertido em parte pelo [ticket 092](../wayfinder/tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md)
+— ver § Um painel, e o que da recusa continua de pé, no fim deste documento.*
 
 **Canal de notificação de alerta** foi adiado, não recusado por mérito: é configuração de
 *contact point*, e sem ele **a detecção não mudou**. Está escrito como limitação, e não como
@@ -372,3 +374,54 @@ overlay de carga nem chega à stack, já que o overlay a desliga.
   ciclo do Vídeo completa mesmo assim, religando-o por um `trap`. O console também não mudou:
   `docker logs` foi o que diagnosticou o incidente de 06/09, e o cenário em que ele mais importa
   é justamente aquele em que a stack de observabilidade é o que está quebrado.
+
+## Um painel, e o que da recusa continua de pé
+
+A recusa de painel curado acima é **revertida em parte** pelo
+[ticket 092](../wayfinder/tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md): existe
+**um** painel, `docker/observabilidade/painel-infraestrutura.json`, provisionado por arquivo e
+home do Grafana. Um, e não uma suíte. O parágrafo recusado fica onde está: painel curado esteve
+fora, e por que esteve é parte do registro.
+
+**Cai o argumento do Explore, e cai por quem é o leitor.** *"A exploração ad-hoc responde as
+mesmas perguntas"* pressupõe alguém que sabe o que perguntar. O público desta camada não é quem
+a escreveu: é o avaliador, nos dez minutos do vídeo, e ele não tem como saber que existe uma
+fila chamada `extracao.extrair.estacionamento` — não há consulta que ele possa formular no
+Explore. A diferença que o painel faz não é de eficiência; é entre *"está tudo verde"* e *"não
+sei o que perguntar"*.
+
+**Fica de pé o argumento do envelhecimento**, e por isso ele virou requisito em vez de ser
+dispensado. O passo 12 do `scripts/smoke.sh` lê as queries **do arquivo do painel** e reprova a
+que devolver série vazia num sistema que acabou de processar um Vídeo. É a mesma disciplina das
+três cópias do teste arquitetural e do `SdkDesligadoAindaGravaTest`: o que pode mentir em
+silêncio ganha quem o cobre. O passo roda **depois** do ciclo do Vídeo, e não antes, porque
+`fiapx.extracao.duracao` está legitimamente vazia até a primeira Extração — medido numa stack
+recém-subida: 88 nomes de métrica na base, zero com `durac`.
+
+**Fica de pé, e é o que decide o escopo, o "painel vazio prova menos".** O painel cobre só o
+**vão** — fila, Estacionamento, DLQ, consumidores e `fiapx.extracao.duracao` —, que é o que
+nenhum dashboard de fábrica olha. HTTP e JVM ficam de fora: são dos dois dashboards que a
+imagem mantém e que o [ticket 091](../wayfinder/tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md)
+fez enxergar os três serviços, e o painel apenas linka para eles. Repetir aqui série que outro
+dashboard já mantém seria exatamente o envelhecimento que a recusa temia, com o agravante de
+que o dono do outro dashboard é a imagem, que muda sozinha no upgrade. Continua fora, e pelo
+motivo já registrado acima, **contagem de Vídeo por estado**: o endpoint de listagem responde, e
+um gauge exigiria varredura periódica no banco.
+
+Três decisões de forma que o arquivo carrega, e o porquê de cada uma:
+
+- **As expressões de fila são derivadas das dos três alertas** de
+  `docker/observabilidade/alertas.yaml`, e não reinventadas. Duas verdades sobre a mesma
+  pergunta é como o painel começa a divergir do que alerta.
+- **A busca de trace herda a âncora do passo 10 do smoke**: `resource.service.name =
+  "fiapx-extracao"`, em **dois spansets ligados por `&&`**. Os dois motivos estão medidos em
+  *`idVideo` é a chave que o humano digita*, acima — sem a âncora a busca casa dezenas de traces
+  de uma linha, e num spanset só ela não casaria nada, porque o span do `ffmpeg` não carrega
+  `idVideo`.
+- **A duração aparece como média por `resultado`, e não como quantil.** Medido: os limites de
+  bucket são os default do OpenTelemetry (0, 5, 10, 25 … 10000), pensados para milissegundos, e
+  a Extração do fixture leva ~0,19 s — toda observação cai no primeiro bucket, então
+  `histogram_quantile` devolveria interpolação, não medida. E um quantil sobre `rate()` devolve
+  `NaN` no volume da demo: a série nasce já com a contagem, sem incremento dentro da janela. A
+  soma e a contagem são exatas nos dois casos, e o corte por `resultado` — que é o ponto da
+  métrica — sobrevive inteiro.

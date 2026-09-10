@@ -484,9 +484,12 @@ enquanto o CI/CD era o risco; entregue o CI/CD, ela perdeu a premissa. Um contai
 métrica e trace por OTLP ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)):
 buscar um `idVideo` devolve **um** trace com os três serviços dentro, com os registros de log
 pendurados nos spans certos, e três alertas binários avaliam Estacionamento não-vazio, DLQ com
-mensagem, e fila com mensagem e zero consumidores. O que continua de fora é **painel curado e
-canal de notificação de alerta** — veja a seção seguinte. O que a camada deliberadamente não
-faz está no [ADR 0004](adr/0004-camada-de-observabilidade.md) e em *Limitações conhecidas*.
+mensagem, e fila com mensagem e zero consumidores. Um painel — **um**, sobre o vão que nenhum
+dashboard de fábrica olha — é a home do Grafana desde o
+[ticket 092](wayfinder/tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md), e o que
+continua de fora é o **canal de notificação de alerta** — veja a seção seguinte. O que a camada
+deliberadamente não faz está no [ADR 0004](adr/0004-camada-de-observabilidade.md) e em
+*Limitações conhecidas*.
 
 Redis, esse ficou de fora mesmo: não há leitura repetida o bastante para justificar cache, e a
 consulta de status já é uma linha por chave primária.
@@ -502,7 +505,7 @@ Cada linha tem a discussão inteira no arquivo apontado.
 | **Outbox canônico** com tabela e payload | compraria *exatamente uma vez*, regime que o ADR 0001 já recusou; a tabela `video` com duas colunas marcadoras fecha as mesmas janelas sem tabela nova ([ADR 0003](adr/0003-reconciliacao-por-varredura.md)) |
 | **Kubernetes** | o enunciado aceita Compose *ou* Kubernetes; Compose garante que a demonstração roda na máquina de quem avalia, sem cluster |
 | **Módulo Maven `shared`** com os contratos | duplicar cinco records é mais honesto que acoplar três serviços por um jar; extrair depois, se doer |
-| **Painel curado no Grafana e canal de notificação de alerta** | a coleta dos três sinais entrou (tickets 058 e 059) e os três alertas avaliam; o painel e o *contact point* continuam custando sem pagar nesta entrega, e por isso a detecção não mudou ([ADR 0004](adr/0004-camada-de-observabilidade.md), e a limitação abaixo) |
+| **Painel curado no Grafana e canal de notificação de alerta** | a coleta dos três sinais entrou (tickets 058 e 059) e os três alertas avaliam; o painel e o *contact point* continuam custando sem pagar nesta entrega, e por isso a detecção não mudou ([ADR 0004](adr/0004-camada-de-observabilidade.md), e a limitação abaixo). *Revertido em parte pelo [ticket 092](wayfinder/tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md): existe **um** painel, e ele é a home do Grafana. Caiu o argumento do Explore, que pressupunha um leitor que sabe o que perguntar; o do envelhecimento ficou de pé e virou o passo 12 do `scripts/smoke.sh`. O canal de notificação continua recusado, e a detecção continua não tendo mudado.* |
 | **E2E automatizado no CI** | Compose inteiro num runner (ffmpeg + MinIO + Keycloak + RabbitMQ) é fonte de instabilidade que não acrescenta garantia; `scripts/smoke.sh` faz a mesma verificação onde ela é confiável |
 
 ## Limitações conhecidas

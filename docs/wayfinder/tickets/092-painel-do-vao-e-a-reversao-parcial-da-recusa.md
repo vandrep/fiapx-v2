@@ -2,8 +2,8 @@
 
 - id: 092
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: agente de implementacao (sessao de 2026-09-10)
 - bloqueado-por: 091
 - prioridade: P3
 
@@ -117,12 +117,71 @@ Três lugares, e o `TRACKER.md` § *Onde mora a reversão de uma decisão* decid
 
 ## Critérios de aceite
 
-- [ ] Um painel, provisionado por arquivo, versionado em `docker/observabilidade/`
-- [ ] Ele é a home do Grafana: abrir `localhost:3000` cai nele sem navegar
-- [ ] Cobre fila, Estacionamento, DLQ, consumidores e `fiapx.extracao.duracao` com `resultado`
-- [ ] Não repete HTTP nem JVM; linka para os dois dashboards que o 091 fez funcionar
-- [ ] As expressões de fila são derivadas das do `alertas.yaml`, não reinventadas
-- [ ] A busca de trace ancora em `resource.service.name` e usa dois spansets ligados por `&&`
-- [ ] Passo novo no `smoke.sh`, **depois** do ciclo do Vídeo, reprova query que devolve vazio
-- [ ] O passo 11 continua verde: derrubar a stack de observabilidade não afeta o ciclo do Vídeo
-- [ ] `map.md`, este ticket e o `ADR 0004` registram a reversão, sem reescrever o que foi recusado
+- [x] Um painel, provisionado por arquivo, versionado em `docker/observabilidade/`
+- [x] Ele é a home do Grafana: abrir `localhost:3000` cai nele sem navegar
+- [x] Cobre fila, Estacionamento, DLQ, consumidores e `fiapx.extracao.duracao` com `resultado`
+- [x] Não repete HTTP nem JVM; linka para os dois dashboards que o 091 fez funcionar
+- [x] As expressões de fila são derivadas das do `alertas.yaml`, não reinventadas
+- [x] A busca de trace ancora em `resource.service.name` e usa dois spansets ligados por `&&`
+- [x] Passo novo no `smoke.sh`, **depois** do ciclo do Vídeo, reprova query que devolve vazio
+- [x] O passo 11 continua verde: derrubar a stack de observabilidade não afeta o ciclo do Vídeo
+- [x] `map.md`, este ticket e o `ADR 0004` registram a reversão, sem reescrever o que foi recusado
+
+## Resolução
+
+Feito como especificado, sem desvio de escopo. O que o ticket não previa e a implementação
+mediu está em *O que a medição mudou no desenho*, abaixo.
+
+### O que mudou
+
+| Arquivo | Mudança |
+|---|---|
+| `docker/observabilidade/painel-infraestrutura.json` | **novo**. Um painel, `uid` `fiapx-infraestrutura`, título acentuado (*FIAP X — a infraestrutura está saudável?*), nome de arquivo e `uid` em ASCII. Onze painéis: quatro *stat* de cabeça (Estacionamento, DLQs, filas sem consumidor, consumidores da `extracao.extrair`), três séries de fila, dois de `fiapx.extracao.duracao`, um de busca de trace e um de log. Como JSON não carrega comentário, o porquê de cada painel vive no `description` dele — que é tooltip na tela, e portanto chega também a quem só assiste à demo |
+| `docker/observabilidade/dashboards.yaml` | **novo**. O provider de arquivo. Ele existe porque `provisioning/dashboards/` guarda *providers*, não dashboards: um JSON solto ali é ignorado, e o `sample.yaml` da imagem está inteiro comentado. `allowUiUpdates: false` e `disableDeletion: true` deixam o arquivo ser a verdade |
+| `docker-compose.yml` | dois mounts novos no serviço `observabilidade` (o provider e o JSON, este num subdiretório `fiapx/`) e o bloco `environment` com `GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`. O `grafana-dashboards.yaml` da imagem não é tocado: um provider a mais convive com ele, e sobrescrevê-lo custaria rederivar aquele arquivo a cada upgrade |
+| `scripts/smoke.sh` | passo **12** novo, depois do 11. Ele lê as queries **do arquivo do painel** e reprova a que devolver série vazia; confere de quebra que a home do Grafana é o painel e que os três `uid` de datasource que o painel fixa existem. O cabeçalho do script passa a apresentar o passo, e a linha final diz que o painel é a home |
+| `docs/adr/0004-camada-de-observabilidade.md` | ponteiro de uma linha no parágrafo da recusa, **sem reescrevê-lo**, e seção nova no fim: *Um painel, e o que da recusa continua de pé* |
+| `docs/wayfinder/map.md` | linha em *Decisões até aqui*; o item de *Fora de escopo* ganhou o ponteiro e **não** foi reescrito |
+| `docs/arquitetura.md` | duas frases que passaram a ser falsas: a de que painel curado continua fora, e a linha da tabela de recusados. A linha ganhou o ponteiro em vez de sumir — o canal de notificação continua recusado ali |
+| `README.md` | *"Não há painel montado"* era falso. O parágrafo passa a dizer o que abre em `localhost:3000`, e por que HTTP e JVM não estão lá |
+
+### O que a medição mudou no desenho
+
+**A duração virou média por `resultado`, e não quantil.** O desenho inicial era
+`histogram_quantile` sobre `rate(..._bucket[$__rate_interval])`, que é a forma de manual — e ela
+devolveu `NaN` em **todas** as amostras da janela de uma hora. Duas causas independentes, as
+duas medidas contra a stack:
+
+- Os limites de bucket são os *default* do OpenTelemetry (0, 5, 10, 25 … 10000), pensados para
+  milissegundos. A Extração do fixture leva **0,19 s** (concluída) e **0,048 s** (falha no
+  ffprobe): as três observações caem no primeiro bucket, e o quantil ali é interpolação linear
+  dentro de `[0, 5]`, não medida.
+- No volume da demo, `rate()` sobre a janela devolve zero: a série nasce já com a contagem — o
+  exportador só emite o instrumento depois da primeira observação —, então não há incremento
+  **dentro** da janela para o `rate` enxergar, e `histogram_quantile` sobre buckets todos em zero
+  é `NaN`.
+
+`_sum / _count` por `resultado` é exato nos dois casos, e preserva o corte que é o ponto da
+métrica. Mudar os limites de bucket seria código novo no `extracao`, e outro ticket.
+
+**A verificação precisou separar "sem série" de "série só de `NaN`".** A primeira versão do passo
+12 cobrava `.data.result | length > 0`, e a query do quantil **passava** — duas séries, todas as
+amostras `NaN`. Um painel que desenha uma linha vazia é o mesmo defeito que este passo existe
+para pegar. O passo conta amostras não-`NaN`, e foi essa contagem que expôs o problema acima.
+
+**Dois defeitos de escape, achados por reprovação e não por leitura.** A expressão das DLQs é
+`queue=~".+\\.dlq"` — PromQL usa escape de Go em literal de string, então a contrabarra vai
+dobrada, e a forma "óbvia" (`.+\.dlq`) é erro de sintaxe. E o passo 12 lia as queries com
+`@tsv` do `jq`, que **escapa contrabarra**: a expressão chegava ao Prometheus com a barra
+dobrada de novo e não casava fila nenhuma, reprovando um painel correto. O passo lê com
+`join` num separador de unidade.
+
+### Como foi verificado
+
+`scripts/smoke.sh` inteiro, do zero (`docker compose down` antes), sob `systemd-inhibit`:
+**verde nos doze passos**, com o 11 inalterado. O passo 12 consultou as **12** queries do painel
+— as nove do Prometheus, a do Loki e a do Tempo, mais a variável `$servico` resolvida no
+`allValue` e o `$idVideo` resolvido no Vídeo que concluiu — e todas devolveram amostra. O
+provisionamento foi conferido pela API do Grafana (13.2.0): o painel aparece como `provisioned`,
+com os onze painéis, as duas variáveis e os dois links, e `GET /api/dashboards/home` redireciona
+para ele.

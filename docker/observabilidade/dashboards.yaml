@@ -1,0 +1,31 @@
+# Provider de dashboard por arquivo (ticket 092), ao lado do `alertas.yaml`.
+#
+# Ele existe porque o provisionamento de dashboard do Grafana NAO e por arquivo solto: o
+# `alertas.yaml` cai direto em `provisioning/alerting/` e e lido, mas um JSON de dashboard
+# posto em `provisioning/dashboards/` e ignorado — aquele diretorio guarda PROVIDERS, e o
+# unico que a imagem traz la (`sample.yaml`) esta inteiro comentado. Dai o custo de dois
+# mounts para um painel: este arquivo e o JSON que ele aponta.
+#
+# O `grafana-dashboards.yaml` da imagem, que provisiona os tres dashboards de fabrica, nao e
+# tocado: um provider a mais convive com ele, e sobrescreve-lo custaria rederivar aquele
+# arquivo a cada upgrade (o mesmo preco que o `otelcol-config.yaml` ja paga).
+#
+# `allowUiUpdates: false` e `disableDeletion: true` deixam o arquivo ser a verdade: o painel
+# volta ao versionado a cada boot, e ninguem o apaga por engano no meio da demo. O ganho e o
+# mesmo que o `alertas.yaml` tem — o que esta na tela esta no repositorio.
+apiVersion: 1
+
+providers:
+  - name: "FIAP X"
+    orgId: 1
+    type: file
+    # Pasta raiz de proposito: o painel e a HOME (GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH no
+    # `docker-compose.yml`), e uma pasta so o esconderia um clique mais fundo na busca. A pasta
+    # `FIAP X` do `alertas.yaml` e outra coisa — la ela agrupa regra de alerta, nao dashboard.
+    folder: ""
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /otel-lgtm/grafana/conf/provisioning/dashboards/fiapx/
+      foldersFromFilesStructure: false

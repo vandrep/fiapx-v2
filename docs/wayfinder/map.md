@@ -1239,6 +1239,30 @@ verificadas por teste, não são sugestão). Projeto original em
   **não** foi reaberta aqui, e é o [092](tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md)
   que a discute.
 
+- [Um painel do vão, e a reversão parcial da recusa de painel
+  curado](tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md) — **reversão parcial** de
+  decisão registrada, e não acréscimo: painel curado estava em *Fora de escopo* e o ADR 0004 o
+  recusava por mérito. Cai **um** dos dois argumentos daquela recusa, e cai por quem é o leitor:
+  *"a exploração ad-hoc no Explore responde as mesmas perguntas"* pressupõe alguém que sabe o que
+  perguntar, e o público real é o avaliador nos dez minutos do vídeo — ele não tem como saber que
+  existe uma fila chamada `extracao.extrair.estacionamento`. O outro argumento — um painel é a
+  parte que envelhece primeiro — **fica de pé, e virou requisito**: o passo 12 do `scripts/smoke.sh`
+  lê as queries **do arquivo do painel** e reprova a que devolver série vazia num sistema que
+  acabou de processar um Vídeo; ele roda **depois** do ciclo porque `fiapx.extracao.duracao` está
+  legitimamente vazia até a primeira Extração. É **um** painel, não uma suíte
+  (`docker/observabilidade/painel-infraestrutura.json`, provisionado por arquivo e home do
+  Grafana por `GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`), e cobre só o **vão**: fila,
+  Estacionamento, DLQ, consumidores e `fiapx.extracao.duracao` com `resultado`, mais log e trace.
+  HTTP e JVM ficam fora e são linkados — são dos dois dashboards que o
+  [091](tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md) fez enxergar os
+  três serviços, e repeti-los aqui seria o envelhecimento que a recusa temia. As expressões de
+  fila são derivadas das dos três alertas do `alertas.yaml`, e a busca de trace herda a âncora em
+  `resource.service.name` e os dois spansets ligados por `&&` do passo 10. Contagem de Vídeo por
+  estado **continua fora**. Medido ao escrever: a duração aparece como média por `resultado`, e
+  não como quantil, porque os limites de bucket default do OpenTelemetry são de milissegundos e a
+  Extração do fixture leva ~0,19 s — todo mundo cai no primeiro bucket, e um quantil ali é
+  interpolação, não medida.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -1297,6 +1321,10 @@ verificadas por teste, não são sugestão). Projeto original em
   de alerta** (os alertas existem e guardam histórico; entregá-los por e-mail é configuração
   de *contact point*, adiada conscientemente — a detecção não muda, e isso está registrado
   em Limitações conhecidas).
+  *Revertido em parte pelo [ticket 092](tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md):
+  existe **um** painel, e só sobre o vão que nenhum dashboard de fábrica olha — ver Decisões até
+  aqui. O canal de notificação continua fora. O item acima não se reescreve: painel curado esteve
+  fora, e por que esteve continua sendo parte do registro.*
 - **Manifests Kubernetes** — o enunciado aceita "Docker Compose **ou** Kubernetes";
   Compose garante a demo.
 - **Interface web** — o projeto original tinha HTML embutido; a demo será por Swagger UI e

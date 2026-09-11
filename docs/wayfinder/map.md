@@ -1322,6 +1322,21 @@ verificadas por teste, não são sugestão). Projeto original em
   ficam inalterados. O *RED classic* não muda nas legendas — toda query dele soma as instâncias
   numa linha só —, só na lista suspensa `$instance`.
 
+- [As legendas do *JVM Overview* sem id de
+  container](tickets/096-legendas-do-jvm-overview-sem-id-de-container.md) — a `instance` passa a
+  ser `<service.name>-<réplica>` (`fiapx-extracao-2`). O número da réplica só existe no nome que o
+  Compose dá ao container, e de dentro dele a única porta é a DNS do Docker; por isso as três
+  imagens ganham um `entrypoint.sh` que declara esse nome como `container.name` (convenção do OTel)
+  e dá `exec` no JVM, e o coletor aproveita só o sufixo numérico, porque o prefixo muda com o
+  diretório do projeto. O formato do 095 fica como recuo para série sem `container.name`. O preço,
+  aceito: a `instance` fica única por réplica e não por container, então por ~5 min depois de
+  **recriar** um serviço as duas gerações somam nos painéis que agregam (*Threads* mediu 72 contra
+  32/40). As três
+  cópias do script têm guarda no `validate` (`scripts/verifica-entrypoint.sh`). O "só alguns têm
+  o nome" que abriu o ticket era histórico, não defeito: as séries anteriores continuam na janela
+  de 1 h do dashboard, e só recriar o container `observabilidade` as tira antes — ao preço de
+  zerar todo o histórico.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

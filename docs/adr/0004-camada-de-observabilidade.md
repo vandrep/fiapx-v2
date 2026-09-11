@@ -285,15 +285,30 @@ primeiro chega; o segundo não era emitido por ninguém, e as três telas filtra
 únicas séries que a tinham eram as de *scrape* (`rabbitmq` e `otelcol-contrib`), que a setam
 nativamente. O conserto é um processador `transform` na pipeline de métrica do
 `docker/observabilidade/otelcol-config.yaml`, que monta `service.instance.id` como
-`<service.name>/<host.name>` — `fiapx-videos/3de6f12673fe` —, com uma guarda `== nil` que
-preserva quem já traz a sua. O `host.name` já está em toda série e é o id do container, portanto
-único por réplica. O `service.name` na frente veio depois, no
-[ticket 095](../wayfinder/tickets/095-nome-do-servico-nas-legendas-do-jvm-overview.md): as
-legendas do *JVM Overview* só mostram a `instance` — seis das oito queries agregam
-`by (instance)` e descartam o `job` —, e com o id do container sozinho ninguém sabia de qual
-serviço era a linha. Consertar
-no valor da etiqueta, e não no JSON do dashboard, mantém o dashboard da imagem intocado — que é
-o que o deixa a custo zero de manutenção.
+`<service.name>-<réplica>` — `fiapx-extracao-2` —, com uma guarda `== nil` que preserva quem já
+traz a sua. O valor precisa ser único por réplica, porque o `extracao` sobe com duas, e legível,
+porque as legendas do *JVM Overview* só mostram a `instance`: seis das oito queries agregam
+`by (instance)` e descartam o `job`. Consertar no valor da etiqueta, e não no JSON do dashboard,
+mantém o dashboard da imagem intocado — que é o que o deixa a custo zero de manutenção.
+
+O número da réplica não existe dentro do JVM: é o sufixo do nome que o Compose dá ao container
+(`fiapx-v2-extracao-2`), e de dentro do container a única porta para ele é a DNS do Docker, que
+responde o PTR do próprio IP. Por isso cada imagem sobe por um `entrypoint.sh` que pergunta esse
+nome e o declara como `container.name`, atributo de convenção do OTel, antes de dar `exec` no JVM
+([ticket 096](../wayfinder/tickets/096-legendas-do-jvm-overview-sem-id-de-container.md)). O
+valor chegou em três passos: `host.name` puro no 091, que é único mas ilegível;
+`<service.name>/<host.name>` no
+[095](../wayfinder/tickets/095-nome-do-servico-nas-legendas-do-jvm-overview.md); e o número da
+réplica no lugar do id no 096. O formato do 095 continua como **recuo**, para a série que chega
+sem `container.name` — imagem anterior ao 096, ou serviço rodando fora do Compose.
+
+O preço de tirar o id é que a `instance` passa a ser única por **réplica**, não por container.
+Um container recriado herda a `instance` do anterior, e por uns 5 min — o lookback do
+Prometheus, porque série OTLP não recebe marca de staleness — as duas gerações convivem: somam
+nos painéis que agregam `by (instance)` (*Threads* mediu 72 contra 32 e 40) e aparecem como duas
+linhas de mesma legenda nos que não agregam. É transitório e só acontece na recriação, não no
+restart. Foi aceito porque qualquer coisa que separe as gerações teria de estar na `instance`, e
+a `instance` é a legenda.
 
 O terceiro **continua morto, e é estrutural**: ele consulta
 `http_server_request_duration_seconds` como histograma nativo, sem sufixo, e o Quarkus exporta

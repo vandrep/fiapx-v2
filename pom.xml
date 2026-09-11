@@ -140,7 +140,7 @@
 
         <plugins>
             <!-- Guarda de repositorio, nao de modulo: cobra que as tres copias de
-                 ArchitectureConstraintsTest e as tres copias de AckManual sejam
+                 ArchitectureConstraintsTest, de AckManual e de entrypoint.sh sejam
                  identicas. Roda so no agregador (inherited false) e na primeira fase
                  do ciclo, para o feedback chegar antes de qualquer compilacao.
                  Ver AGENTS.md. -->
@@ -173,6 +173,19 @@
                             <executable>bash</executable>
                             <arguments>
                                 <argument>${project.basedir}/scripts/verifica-ackmanual.sh</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>verifica-entrypoint</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>bash</executable>
+                            <arguments>
+                                <argument>${project.basedir}/scripts/verifica-entrypoint.sh</argument>
                             </arguments>
                         </configuration>
                     </execution>

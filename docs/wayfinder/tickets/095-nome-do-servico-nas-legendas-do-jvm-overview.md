@@ -93,3 +93,6 @@ não recebe marca de staleness, então elas continuam aparecendo na consulta ins
 recém-subida isso não existe. Nada no repositório consultava a `instance` pelo valor — o
 `painel-infraestrutura.json`, o `alertas.yaml` e os scripts não a usam —, então nenhum outro
 arquivo mudou.
+
+*O id do container saiu da `instance` no [096](096-legendas-do-jvm-overview-sem-id-de-container.md);
+o formato daqui ficou como recuo.*

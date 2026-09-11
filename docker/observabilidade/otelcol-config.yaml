@@ -2,8 +2,8 @@
 #
 # DERIVADA de `/otel-lgtm/otelcol-config.yaml` da imagem `grafana/otel-lgtm:0.32.1`, com DUAS
 # adicoes: o receiver `prometheus/rabbitmq` (ticket 058) e o processador `transform/instancia`
-# (tickets 091 e 095). A imagem nao oferece mecanismo de inclusao, so substituicao do arquivo inteiro
-# — entao subir a versao da imagem exige rederivar este arquivo e reaplicar as DUAS adicoes,
+# (tickets 091, 095 e 096). A imagem nao oferece mecanismo de inclusao, so substituicao do
+# arquivo inteiro — entao subir a versao da imagem exige rederivar este arquivo e reaplicar as DUAS adicoes,
 # conferindo o diff, do mesmo jeito que o ticket 035 fez com os campos privados do SmallRye. O
 # `docker-compose.yml` fixa a versao justamente para que isso nao aconteca sozinho.
 #
@@ -61,15 +61,27 @@ processors:
   # A guarda `== nil` preserva quem ja traz a sua: as series de scrape do `rabbitmq` e do
   # `otelcol-contrib` setam `instance` nativamente, e nao podem ser reescritas.
   #
-  # O valor leva o service.name na frente (`fiapx-videos/3de6f12673fe`), e nao so o host.name
-  # (ticket 095): as legendas do *JVM Overview* so mostram a `instance` — a maioria das queries
-  # agrega `by (instance)` e descarta o `job` —, e um id de container sozinho nao diz de qual
-  # dos tres servicos a linha e. Por isso a guarda tambem exige service.name.
+  # O valor e `<service.name>-<replica>` (`fiapx-extracao-2`), e nao o id do container: as
+  # legendas do *JVM Overview* so mostram a `instance` — a maioria das queries agrega
+  # `by (instance)` e descarta o `job` —, e o id nao diz nem de qual servico a linha e
+  # (ticket 095) nem qual replica ela e (ticket 096). O numero da replica e o sufixo do
+  # `container.name` que o `entrypoint.sh` de cada imagem declara (`fiapx-v2-extracao-2`);
+  # o prefixo e o nome do projeto Compose, que muda com o diretorio, por isso so o numero
+  # e aproveitado. Continua UNICO POR REPLICA, que e o que o `extracao` exige — mas nao por
+  # container: um container RECRIADO herda a `instance` do anterior, e por ~5 min (o lookback
+  # do Prometheus) as duas geracoes somam nos paineis que agregam `by (instance)`. Custo aceito
+  # no ticket 096; qualquer coisa que separe as geracoes teria de estar na legenda.
+  #
+  # O segundo statement e o recuo para quem nao declara `container.name` — imagem antiga, ou
+  # fora do Compose —: `<service.name>/<host.name>`, feio mas unico. Sem ele a serie ficaria
+  # sem `instance` e voltaria a sumir dos dashboards (ticket 091).
   transform/instancia:
     error_mode: ignore
     metric_statements:
       - context: resource
         statements:
+          - set(cache["replica"], ExtractPatterns(attributes["container.name"], "-(?P<replica>[0-9]+)$")["replica"]) where attributes["container.name"] != nil
+          - set(attributes["service.instance.id"], Concat([attributes["service.name"], cache["replica"]], "-")) where attributes["service.instance.id"] == nil and attributes["service.name"] != nil and cache["replica"] != nil
           - set(attributes["service.instance.id"], Concat([attributes["service.name"], attributes["host.name"]], "/")) where attributes["service.instance.id"] == nil and attributes["service.name"] != nil and attributes["host.name"] != nil
 
 exporters:

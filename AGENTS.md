@@ -35,7 +35,7 @@ O resto do contexto está atrás de ponteiros, cada um com o seu gatilho:
 
 ```
 pom.xml         parent agregador, packaging pom, br.com.fiapx:fiapx — não gera artefato
-videos/         pom + src + Dockerfile
+videos/         pom + src + Dockerfile + entrypoint.sh
 extracao/       idem
 notificacao/    idem
 ```
@@ -254,6 +254,14 @@ cópias de `ArchitectureConstraintsTest` são byte a byte idênticas — inclusi
 cópia —, e a guarda em `scripts/verifica-testes-arquiteturais.sh` compara sem normalização. As
 três cópias de `AckManual` diferem só na linha `package`, que carrega o nome do serviço; a
 guarda em `scripts/verifica-ackmanual.sh` normaliza essa linha antes de comparar o resto.
+
+As famílias contadas até aqui são de código Java. Fora dele há uma terceira com guarda, que não
+entra naquela contagem: o `entrypoint.sh` de cada imagem (ticket 096),
+que declara o nome do container à observabilidade e só então dá `exec` no JVM. As três cópias
+existem porque o contexto de build de cada imagem é o diretório do serviço, e um `COPY` não
+alcança o vizinho; são byte a byte idênticas, e `scripts/verifica-entrypoint.sh` compara sem
+normalização. O `exec` não é detalhe: sem ele o JVM deixa de ser o PID 1 e não recebe o SIGTERM
+de que o dreno do `extracao` depende.
 
 ## Nomes na observabilidade
 

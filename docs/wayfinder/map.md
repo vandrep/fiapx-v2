@@ -1311,6 +1311,17 @@ verificadas por teste, não são sugestão). Projeto original em
   falhas ficaram todas no primeiro bucket e os cinco limites acima de 10 s ficaram vazios — os dois
   são o esperado, e estão registrados como tal em vez de corrigidos.
 
+- [O nome do serviço nas legendas do *JVM
+  Overview*](tickets/095-nome-do-servico-nas-legendas-do-jvm-overview.md) — as legendas daquele
+  dashboard só mostram a `instance` (seis das oito queries agregam `by (instance)` e descartam o
+  `job`), e a `instance` era só o id do container. O conserto mora na **etiqueta**, não no dashboard: o `transform/instancia` do 091
+  passa a montar `service.instance.id` como `<service.name>/<host.name>`
+  (`fiapx-videos/3de6f12673fe`), e o JSON da imagem continua intocado — sobrescrevê-lo custaria
+  rederivá-lo a cada upgrade, que é justamente o custo que tornou os dashboards de fábrica
+  aceitáveis no ADR 0004. A `instance` segue única por réplica, e `rabbitmq` e `otelcol-contrib`
+  ficam inalterados. O *RED classic* não muda nas legendas — toda query dele soma as instâncias
+  numa linha só —, só na lista suspensa `$instance`.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

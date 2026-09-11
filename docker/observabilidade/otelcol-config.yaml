@@ -2,7 +2,7 @@
 #
 # DERIVADA de `/otel-lgtm/otelcol-config.yaml` da imagem `grafana/otel-lgtm:0.32.1`, com DUAS
 # adicoes: o receiver `prometheus/rabbitmq` (ticket 058) e o processador `transform/instancia`
-# (ticket 091). A imagem nao oferece mecanismo de inclusao, so substituicao do arquivo inteiro
+# (tickets 091 e 095). A imagem nao oferece mecanismo de inclusao, so substituicao do arquivo inteiro
 # — entao subir a versao da imagem exige rederivar este arquivo e reaplicar as DUAS adicoes,
 # conferindo o diff, do mesmo jeito que o ticket 035 fez com os campos privados do SmallRye. O
 # `docker-compose.yml` fixa a versao justamente para que isso nao aconteca sozinho.
@@ -60,12 +60,17 @@ processors:
   #
   # A guarda `== nil` preserva quem ja traz a sua: as series de scrape do `rabbitmq` e do
   # `otelcol-contrib` setam `instance` nativamente, e nao podem ser reescritas.
+  #
+  # O valor leva o service.name na frente (`fiapx-videos/3de6f12673fe`), e nao so o host.name
+  # (ticket 095): as legendas do *JVM Overview* so mostram a `instance` — a maioria das queries
+  # agrega `by (instance)` e descarta o `job` —, e um id de container sozinho nao diz de qual
+  # dos tres servicos a linha e. Por isso a guarda tambem exige service.name.
   transform/instancia:
     error_mode: ignore
     metric_statements:
       - context: resource
         statements:
-          - set(attributes["service.instance.id"], attributes["host.name"]) where attributes["service.instance.id"] == nil and attributes["host.name"] != nil
+          - set(attributes["service.instance.id"], Concat([attributes["service.name"], attributes["host.name"]], "/")) where attributes["service.instance.id"] == nil and attributes["service.name"] != nil and attributes["host.name"] != nil
 
 exporters:
   otlp_http/metrics:

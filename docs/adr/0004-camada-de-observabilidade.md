@@ -284,9 +284,16 @@ primeiro chega; o segundo não era emitido por ninguém, e as três telas filtra
 `instance=~"$instance"` com `allValue: ".+"` — um matcher que **exige a etiqueta existir**. As
 únicas séries que a tinham eram as de *scrape* (`rabbitmq` e `otelcol-contrib`), que a setam
 nativamente. O conserto é um processador `transform` na pipeline de métrica do
-`docker/observabilidade/otelcol-config.yaml`, copiando `host.name` — que já está em toda série e
-é o id do container, portanto único por réplica — para `service.instance.id`, com uma guarda
-`== nil` que preserva quem já traz a sua.
+`docker/observabilidade/otelcol-config.yaml`, que monta `service.instance.id` como
+`<service.name>/<host.name>` — `fiapx-videos/3de6f12673fe` —, com uma guarda `== nil` que
+preserva quem já traz a sua. O `host.name` já está em toda série e é o id do container, portanto
+único por réplica. O `service.name` na frente veio depois, no
+[ticket 095](../wayfinder/tickets/095-nome-do-servico-nas-legendas-do-jvm-overview.md): as
+legendas do *JVM Overview* só mostram a `instance` — seis das oito queries agregam
+`by (instance)` e descartam o `job` —, e com o id do container sozinho ninguém sabia de qual
+serviço era a linha. Consertar
+no valor da etiqueta, e não no JSON do dashboard, mantém o dashboard da imagem intocado — que é
+o que o deixa a custo zero de manutenção.
 
 O terceiro **continua morto, e é estrutural**: ele consulta
 `http_server_request_duration_seconds` como histograma nativo, sem sufixo, e o Quarkus exporta

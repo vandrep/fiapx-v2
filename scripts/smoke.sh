@@ -366,6 +366,18 @@ passo "12. Nenhuma query do painel curado devolve série vazia"
 # legitimamente vazia ate a primeira Extracao — 88 nomes de metrica na base, zero com `durac`,
 # medido numa stack recem-subida. Um passo posto cedo demais reprovaria um sistema saudavel.
 #
+# A linha `Borda` do painel (ticket 097) e coberta por este mesmo laco, e quem a alimenta e o
+# PROPRIO smoke: o passo 9 cobra 404 no Video de outro dono, e foi medido subindo o contador
+# daquele status (13 -> 14) numa corrida desta. Um painel de erro com dado numa corrida VERDE nao e
+# contradicao: 4xx e a borda recusando o que o contrato manda recusar, e o RED Metrics de fabrica
+# nao conta nenhuma delas, porque conta so `5..`. Basta esse 404 para a query ter serie; as outras
+# tres classes (415, 400, 409) so aparecem depois de uma corrida do `scripts/trafego.sh`, que e
+# quem exercita o cenario `erro` inteiro.
+#
+# O painel de 5xx ao lado passa com ZERO, e nao vazio, que e exatamente o ponto dele — o
+# `or vector(0)` no numerador —, e este laco aprova o zero de proposito: ele conta amostra
+# nao-`NaN`, e nao valor diferente de zero. Um 5xx aqui, alias, seria defeito de verdade.
+#
 # UM painel escapa deste passo, e escapa de proposito: o `count(...) or vector(0)` das filas sem
 # consumidor nunca volta vazio, porque sem o `or vector(0)` ele diria "No data" justamente com o
 # sistema saudavel. O que sobraria descoberto sao as duas metricas que ele usa, e as duas estao

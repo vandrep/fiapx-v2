@@ -1337,6 +1337,22 @@ verificadas por teste, não são sugestão). Projeto original em
   de 1 h do dashboard, e só recriar o container `observabilidade` as tira antes — ao preço de
   zerar todo o histórico.
 
+- [As recusas 4xx da borda, e o *Error Rate* que só conta
+  5xx](tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md) — o diagnóstico não
+  achou defeito: o *Error Rate* do *RED classic* conta `5..`, o sistema não produz nenhum, e o
+  painel vazio é a verdade. O vão era vizinho — as 52 recusas do contrato que o `trafego.sh` gera
+  (415, 400, 404, 409) não apareciam em painel algum. **Decidido o caminho B**: a leitura de erro
+  da borda vai para o painel curado, numa linha *Borda* com dois painéis, e o JSON de fábrica fica
+  intocado. Isto abre uma exceção estreita na recusa do 092 de repetir HTTP, e ela é estreita pelo
+  próprio argumento da recusa: o RED **não** mantém `4..`, então não há série repetida; o 5xx
+  entra junto só para a razão ter sentido e para dar à palavra "erro" um título que diz de qual
+  faixa fala. O `0%` no lugar de "No data" custa um `or vector(0)` no numerador — numerador vazio
+  dividido por denominador é vetor vazio em PromQL, não bug do Grafana. **O caminho A foi
+  recusado pela terceira vez** (091, 095, 097): sobrescrever 15,9 kB de JSON derivado da imagem, a
+  rederivar a cada upgrade, para ganhar um título. O preço do B, dito por escrito: quem abrir o
+  *RED classic* direto continua vendo `Error Rate` sem qualificação e vazio, e quem o desambigua é
+  o ADR 0004, não a tela.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -1379,6 +1395,16 @@ verificadas por teste, não são sugestão). Projeto original em
      achado foi recusado: a cerca do 045 é sintática e `Uni.join` passaria verde, mas o
      próprio 045 já registra isso como escolha barata deliberada, e reabrir seria refazer
      decisão registrada. -->
+
+<!-- A fronteira reabriu em 2026-09-12, com um ticket só e por um diagnóstico que NÃO achou
+     defeito: o [097](tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md)
+     nasceu da pergunta "por que o *Error Rate* do *RED classic* está sem dados", cuja resposta
+     é que ele conta `5..` e o sistema não produz nenhum — o que 091 e o ADR 0004 já registravam.
+     O que o diagnóstico achou foi o vão vizinho: as 52 recusas 4xx que o `trafego.sh` gera de
+     propósito (415, 400, 404, 409) não apareciam em painel nenhum. A decisão que ele carregava
+     saiu na mesma sessão, pelo caminho recomendado — painel curado, JSON de fábrica intocado —,
+     e o ticket fechou; a linha dele está em Decisões até aqui, com o preço do B por escrito.
+     A fronteira voltou a ficar vazia. -->
 
 ## Fora de escopo
 

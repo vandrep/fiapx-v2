@@ -277,6 +277,17 @@ defeito: ele conta `http_response_status_code=~"5.."`, e num ciclo saudável nã
 demais séries dos dois dashboards que servem foram conferidas com as variáveis em "All" — GC
 inclusive, que tem `jvm_gc_duration_seconds_sum` por container.
 
+O que aquele "No data" **não** diz, e o
+[ticket 097](../wayfinder/tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md)
+mediu, é que a borda recusa bastante: 52 recusas `4..` numa corrida do `trafego.sh` — 415, 400,
+404 e 409, 13 de cada —, e nenhuma delas aparecia em painel algum. RED define erro como erro de
+servidor, então o dashboard de fábrica está certo em não contá-las; o vão é que ninguém mais as
+contava. **A leitura de recusa 4xx da borda mora no painel curado**, na linha *Borda* de
+`painel-infraestrutura.json`, junto com a taxa de 5xx — ver § *Um painel*, no fim deste
+documento. O título `Error Rate` do dashboard de fábrica continua sem qualificação e continua
+vazio em ciclo saudável: qualificá-lo exigiria sobrescrever 15,9 kB de JSON derivado da imagem,
+e quem desambigua é este parágrafo, não a tela.
+
 Os dois que servem passaram a servir porque as séries ganharam `instance`. O mecanismo é o
 oposto do intuitivo: quem traduz OTLP→Prometheus **não é o coletor, é o próprio Prometheus**, no
 `/api/v1/otlp`, e ele mapeia `service.name` → `job` e `service.instance.id` → `instance`. O
@@ -422,13 +433,34 @@ recém-subida: 88 nomes de métrica na base, zero com `durac`.
 
 **Fica de pé, e é o que decide o escopo, o "painel vazio prova menos".** O painel cobre só o
 **vão** — fila, Estacionamento, DLQ, consumidores e `fiapx.extracao.duracao` —, que é o que
-nenhum dashboard de fábrica olha. HTTP e JVM ficam de fora: são dos dois dashboards que a
+nenhum dashboard de fábrica olha. JVM fica de fora, e HTTP também ficava inteiro até o
+[ticket 097](../wayfinder/tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md)
+abrir uma exceção estreita, adiante: são dos dois dashboards que a
 imagem mantém e que o [ticket 091](../wayfinder/tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md)
 fez enxergar os três serviços, e o painel apenas linka para eles. Repetir aqui série que outro
 dashboard já mantém seria exatamente o envelhecimento que a recusa temia, com o agravante de
 que o dono do outro dashboard é a imagem, que muda sozinha no upgrade. Continua fora, e pelo
 motivo já registrado acima, **contagem de Vídeo por estado**: o endpoint de listagem responde, e
 um gauge exigiria varredura periódica no banco.
+
+**A exceção, e por que ela é estreita** ([ticket
+097](../wayfinder/tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md)). O
+painel ganhou uma linha *Borda*, com dois painéis de HTTP, e isso contraria a frase acima — de
+propósito, e só onde o argumento dela não alcança. O que a frase protege é "não repita série que
+outro dashboard já mantém", e o RED de fábrica **não** mantém `4..`: ele conta erro de servidor,
+que é a definição de RED, e as recusas do contrato — 415, 400, 404, 409, que
+`docs/contratos/http-videos.md` fixa, o teste de borda confere e o `trafego.sh` exercita — não
+apareciam em tela nenhuma. O 5xx entra junto, e aí sim é repetição: ele existe para que a palavra
+"erro" tenha um título que diz de qual faixa fala, e para que ciclo saudável leia `0%` em vez de
+"No data", o que custa um `or vector(0)` no numerador — numerador vazio dividido por denominador
+é vetor vazio em PromQL, não um bug do Grafana. Taxa e duração do HTTP continuam fora, e o link
+do topo continua sendo a resposta para elas.
+
+O que esta escolha **não** entrega, e fica dito: quem abrir o *RED Metrics (classic histogram)*
+direto continua vendo um `Error Rate` sem qualificação e vazio. A alternativa era sobrescrever
+aquele JSON por mount — a terceira reversão da mesma decisão que 091 e 095 recusaram, e 15,9 kB
+a rederivar a cada upgrade da `grafana/otel-lgtm` — para ganhar um título. O preço não compra o
+suficiente.
 
 Três decisões de forma que o arquivo carrega, e o porquê de cada uma:
 

@@ -1,14 +1,14 @@
 {
   "uid": "fiapx-infraestrutura",
   "title": "FIAP X — a infraestrutura está saudável?",
-  "description": "O único painel curado do projeto (ticket 092). Ele cobre o VÃO: fila, Estacionamento, DLQ, consumidores e a duração da Extração — tudo que nenhum dashboard de fábrica da imagem olha. HTTP e JVM ficam de fora de propósito, e estão nos dois dashboards que a própria imagem mantém, linkados no topo: repetir aqui série que outro dashboard já mantém é o envelhecimento que o ADR 0004 teme. As expressões de fila são derivadas das dos três alertas de docker/observabilidade/alertas.yaml, e não reinventadas.",
+  "description": "O único painel curado do projeto (ticket 092). Ele cobre o VÃO: fila, Estacionamento, DLQ, consumidores e a duração da Extração — tudo que nenhum dashboard de fábrica da imagem olha. JVM fica de fora de propósito, e HTTP fica quase todo de fora: taxa e duração estão no RED Metrics de fábrica, linkado no topo, e repetir aqui série que outro dashboard já mantém é o envelhecimento que o ADR 0004 teme. A exceção é a linha da Borda, aberta estreita pelo ticket 097: as recusas 4xx do contrato não estão em dashboard de fábrica nenhum, porque o RED conta só `5..`, e o 5xx as acompanha aqui com `or vector(0)` para que ciclo saudável leia 0% em vez de 'No data'. As expressões de fila são derivadas das dos três alertas de docker/observabilidade/alertas.yaml, e não reinventadas.",
   "tags": [
     "fiapx"
   ],
   "editable": false,
   "graphTooltip": 1,
   "schemaVersion": 41,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": {
     "from": "now-1h",
@@ -754,6 +754,119 @@
       ]
     },
     {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Borda — recusas do contrato (4xx), por status",
+      "description": "A borda recusando o que o contrato manda recusar (ticket 097): 415 de tipo errado, 400 de corpo inválido, 404 de Vídeo alheio ou inexistente, 409 de Pacote que ainda não existe — os quatro que docs/contratos/http-videos.md fixa, que o teste de borda confere e que o cenário `erro` do scripts/trafego.js exercita de propósito. Eles não apareciam em painel NENHUM: o RED Metrics de fábrica conta só `5..`, porque RED define erro como erro de servidor, e uma recusa 4xx é a borda funcionando. Este painel é a exceção estreita que o ticket 097 abriu na recusa do 092 de repetir HTTP aqui, e ela é estreita por construção — cobre exatamente o que o dashboard de fábrica NÃO cobre, e nada além. Taxa por segundo, e não o acumulado: o que se lê é 'está recusando agora', e uma classe subindo sozinha é sintoma — 415 em rajada é cliente mandando o tipo errado, 409 em rajada é alguém baixando Pacote antes da hora. Linha em zero é o normal fora do tráfego sintético.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count{job=\"fiapx-videos\", http_response_status_code=~\"4..\"}[5m]))",
+          "legendFormat": "{{http_response_status_code}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Borda — erros de servidor (5xx), taxa sobre o total",
+      "description": "A leitura de erro de SERVIDOR da borda, que é a do RED: `5..` sobre o total. O `or vector(0)` não é enfeite — sem ele, numerador vazio dividido por denominador é vetor vazio em PromQL, e o painel diz 'No data' justamente quando o sistema está saudável. É o que o Error Rate do dashboard de fábrica faz, e o que o ticket 097 veio consertar sem tocar naquele JSON, que é de 15,9 kB e se rederiva a cada upgrade da imagem. Aqui, ciclo saudável lê 0%, que é uma afirmação, e não um silêncio ambíguo. O 5xx mora neste painel curado só como companhia do painel ao lado: sozinho ele já estava respondido de fábrica, mas sem ele a palavra 'erro' ficaria com dois donos e nenhum título dizendo de qual faixa de status fala. Ele ainda pode ficar vazio num caso, e é legítimo: borda 100% ociosa por mais de 5 min zera também o DENOMINADOR, e razão sem denominador não existe.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "always",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum(rate(http_server_request_duration_seconds_count{job=\"fiapx-videos\", http_response_status_code=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_server_request_duration_seconds_count{job=\"fiapx-videos\"}[5m]))",
+          "legendFormat": "5xx / total",
+          "range": true
+        }
+      ]
+    },
+    {
       "id": 11,
       "type": "logs",
       "title": "Log dos três serviços",
@@ -766,7 +879,7 @@
         "h": 11,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 44
       },
       "fieldConfig": {
         "defaults": {},

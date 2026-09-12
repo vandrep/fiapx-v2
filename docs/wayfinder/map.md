@@ -1459,14 +1459,10 @@ verificadas por teste, não são sugestão). Projeto original em
      terceiro pedido igual, olhe primeiro o ADR 0004 § Os três dashboards de fábrica. A fronteira
      está vazia de novo. -->
 
-<!-- Reabriu e fechou mais duas vezes na mesma data, e as duas mudaram código em vez de registro:
-     o [099](tickets/099-a-pasta-fiap-x-vazia-e-o-painel-que-mora-fora-dela.md) moveu o painel
-     curado para a pasta dos três alertas, e o
-     [100](tickets/100-tabela-de-trace-vazia-e-as-travessias-recentes-que-ninguem-ve.md) fez a
-     tabela de trace listar as travessias recentes quando ninguém digitou um idVideo. O padrão dos
-     quatro pedidos seguidos sobre painel vazio se inverteu aqui: 097 e 098 eram painel de erro de
-     fábrica, e a resposta era o registro; 099 e 100 eram o painel curado, e a resposta era
-     conserto. A fronteira está vazia de novo. -->
+<!-- Reabriu e fechou de novo em 2026-09-12, com o
+     [100](tickets/100-tabela-de-trace-vazia-e-as-travessias-recentes-que-ninguem-ve.md): quarto
+     pedido seguido sobre painel vazio, e o primeiro que era defeito — a tabela de trace do painel
+     curado exigia um idVideo digitado. A fronteira está vazia de novo. -->
 
 ## Fora de escopo
 

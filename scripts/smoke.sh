@@ -483,8 +483,22 @@ servico_all="$(jq -r '.templating.list[] | select(.name == "servico") | .allValu
 # `\b` depois do nome: sem ele, uma variavel futura chamada `$servicos` seria comida pela
 # substituicao de `$servico` e sobraria um `s` solto no meio da query — que a guarda de `$`
 # remanescente, logo abaixo, NAO pegaria, porque o cifrao ja teria sumido.
+# O idVideo vem por argumento, com o Video que concluiu como default, porque o passo julga o
+# painel de trace em DOIS estados (ticket 100) e um segundo resolvedor nao saberia de `$servico`:
+# um target de trace que a usasse reprovaria por "variavel que este passo nao sabe resolver".
 resolve_variaveis() {
-    sed -e "s/\\\$servico\\b/$servico_all/g" -e "s/\\\$idVideo\\b/$id/g"
+    local id_video="${1-$id}"
+    sed -e "s/\\\$servico\\b/$servico_all/g" -e "s/\\\$idVideo\\b/$id_video/g"
+}
+
+# Uma forma so de perguntar ao Tempo, usada pelo laco das queries e pela passagem do idVideo
+# vazio. Devolve a resposta CRUA, e nao a contagem, porque a passagem do idVideo vazio faz tres
+# perguntas sobre a mesma busca — quantos, em que ordem e de quem sao os spans.
+busca_no_tempo() {
+    curl -sS -G "$grafana_url/api/datasources/proxy/uid/tempo/api/search" \
+        --data-urlencode "q=$1" \
+        --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
+        --data-urlencode "limit=20"
 }
 
 agora=$(date +%s)
@@ -538,11 +552,8 @@ while IFS=$'\037' read -r titulo refid uid consulta; do
                 | jq '[.data.result[]?.values[]?] | length' || true)"
             ;;
         tempo)
-            amostras="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/tempo/api/search" \
-                --data-urlencode "q=$consulta" \
-                --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
-                --data-urlencode "limit=20" \
-                | jq '[.traces[]?] | length' || true)"
+            # Conta TRACE, e nao span: e a linha que a tabela do painel desenha.
+            amostras="$(busca_no_tempo "$consulta" | jq '[.traces[]?] | length' || true)"
             ;;
         *)
             falha "painel '$titulo' usa datasource desconhecido '$uid'"
@@ -569,24 +580,39 @@ ok "$consultadas queries do painel, todas com série"
 # igualdade, ou perdendo a ancora, que e o que separa travessia de GET de acompanhamento —, e
 # nos dois a tela fica plausivel. Dai o segundo par de olhos aqui, com a variavel VAZIA.
 travessias=0
-while IFS=$'\037' read -r titulo refid consulta; do
-    [[ -n "$refid" ]] || continue
-    consulta="$(sed -e 's/\$idVideo\b//g' <<< "$consulta")"
+while IFS=$'\037' read -r titulo refid uid consulta; do
+    [[ "$uid" == tempo ]] || continue
+    consulta="$(resolve_variaveis "" <<< "$consulta")"
     [[ "$consulta" != *'$'* ]] \
         || falha "painel '$titulo' ($refid) usa variável que este passo não sabe resolver: $consulta"
     travessias=$(( travessias + 1 ))
-    achadas="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/tempo/api/search" \
-        --data-urlencode "q=$consulta" \
-        --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
-        --data-urlencode "limit=20" \
-        | jq '[.traces[]?] | length' || true)"
+    busca="$(busca_no_tempo "$consulta")"
+
+    achadas="$(jq '[.traces[]?] | length' <<< "$busca" || true)"
     [[ "$achadas" =~ ^[0-9]+$ ]] \
         || falha "painel '$titulo' ($refid): o Tempo não respondeu um número consultável com o idVideo vazio"
     (( achadas > 0 )) \
         || falha "painel '$titulo' ($refid) não lista travessia nenhuma com o idVideo VAZIO, que é o estado que a demo abre: $consulta"
-    printf '    %6s traces   %s [%s] com o idVideo vazio\n' "$achadas" "$titulo" "$refid"
-done <<< "$(jq -r '.panels[] | .title as $t | .targets[]
-    | select(.datasource.uid == "tempo") | [$t, .refId, (.expr // .query)] | join("\u001f")' "$painel" || true)"
+
+    # "A mais nova primeiro" e o que o painel PROMETE no `description`, e nada no JSON a impoe:
+    # a tabela desenha na ordem do quadro, que e a ordem que o Tempo devolveu. Ou seja, a
+    # promessa vale por comportamento de outro processo — exatamente o tipo de coisa que este
+    # passo existe para nao deixar no boca a boca.
+    fora_de_ordem="$(jq '[.traces[].startTimeUnixNano | tonumber] as $t
+        | [range(1; ($t | length)) | select($t[.] > $t[. - 1])] | length' <<< "$busca" || true)"
+    [[ "$fora_de_ordem" == 0 ]] \
+        || falha "painel '$titulo' ($refid): o Tempo devolveu $fora_de_ordem trace(s) fora da ordem decrescente, e o painel promete a mais nova primeiro"
+
+    # A ancora `resource.service.name = "fiapx-extracao"` some sem deixar a tela vazia: sem ela
+    # a busca casa MAIS traces (medido no ticket 100: 19 contra 8, e 11 deles sem span do
+    # extracao), e a contagem acima ficaria verde mostrando GET de acompanhamento no lugar das
+    # travessias. Quem separa os dois e a origem dos spans de cada trace, nao o numero deles.
+    sem_extracao="$(jq '[.traces[] | select((.serviceStats | has("fiapx-extracao")) | not)] | length' <<< "$busca" || true)"
+    [[ "$sem_extracao" == 0 ]] \
+        || falha "painel '$titulo' ($refid): $sem_extracao de $achadas traces não têm span do fiapx-extracao — a âncora da busca se perdeu, e a tabela lista consulta em vez de travessia"
+
+    printf '    %6s traces   %s [%s] com o idVideo vazio, em ordem e todos com span do extracao\n' "$achadas" "$titulo" "$refid"
+done <<< "$consultas"
 (( travessias > 0 )) || falha "nenhuma query de trace lida de $painel; o estado de idVideo vazio ficou sem guarda"
 ok "a tabela de trace lista as travessias recentes sem o idVideo preenchido"
 

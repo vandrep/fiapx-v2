@@ -122,3 +122,49 @@ Markdown, sem uma linha de Java nem de `application.properties` — nada que qua
 `ArchitectureConstraintsTest` julgue. Rodá-la exigiria parar o Compose do usuário (os Dev
 Services do Keycloak estouram o timeout com a stack de pé), o que apagaria a própria base do
 Tempo que serviu de medição.
+
+## Correção (revisão da mesma sessão)
+
+O `/code-review` nos dois eixos rodou contra o commit da Resolução. **Nenhuma violação dura** de
+padrão documentado em nenhum dos dois. O que os dois eixos acharam foi o mesmo tipo de coisa: a
+guarda nova cobria menos do que o registro prometia. Aplicado:
+
+- **A guarda verde não distinguia perder a âncora.** Achado do eixo Spec, e é o achado que fez a
+  revisão valer: a asserção era `achadas > 0`, e perder
+  `resource.service.name = "fiapx-extracao"` **aumenta** a contagem — 19 traces contra 8, 11 deles
+  sem span do `extracao`. A tela continuaria plausível, listando GET de acompanhamento no lugar das
+  travessias, e o critério de aceite "a âncora continua onde está" não tinha quem o cobrasse. O
+  passo 12 passou a exigir que **todo** trace listado tenha span do `fiapx-extracao`, pelo
+  `serviceStats` da resposta de busca. **Vista vermelha** com a âncora removida de um painel de
+  cópia.
+- **"A mais nova primeiro" era promessa sem dono.** Nada no JSON impõe ordem — a tabela desenha na
+  ordem do quadro, que é a ordem que o Tempo devolveu —, e o `description` afirma a ordem como
+  fato. O passo 12 passou a conferir que os `startTimeUnixNano` chegam decrescentes. Esta é a
+  única das três asserções que **não** foi vista vermelha: quem a quebraria é uma mudança de
+  comportamento do Tempo, que não se simula de fora.
+- **O metacaractere na regex ficou dito.** O valor do textbox entra cru em
+  `=~ ".*$idVideo.*"`, então um parêntese digitado vira erro de query em vez de filtro. UUID não
+  tem metacaractere, e o preço fica aceito — mas agora está no `description` do painel, que é
+  quem fala com quem digita, e não só aqui.
+- **`| select(.idVideo)` não estava em critério nenhum.** Achado de escopo do eixo Spec, e
+  procede: ele entrou pela Resolução, não pelos critérios. Fica, e o porquê é o da própria § acima
+  — sem ele, quem expande uma linha da lista recente não tem como ligá-la a um Vídeo. O que muda
+  aqui é o registro: é decisão desta sessão, tomada depois dos critérios, não requisito do pedido.
+- **Dois resolvedores de variável, e um deles não sabia de `$servico`.** Achado do eixo Standards.
+  A passagem nova tinha um `sed` próprio para esvaziar `$idVideo`; um target de trace que usasse
+  `$servico` reprovaria com *"variável que este passo não sabe resolver"* — mensagem falsa.
+  `resolve_variaveis` passou a aceitar o `idVideo` por argumento, com o Vídeo concluído como
+  default, e há um resolvedor só. Na mesma linha, a busca no Tempo virou uma função usada pelas
+  duas passagens, e a passagem nova filtra o `$consultas` que o laço já leu em vez de reextrair o
+  JSON com um `jq` quase igual.
+- **Comentário do mapa reinterpretava o 099.** A nota de fronteira que eu havia escrito
+  agrupava 099 e 100 num padrão e repetia *"a fronteira está vazia de novo"* duas vezes seguidas.
+  Encurtada para o que é fato desta sessão.
+
+Um achado **não** foi aplicado, e fica registrado: *"travessia"* é usada no título do painel, no
+ADR 0004 e neste ticket, e não está no `CONTEXT.md`. O uso é anterior a este ticket (092 e ADR
+0004), e acrescentar verbete ao glossário canônico é decisão de modelagem de domínio, não
+consequência desta mudança.
+
+`scripts/smoke.sh` rodado de novo, inteiro, depois de todas as edições: **verde** — 16 queries no
+laço e a linha nova com as três asserções.

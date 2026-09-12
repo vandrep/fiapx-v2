@@ -505,7 +505,12 @@ Três decisões de forma que o arquivo carrega, e o porquê de cada uma:
   painel (*preencha o idVideo no topo*) — mitigação que não sobrevive a quem abre a home numa demo
   e vê uma tabela sem linha. O que guarda os dois estados são duas passagens do passo 12 do
   `smoke.sh`: a do laço, com a variável resolvida para o Vídeo que concluiu, e uma segunda com a
-  variável **vazia** — voltar à igualdade ou perder a âncora deixa a tela plausível nos dois casos.
+  variável **vazia**, que julga três coisas sobre a mesma busca: que ela lista algo, que a ordem
+  é decrescente — *a mais nova primeiro* é promessa do `description`, e nada no JSON a impõe — e
+  que **todo** trace listado tem span do `fiapx-extracao`. A terceira é a que cobre a âncora, e
+  ela não cabia numa contagem: perder a âncora **aumenta** o número de traces (19 contra 8 na
+  medição do 100), então a tela continuaria plausível, listando GET de acompanhamento no lugar
+  das travessias. As duas reversões foram vistas vermelhas.
 - **A duração aparece como média por `resultado` — e, desde o
   [ticket 094](../wayfinder/tickets/094-limites-de-bucket-da-duracao-da-extracao.md), também como
   quantil.** A média por `_sum / _count` é exata e não depende de bucket nenhum; ela nasceu como

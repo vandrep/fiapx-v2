@@ -263,3 +263,8 @@ que se mostrou errada.
 *A escolha de deixar o painel na pasta raiz foi revertida pelo
 [ticket 099](099-a-pasta-fiap-x-vazia-e-o-painel-que-mora-fora-dela.md): ele vive na pasta
 `FIAP X`, a mesma dos três alertas.*
+
+*A mitigação por título do painel de trace — "preencha o idVideo no topo", para a tabela vazia
+não ler como painel quebrado — foi substituída pelo
+[ticket 100](100-tabela-de-trace-vazia-e-as-travessias-recentes-que-ninguem-ve.md): com o textbox
+vazio a tabela agora lista as travessias recentes.*

@@ -495,6 +495,17 @@ Três decisões de forma que o arquivo carrega, e o porquê de cada uma:
   *`idVideo` é a chave que o humano digita*, acima — sem a âncora a busca casa dezenas de traces
   de uma linha, e num spanset só ela não casaria nada, porque o span do `ffmpeg` não carrega
   `idVideo`.
+  Ela **serve a dois estados desde o
+  [ticket 100](../wayfinder/tickets/100-tabela-de-trace-vazia-e-as-travessias-recentes-que-ninguem-ve.md)**,
+  e por isso o filtro é regex em vez de igualdade: com o textbox vazio, `.idVideo =~ ".*$idVideo.*"`
+  vira `.*.*` e a tabela lista as travessias mais recentes — 6 numa janela de 2 h, contra as 17 que
+  a mesma query sem a âncora casaria, que é a medição acima refeita no estado novo; com um
+  `idVideo` inteiro digitado, o resultado é o mesmo da igualdade (medido). Antes disso a igualdade
+  contra string vazia não casava span nenhum, e o 092 havia respondido a isso no **título** do
+  painel (*preencha o idVideo no topo*) — mitigação que não sobrevive a quem abre a home numa demo
+  e vê uma tabela sem linha. O que guarda os dois estados são duas passagens do passo 12 do
+  `smoke.sh`: a do laço, com a variável resolvida para o Vídeo que concluiu, e uma segunda com a
+  variável **vazia** — voltar à igualdade ou perder a âncora deixa a tela plausível nos dois casos.
 - **A duração aparece como média por `resultado` — e, desde o
   [ticket 094](../wayfinder/tickets/094-limites-de-bucket-da-duracao-da-extracao.md), também como
   quantil.** A média por `_sum / _count` é exata e não depende de bucket nenhum; ela nasceu como

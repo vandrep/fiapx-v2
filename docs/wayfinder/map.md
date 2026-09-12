@@ -1381,6 +1381,22 @@ verificadas por teste, não são sugestão). Projeto original em
   os dois arquivos de provisionamento, e divergência ali cria uma segunda pasta em silêncio: o
   passo 12 do `smoke.sh` passou a cobri-la.
 
+- [A tabela de trace vazia, e as travessias recentes que ninguém
+  via](tickets/100-tabela-de-trace-vazia-e-as-travessias-recentes-que-ninguem-ve.md) — o quarto
+  pedido seguido sobre painel vazio, e o primeiro que **não** é sobre painel de erro nem termina
+  em "não é defeito": a tabela de trace do painel curado nascia sem linha porque a query exigia um
+  `idVideo` que ninguém havia digitado, e `= ""` não casa span nenhum (medido: 0). **Decidido
+  servir os dois estados com uma query só**, por regex — `.idVideo =~ ".*$idVideo.*"`: vazio lista
+  as travessias recentes (6 numa janela de 2 h, contra 17 traces sem a âncora), preenchido filtra
+  igual a antes (o mesmo 1 trace que a igualdade). Recusados um segundo target no mesmo painel
+  (duas verdades sobre a mesma pergunta) e um painel novo só de travessias recentes (é a **suíte**
+  que a recusa do 092 barra). Isto **substitui a mitigação por título do 092**, que respondia ao
+  mesmo defeito com um *"preencha o idVideo no topo"* no nome do painel. O preço, por escrito: a
+  condição passa a significar "contém" em vez de "igual a" — com UUID inteiro dá no mesmo, com um
+  pedaço colado dá match parcial, e isso ajuda mais do que atrapalha. O estado de textbox vazio é
+  o que a demo abre e ficou com guarda própria no passo 12 do `smoke.sh`, vista vermelha antes de
+  verde.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -1442,6 +1458,15 @@ verificadas por teste, não são sugestão). Projeto original em
      sobre painel de erro vazio sugerem que o registro tinha razão e a tela é que não explica;
      terceiro pedido igual, olhe primeiro o ADR 0004 § Os três dashboards de fábrica. A fronteira
      está vazia de novo. -->
+
+<!-- Reabriu e fechou mais duas vezes na mesma data, e as duas mudaram código em vez de registro:
+     o [099](tickets/099-a-pasta-fiap-x-vazia-e-o-painel-que-mora-fora-dela.md) moveu o painel
+     curado para a pasta dos três alertas, e o
+     [100](tickets/100-tabela-de-trace-vazia-e-as-travessias-recentes-que-ninguem-ve.md) fez a
+     tabela de trace listar as travessias recentes quando ninguém digitou um idVideo. O padrão dos
+     quatro pedidos seguidos sobre painel vazio se inverteu aqui: 097 e 098 eram painel de erro de
+     fábrica, e a resposta era o registro; 099 e 100 eram o painel curado, e a resposta era
+     conserto. A fronteira está vazia de novo. -->
 
 ## Fora de escopo
 

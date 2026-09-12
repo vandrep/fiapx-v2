@@ -561,6 +561,35 @@ done <<< "$consultas"
 
 ok "$consultadas queries do painel, todas com série"
 
+# O painel de trace tem DOIS estados, e o laco acima so exercita um: o textbox `idVideo`
+# preenchido, porque o passo resolve a variavel para o Video que acabou de CONCLUIR. O outro
+# estado e o que a demo ABRE — textbox vazio —, e ate o ticket 100 ele devolvia tabela vazia:
+# `= ""` nao casa span nenhum. Agora a query e regex (`=~ ".*$idVideo.*"`), o vazio vira `.*.*`
+# e a tabela lista as travessias recentes. Isso mente em silencio de dois jeitos — voltando a
+# igualdade, ou perdendo a ancora, que e o que separa travessia de GET de acompanhamento —, e
+# nos dois a tela fica plausivel. Dai o segundo par de olhos aqui, com a variavel VAZIA.
+travessias=0
+while IFS=$'\037' read -r titulo refid consulta; do
+    [[ -n "$refid" ]] || continue
+    consulta="$(sed -e 's/\$idVideo\b//g' <<< "$consulta")"
+    [[ "$consulta" != *'$'* ]] \
+        || falha "painel '$titulo' ($refid) usa variável que este passo não sabe resolver: $consulta"
+    travessias=$(( travessias + 1 ))
+    achadas="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/tempo/api/search" \
+        --data-urlencode "q=$consulta" \
+        --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
+        --data-urlencode "limit=20" \
+        | jq '[.traces[]?] | length' || true)"
+    [[ "$achadas" =~ ^[0-9]+$ ]] \
+        || falha "painel '$titulo' ($refid): o Tempo não respondeu um número consultável com o idVideo vazio"
+    (( achadas > 0 )) \
+        || falha "painel '$titulo' ($refid) não lista travessia nenhuma com o idVideo VAZIO, que é o estado que a demo abre: $consulta"
+    printf '    %6s traces   %s [%s] com o idVideo vazio\n' "$achadas" "$titulo" "$refid"
+done <<< "$(jq -r '.panels[] | .title as $t | .targets[]
+    | select(.datasource.uid == "tempo") | [$t, .refId, (.expr // .query)] | join("\u001f")' "$painel" || true)"
+(( travessias > 0 )) || falha "nenhuma query de trace lida de $painel; o estado de idVideo vazio ficou sem guarda"
+ok "a tabela de trace lista as travessias recentes sem o idVideo preenchido"
+
 # ---------------------------------------------------------------------------------------
 echo
 echo "${negrito}${verde}Smoke completo.${normal} Video concluido: $id | Video falho: $id_falha"

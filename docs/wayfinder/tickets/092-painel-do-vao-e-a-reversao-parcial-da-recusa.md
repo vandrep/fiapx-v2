@@ -257,3 +257,9 @@ correção parece pequena e recente para quem a faz. A troca foi desfeita, o par
 dizer "nove", e a conta certa é esta seção. A § *Revisão aplicada* também fica como está, pelo
 mesmo motivo — inclusive a linha que anuncia a correção no lugar, que é o registro de uma decisão
 que se mostrou errada.
+
+---
+
+*A escolha de deixar o painel na pasta raiz foi revertida pelo
+[ticket 099](099-a-pasta-fiap-x-vazia-e-o-painel-que-mora-fora-dela.md): ele vive na pasta
+`FIAP X`, a mesma dos três alertas.*

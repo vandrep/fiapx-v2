@@ -1365,6 +1365,22 @@ verificadas por teste, não são sugestão). Projeto original em
   está no ADR 0004 § *Um painel*, que passou a carregá-lo, junto com a ressalva de que o
   `Error %` vazio não é defeito; ela estava escrita só sobre o *RED classic*.
 
+- [A pasta *FIAP X* vazia, e o painel que morava fora
+  dela](tickets/099-a-pasta-fiap-x-vazia-e-o-painel-que-mora-fora-dela.md) — o terceiro
+  diagnóstico seguido sobre a mesma stack, e o primeiro que mudou alguma coisa fora de
+  documentação. A pasta não vinha de JSON nenhum: quem a declara é o `alertas.yaml`, onde ela
+  agrupa as três regras — e no Grafana pasta de alerta e pasta de dashboard são a **mesma**
+  entidade, então ela aparecia na lista de Dashboards carregando só alerta. Apagá-la não era
+  opção (`folder` é obrigatório em regra provisionada). **Decidido mover o painel curado para
+  dentro dela** (`folder: "FIAP X"` no `dashboards.yaml`), o que **reverte o "pasta raiz de
+  propósito" do 092**: aquele argumento existia para o painel ser fácil de achar, e a home já
+  entrega isso — `GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH` lê arquivo do disco, não pasta. O
+  painel passa a morar ao lado dos três alertas de que ele deriva as expressões de fila. Achado
+  de método: `docker compose restart` **não** move o painel — o provisionador pula arquivo que
+  não mudou, e quem move é base nova (`up -d --force-recreate`). O título da pasta é contrato entre
+  os dois arquivos de provisionamento, e divergência ali cria uma segunda pasta em silêncio: o
+  passo 12 do `smoke.sh` passou a cobri-la.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

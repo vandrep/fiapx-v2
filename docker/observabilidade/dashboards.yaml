@@ -19,10 +19,26 @@ providers:
   - name: "FIAP X"
     orgId: 1
     type: file
-    # Pasta raiz de proposito: o painel e a HOME (GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH no
-    # `docker-compose.yml`), e uma pasta so o esconderia um clique mais fundo na busca. A pasta
-    # `FIAP X` do `alertas.yaml` e outra coisa — la ela agrupa regra de alerta, nao dashboard.
-    folder: ""
+    # `FIAP X` e a MESMA pasta que o `alertas.yaml` declara (ticket 099): no Grafana, pasta de
+    # alerta e pasta de dashboard sao a mesma entidade, casada por titulo. O painel entra nela
+    # porque dela derivam as expressoes de fila — as tres regras daquele arquivo —, e porque uma
+    # pasta que so tem alerta aparece VAZIA na lista de Dashboards, que foi como o defeito
+    # aparente chegou.
+    #
+    # O clique a mais na busca, que o 092 evitava deixando o painel na raiz, esta pago: quem abre
+    # localhost:3000 cai no painel pela HOME (GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH no
+    # `docker-compose.yml`), que le ARQUIVO do disco e nao depende de pasta nenhuma.
+    #
+    # O TITULO e o contrato, e ele nao esta so aqui: tem de bater com o `folder:` do
+    # `alertas.yaml` letra por letra. Divergindo, o Grafana cria uma SEGUNDA pasta em silencio e
+    # o defeito do 099 volta inteiro. Quem guarda isso e o passo 12 do `scripts/smoke.sh`, que le
+    # o titulo dos dois arquivos em vez de fixa-lo.
+    #
+    # Conferir mudanca aqui por `docker compose restart` ENGANA: o provisionador pula o dashboard
+    # cujo ARQUIVO nao mudou, e so o provider mudou — o painel fica onde estava e parece que a
+    # edicao nao pegou. Quem move e base nova: `docker compose up -d --force-recreate
+    # observabilidade` (o Grafana desta imagem guarda a base dentro do container).
+    folder: "FIAP X"
     disableDeletion: true
     allowUiUpdates: false
     updateIntervalSeconds: 30

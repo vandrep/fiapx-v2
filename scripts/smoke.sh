@@ -25,6 +25,9 @@
 # reprova a que devolver serie vazia num sistema que acabou de processar um Video. E o preco
 # que a reversao da recusa de painel curado paga ao argumento que dela sobrou de pe — um painel
 # e a parte que envelhece primeiro, e envelhecer, aqui, e mostrar "No data" e nao quebrar nada.
+# Ele tambem confere ONDE o painel mora (ticket 099): a pasta que ele divide com os tres alertas
+# e casada por titulo entre dois arquivos de provisionamento, e uma divergencia ali nao levanta
+# erro nenhum — o Grafana cria a segunda pasta calado.
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -410,6 +413,33 @@ home="$(curl -sS "$grafana_url/api/dashboards/home" | jq -r '.redirectUri // emp
 [[ "$home" == *infraestrutura* ]] \
     || falha "a home do Grafana é '$home', e não o painel de infraestrutura"
 ok "a home do Grafana é o painel: $home"
+
+# O painel mora na MESMA pasta dos tres alertas (ticket 099), e o casamento e por TITULO entre
+# dois arquivos — `folder:` no `alertas.yaml` e `folder:` no `dashboards.yaml`. Renomear um sem o
+# outro nao quebra nada em voz alta: o Grafana cria uma segunda pasta em silencio, o painel volta
+# a ficar fora da pasta dos alertas e a lista de Dashboards volta a mostrar a pasta vazia que o
+# 099 consertou. Por isso os dois titulos saem dos ARQUIVOS, e nao sao fixados aqui.
+alertas="docker/observabilidade/alertas.yaml"
+provider="docker/observabilidade/dashboards.yaml"
+pasta_alertas="$(sed -n 's/^ *folder: *//p' "$alertas" | head -1 | tr -d '"')"
+pasta_painel="$(sed -n 's/^ *folder: *//p' "$provider" | head -1 | tr -d '"')"
+[[ -n "$pasta_alertas" && "$pasta_alertas" == "$pasta_painel" ]] \
+    || falha "a pasta do painel ('$pasta_painel', em $provider) não é a dos alertas ('$pasta_alertas', em $alertas)"
+
+uid_painel="$(jq -r '.uid' "$painel")"
+meta="$(curl -sS "$grafana_url/api/dashboards/uid/$uid_painel")"
+pasta_no_grafana="$(jq -r '.meta.folderTitle // empty' <<< "$meta")"
+uid_da_pasta="$(jq -r '.meta.folderUid // empty' <<< "$meta")"
+[[ "$pasta_no_grafana" == "$pasta_alertas" ]] \
+    || falha "o painel está na pasta '$pasta_no_grafana' do Grafana, e não em '$pasta_alertas'"
+
+# E a pasta e mesmo a dos alertas, e nao uma homonima: as tres regras provisionadas apontam para
+# o mesmo `folderUid` que o painel.
+regras_fora="$(curl -sS "$grafana_url/api/v1/provisioning/alert-rules" \
+    | jq -r --arg f "$uid_da_pasta" '[.[] | select(.folderUID != $f)] | length')"
+(( regras_fora == 0 )) \
+    || falha "$regras_fora regra(s) de alerta fora da pasta do painel ($uid_da_pasta) — há duas pastas '$pasta_alertas'"
+ok "o painel e os alertas dividem a pasta '$pasta_alertas'"
 
 # Os tres uids de datasource que o painel fixa precisam existir de verdade — se a imagem
 # renomear um deles no upgrade, todo painel que o usa vira "Datasource not found", e o erro

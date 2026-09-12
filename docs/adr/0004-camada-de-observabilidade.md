@@ -269,13 +269,21 @@ sistema saudável.
 | Dashboard da imagem | Serve? | Por quê |
 |---|---|---|
 | *RED Metrics (classic histogram)* | **sim** | taxa e duração do HTTP dos três serviços |
-| *JVM Overview (OpenTelemetry)* | **sim** | heap, threads, classes e GC, uma série por container |
+| *JVM Overview (OpenTelemetry)* | **sim** | heap, threads, classes e GC, uma série por container; o `Error %` dele é HTTP, e vazio em ciclo saudável |
 | *RED Metrics (native histogram)* | **não** | consulta histograma nativo; o Quarkus exporta clássico |
 
-O painel de **erro** do primeiro é o único que continua podendo aparecer vazio, e isso não é
-defeito: ele conta `http_response_status_code=~"5.."`, e num ciclo saudável não há nenhum. As
-demais séries dos dois dashboards que servem foram conferidas com as variáveis em "All" — GC
-inclusive, que tem `jvm_gc_duration_seconds_sum` por container.
+Os painéis de **erro** dos dois que servem — o `Error Rate` do *RED classic* e o `Error %` do
+*JVM Overview* — são os únicos que continuam podendo aparecer vazios, e isso não é defeito: os
+dois contam erro de servidor no status da resposta — `5..` no primeiro e `5.*` no segundo, a
+mesma pergunta em duas grafias, que é como cada JSON a escreve —, e num ciclo saudável não há
+nenhum. A ressalva era
+escrita só sobre o primeiro até o
+[ticket 098](../wayfinder/tickets/098-o-error-pct-do-jvm-overview-e-a-armadilha-do-or-vector-zero.md)
+medir o segundo: denominador com as quatro séries por `instance`, numerador `5..` vazio, razão
+vazia, e nenhum `5..` na retenção. Que os dois workers apareçam no denominador do `Error %` sem
+ter borda HTTP também não é defeito — é o health check em `:8080`. As demais séries dos dois
+dashboards **que servem** foram conferidas com as variáveis em "All" — GC inclusive, que tem
+`jvm_gc_duration_seconds_sum` por container.
 
 O que aquele "No data" **não** diz, e o
 [ticket 097](../wayfinder/tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md)
@@ -286,7 +294,9 @@ contava. **A leitura de recusa 4xx da borda mora no painel curado**, na linha *B
 `painel-infraestrutura.json`, junto com a taxa de 5xx — ver § *Um painel*, no fim deste
 documento. O título `Error Rate` do dashboard de fábrica continua sem qualificação e continua
 vazio em ciclo saudável: qualificá-lo exigiria sobrescrever 15,9 kB de JSON derivado da imagem,
-e quem desambigua é este parágrafo, não a tela.
+e quem desambigua é este parágrafo, não a tela. O mesmo vale para o `Error %` do *JVM Overview*,
+e o 098 recusou sobrescrever aquele JSON pela quarta vez: **a leitura de erro de servidor que
+mostra `0%` mora no painel curado**, na mesma linha *Borda*, e é ela que se abre numa demo.
 
 Os dois que servem passaram a servir porque as séries ganharam `instance`. O mecanismo é o
 oposto do intuitivo: quem traduz OTLP→Prometheus **não é o coletor, é o próprio Prometheus**, no
@@ -458,11 +468,22 @@ token cai nele também: é recusa da borda igual, e o RED de fábrica também n�
 é vetor vazio em PromQL, não um bug do Grafana. Taxa e duração do HTTP continuam fora, e o link
 do topo continua sendo a resposta para elas.
 
+**O `or vector(0)` só serve porque esta razão é agregada**, e essa ressalva é do
+[ticket 098](../wayfinder/tickets/098-o-error-pct-do-jvm-overview-e-a-armadilha-do-or-vector-zero.md).
+Aqui os dois lados são `sum(...)` sem `by`, então o `vector(0)` — que é uma série **sem etiqueta
+nenhuma** — casa com o denominador sem etiqueta. Numa razão **por** etiqueta, como o `Error %` do
+*JVM Overview* (`sum by (instance)(...) / on (instance) sum by (instance)(...)`), a mesma receita
+continua devolvendo vazio: o `vector(0)` entra sem `instance` e o `on (instance)` não acha par
+para ele. As duas formas foram medidas contra a stack de pé. Ali o zero tem de **nascer com a
+etiqueta**, e a forma curta é `numerador or (denominador * 0)`. Quem copiar esta receita para um
+painel novo olhe antes se a razão tem `by`.
+
 O que esta escolha **não** entrega, e fica dito: quem abrir o *RED Metrics (classic histogram)*
 direto continua vendo um `Error Rate` sem qualificação e vazio. A alternativa era sobrescrever
 aquele JSON por mount — a terceira reversão da mesma decisão que 091 e 095 recusaram, e 15,9 kB
 a rederivar a cada upgrade da `grafana/otel-lgtm` — para ganhar um título. O preço não compra o
-suficiente.
+suficiente. O `Error %` do *JVM Overview* está na mesma situação, e o 098 respondeu igual: quem
+abrir aquele dashboard direto vê o painel vazio, e quem quer o `0%` abre a home.
 
 Três decisões de forma que o arquivo carrega, e o porquê de cada uma:
 

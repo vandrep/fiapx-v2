@@ -1353,6 +1353,18 @@ verificadas por teste, não são sugestão). Projeto original em
   *RED classic* direto continua vendo `Error Rate` sem qualificação e vazio, e quem o desambigua é
   o ADR 0004, não a tela.
 
+- [O *Error %* do *JVM Overview*, e a armadilha do `or
+  vector(0)`](tickets/098-o-error-pct-do-jvm-overview-e-a-armadilha-do-or-vector-zero.md) — o
+  segundo diagnóstico seguido que não achou defeito, e pela mesma causa do 097: o painel conta
+  `5..`, não há nenhum na retenção, e razão sem numerador é vetor vazio. **Decidido o caminho B
+  de novo, e o A recusado pela quarta vez** (091, 095, 097, 098) — o `0%` na tela daquele
+  dashboard custaria sobrescrever mais um JSON derivado da imagem, e a leitura de erro de servidor
+  que mostra `0%` já existe desde o 097, no painel curado, que é a home. O achado que fez o ticket
+  valer é sobre o **conserto**, não sobre o sintoma: o `or vector(0)` do 097 **não** serviria
+  aqui, porque esta razão é por `instance` e o zero precisa nascer com a etiqueta — o mecanismo
+  está no ADR 0004 § *Um painel*, que passou a carregá-lo, junto com a ressalva de que o
+  `Error %` vazio não é defeito; ela estava escrita só sobre o *RED classic*.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -1404,7 +1416,16 @@ verificadas por teste, não são sugestão). Projeto original em
      propósito (415, 400, 404, 409) não apareciam em painel nenhum. A decisão que ele carregava
      saiu na mesma sessão, pelo caminho recomendado — painel curado, JSON de fábrica intocado —,
      e o ticket fechou; a linha dele está em Decisões até aqui, com o preço do B por escrito.
-     A fronteira voltou a ficar vazia. -->
+     A fronteira voltou a ficar vazia.
+
+     Reabriu e fechou de novo na mesma data, pelo mesmo padrão: o
+     [098](tickets/098-o-error-pct-do-jvm-overview-e-a-armadilha-do-or-vector-zero.md) nasceu da
+     mesma pergunta feita sobre o *JVM Overview*, teve a mesma resposta — não é defeito — e a
+     mesma decisão (B, JSON de fábrica intocado). O que ele acrescenta é uma ressalva sobre a
+     receita do 097, que não vale para razão por etiqueta. Dois diagnósticos seguidos sem defeito
+     sobre painel de erro vazio sugerem que o registro tinha razão e a tela é que não explica;
+     terceiro pedido igual, olhe primeiro o ADR 0004 § Os três dashboards de fábrica. A fronteira
+     está vazia de novo. -->
 
 ## Fora de escopo
 

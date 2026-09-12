@@ -450,7 +450,9 @@ propósito, e só onde o argumento dela não alcança. O que a frase protege é 
 outro dashboard já mantém", e o RED de fábrica **não** mantém `4..`: ele conta erro de servidor,
 que é a definição de RED, e as recusas do contrato — 415, 400, 404, 409, que
 `docs/contratos/http-videos.md` fixa, o teste de borda confere e o `trafego.sh` exercita — não
-apareciam em tela nenhuma. O 5xx entra junto, e aí sim é repetição: ele existe para que a palavra
+apareciam em tela nenhuma. O painel mostra `4..`, e não aquelas quatro nomeadas, então o `401` sem
+token cai nele também: é recusa da borda igual, e o RED de fábrica também não a conta — a
+`description` do painel avisa quem o lê numa demo. O 5xx entra junto, e aí sim é repetição: ele existe para que a palavra
 "erro" tenha um título que diz de qual faixa fala, e para que ciclo saudável leia `0%` em vez de
 "No data", o que custa um `or vector(0)` no numerador — numerador vazio dividido por denominador
 é vetor vazio em PromQL, não um bug do Grafana. Taxa e duração do HTTP continuam fora, e o link

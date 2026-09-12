@@ -8,7 +8,7 @@
   "editable": false,
   "graphTooltip": 1,
   "schemaVersion": 41,
-  "version": 2,
+  "version": 3,
   "refresh": "30s",
   "time": {
     "from": "now-1h",
@@ -757,7 +757,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Borda — recusas do contrato (4xx), por status",
-      "description": "A borda recusando o que o contrato manda recusar (ticket 097): 415 de tipo errado, 400 de corpo inválido, 404 de Vídeo alheio ou inexistente, 409 de Pacote que ainda não existe — os quatro que docs/contratos/http-videos.md fixa, que o teste de borda confere e que o cenário `erro` do scripts/trafego.js exercita de propósito. Eles não apareciam em painel NENHUM: o RED Metrics de fábrica conta só `5..`, porque RED define erro como erro de servidor, e uma recusa 4xx é a borda funcionando. Este painel é a exceção estreita que o ticket 097 abriu na recusa do 092 de repetir HTTP aqui, e ela é estreita por construção — cobre exatamente o que o dashboard de fábrica NÃO cobre, e nada além. Taxa por segundo, e não o acumulado: o que se lê é 'está recusando agora', e uma classe subindo sozinha é sintoma — 415 em rajada é cliente mandando o tipo errado, 409 em rajada é alguém baixando Pacote antes da hora. Linha em zero é o normal fora do tráfego sintético.",
+      "description": "A borda recusando o que o contrato manda recusar (ticket 097), com as palavras de docs/contratos/http-videos.md: 415 de content-type ou extensão fora da lista, 400 de campo `arquivo` ausente ou vazio, 404 de Vídeo que não é seu ou não existe — o mesmo 404 para os dois, de propósito, para não confirmar que aquele id existe —, e 409 de Pacote pedido com o Vídeo fora de CONCLUIDO, que é o 'ainda não' que se distingue do 404 'nunca'. São as quatro que o teste de borda confere e que o cenário `erro` do scripts/trafego.js exercita. Elas não apareciam em painel NENHUM: o RED Metrics de fábrica conta só `5..`, porque RED define erro como erro de servidor, e uma recusa 4xx é a borda funcionando. Este painel é a exceção estreita que o ticket 097 abriu na recusa do 092 de repetir HTTP aqui, e ela é estreita por construção — cobre exatamente o que o dashboard de fábrica NÃO cobre, e nada além. UMA quinta faixa aparece aqui e não é do contrato de recurso: 401 sem token, que é o OIDC funcionando — medido virando série própria. Taxa por segundo, e não o acumulado: o que se lê é 'está recusando agora', e uma classe subindo sozinha é sintoma — 415 em rajada é cliente mandando o tipo errado, 409 em rajada é alguém baixando Pacote antes da hora. Linha em zero é o normal fora do tráfego sintético.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

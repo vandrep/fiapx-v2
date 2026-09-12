@@ -374,9 +374,18 @@ passo "12. Nenhuma query do painel curado devolve série vazia"
 # tres classes (415, 400, 409) so aparecem depois de uma corrida do `scripts/trafego.sh`, que e
 # quem exercita o cenario `erro` inteiro.
 #
+# O 401 do passo 3 TAMBEM conta como 4xx — medido a parte: requisicoes sem token criam a serie
+# `http_response_status_code="401"` no `fiapx-videos`. Mas na corrida que fechou o 097 essa serie
+# nao existia no fim, e o porque ficou sem explicacao; por isso o paragrafo acima se apoia no 404,
+# que foi medido subindo, e nao nela.
+#
 # O painel de 5xx ao lado passa com ZERO, e nao vazio, que e exatamente o ponto dele — o
 # `or vector(0)` no numerador —, e este laco aprova o zero de proposito: ele conta amostra
 # nao-`NaN`, e nao valor diferente de zero. Um 5xx aqui, alias, seria defeito de verdade.
+# Ele PODERIA voltar vazio num caso, e a `description` dele diz qual: borda ociosa por mais de
+# 5 min zera tambem o DENOMINADOR, e razao sem denominador nao existe. Nao e mais uma excecao a
+# lista abaixo porque aqui esse caso nao acontece — este passo roda depois do ciclo do Video, e o
+# proprio smoke acabou de fazer dezenas de requisicoes na janela de uma hora que ele consulta.
 #
 # UM painel escapa deste passo, e escapa de proposito: o `count(...) or vector(0)` das filas sem
 # consumidor nunca volta vazio, porque sem o `or vector(0)` ele diria "No data" justamente com o

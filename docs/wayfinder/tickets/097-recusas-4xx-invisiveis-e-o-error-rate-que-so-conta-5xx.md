@@ -173,3 +173,34 @@ fábrica **não** mantém série de `4..`, então não há repetição; o `5xx` 
 mesmo, só para a razão ter denominador e para a palavra "erro" ter um título que diz de qual
 faixa fala. Taxa e duração do HTTP continuam fora, e o link do topo continua sendo a resposta
 para elas.
+
+## Correção (revisão da mesma sessão)
+
+O `/code-review` apontou que a Resolução acima diz *"O que o próprio `smoke.sh` alimenta é o `404`,
+e só ele"*, e que isso não fecha com o parágrafo seguinte, que mede o `401` virando série. Os dois
+são medição, e a frase fica como está porque é o que a corrida devolveu; o que faltava é a
+ressalva:
+
+- O passo 3 do `smoke.sh` cobra `401` sem token, e `401` **conta** neste painel — três
+  `GET /videos` sem token criaram a série `http_response_status_code="401"` no `fiapx-videos`,
+  onde antes não havia nenhuma.
+- Ainda assim, no fim da corrida que fechou este ticket **não havia** série de `401`. Não há
+  explicação medida para isso, e nenhuma foi inventada aqui.
+- Consequência prática, e a única que importa: quem contar com o passo 12 conte com o `404` do
+  passo 9, que foi medido subindo de 13 para 14. É o que o comentário do passo 12 passou a dizer.
+
+Duas outras coisas saíram da revisão e foram aplicadas no mesmo commit:
+
+- A `description` do painel de 4xx passou a usar as palavras de `docs/contratos/http-videos.md`
+  em vez de parafraseá-las (*campo `arquivo` ausente ou vazio*, *content-type ou extensão fora da
+  lista*, o `409` como o *"ainda não"* que se distingue do `404` *"nunca"*), e a avisar que o
+  `401` aparece ali — antes esse aviso só existia neste ticket, onde ninguém que abre o painel
+  numa demo vai lê-lo. O ADR ganhou a mesma ressalva.
+- O comentário do passo 12 diz por que o painel de 5xx **não** entra na lista de exceções do
+  passo, embora a `description` dele admita um vazio legítimo: aquele vazio exige borda ociosa por
+  mais de 5 min, e ali o próprio smoke acabou de gerar tráfego na janela consultada.
+
+A revisão não achou violação dura de padrão. O que ela registra como juízo, e que fica aceito: o
+argumento do `or vector(0)` aparece no ADR, no mapa, neste ticket e na `description` do painel. O
+ADR é a autoridade; os outros três são registro histórico (mapa e ticket) e a única explicação que
+existe **na tela** (a `description`), e é por isso que nenhum deles virou ponteiro.

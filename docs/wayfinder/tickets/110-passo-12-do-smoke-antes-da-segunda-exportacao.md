@@ -128,8 +128,8 @@ A revisão de spec corrigiu o segundo item de *Limites que ficam*. A espera cobr
 não pelo motivo que o item dá. O motivo é que o denominador `sum(rate(...{job="fiapx-videos"}[5m]))`
 não filtra status, então inclui a própria série 4xx que a espera exige com duas amostras. O
 numerador tem `or vector(0)`. O passo final do `query_range` sempre tem valor, e 1 amostra é o
-mínimo esperado, não um sinal de risco. Também não verifiquei que o `/q/health` entra nessa
-métrica. O comentário do 5xx no `smoke.sh`, que ainda se apoiava nas "dezenas de requisições" que
+mínimo esperado, não um sinal de risco. A série do `/q/health/ready` entra, sim, nessa métrica:
+aparece nas amostras cruas de *O que foi medido*. Mas não é ela que garante o painel. O comentário do 5xx no `smoke.sh`, que ainda se apoiava nas "dezenas de requisições" que
 o 110 desmentiu, foi corrigido junto.
 
 A revisão de padrões mudou três coisas:
@@ -139,3 +139,7 @@ A revisão de padrões mudou três coisas:
   quebrada, e não mais por um "aprovaria por cansaço" que não é verdade.
 
 A seção final do 103 passou a se chamar `## Resolução`.
+
+Depois dessas mudanças, `scripts/smoke.sh` rodou de novo contra uma stack recém-criada e passou
+(`exit=0`). A espera rodou 7 vezes, nenhuma linha de erro do `curl` apareceu, o painel 4xx trouxe
+3 amostras e o 5xx trouxe 1.

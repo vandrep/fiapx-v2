@@ -1427,6 +1427,24 @@ verificadas por teste, não são sugestão). Projeto original em
   posse vale pelo caminho, não pelo arquivo: troca deliberada dentro do diretório exclusivo da
   tentativa fica fora da guarda.
 
+- [O dead-lettering at-least-once que não estava
+  ligado](tickets/103-dead-lettering-at-least-once-sem-reject-publish.md) — a policy do Compose
+  definia só `dead-letter-strategy`, e sem `overflow=reject-publish` o RabbitMQ volta a
+  *at-most-once*, que é o regime que o ADR 0001 recusou. A policy ganhou o segundo campo, e não
+  foi preciso recriar fila, porque policy é dinâmica. As DLQs classic não recebem a policy: no
+  RabbitMQ 4.3, uma chave que a fila classic não suporta faz a policy inteira deixar de casar com
+  ela. `reject-publish` não dispara, porque nenhuma fila tem limite de tamanho. O risco ficou
+  registrado na emenda do ADR 0001: **tirar qualquer dos dois campos descarta** as mensagens
+  dead-lettered retidas. O ticket fechou depois do 110.
+- [O passo 12 do smoke julga o painel antes da segunda
+  exportação](tickets/110-passo-12-do-smoke-antes-da-segunda-exportacao.md) — o defeito é
+  anterior ao 103, e isso foi medido com a policy antiga. O `videos` exporta métrica a cada 60 s, e
+  numa stack recém-criada o smoke inteiro cabia na primeira janela. O `rate()` da linha *Borda*
+  ficava vazio num sistema saudável, e o painel só passava na segunda corrida. O passo 12 agora
+  espera, até 150 s, duas amostras de alguma série 4xx crua antes de julgar as queries. O
+  intervalo do SDK não mudou. O 404 do passo 9, que às vezes não entra no contador, continua sem
+  explicação.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

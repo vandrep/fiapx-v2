@@ -2,8 +2,8 @@
 
 - id: 110
 - label: ready-for-agent
-- status: aberto
-- assignee: claude (sessão de 2026-09-13, SHA inicial 769978f)
+- status: fechado
+- assignee: claude (sessão de 2026-09-13, SHA inicial 41503d0)
 - bloqueado-por:
 - prioridade: P2
 
@@ -77,8 +77,47 @@ pode depender do 404.
 
 ## Critérios de aceite
 
-- [ ] `scripts/smoke.sh` verde contra uma stack recém-criada (`docker compose down` sem `-v`,
+- [x] `scripts/smoke.sh` verde contra uma stack recém-criada (`docker compose down` sem `-v`,
       depois o script).
-- [ ] `scripts/smoke.sh` verde contra a stack em uso, logo em seguida.
-- [ ] `scripts/persistencia-rabbitmq.sh` verde.
-- [ ] Linha em "Decisões até aqui" no mapa.
+- [x] `scripts/smoke.sh` verde contra a stack em uso, logo em seguida.
+- [x] `scripts/persistencia-rabbitmq.sh` verde.
+- [x] Linha em "Decisões até aqui" no mapa.
+
+## Resolução
+
+Implementado em 2026-09-13 sobre `develop @ 41503d0`. Só o `scripts/smoke.sh` mudou.
+
+Antes do laço das queries, o passo 12 espera que `max(count_over_time(
+http_server_request_duration_seconds_count{job="fiapx-videos", http_response_status_code=~"4.."}[5m])) >= 2`
+devolva resultado, consultando o Prometheus pelo proxy do Grafana. A cada tentativa sem sucesso
+ele imprime uma linha e dorme 10 s. O teto é de 150 s. Quando estoura, o passo reprova com as
+duas causas possíveis: a exportação parou, ou a métrica ou o rótulo mudou de nome. O comentário do
+passo 12 deixou de dizer que o 404 do passo 9 basta. Agora ele diz que qualquer série 4xx serve e
+explica por quê.
+
+O predicado foi conferido nos três sentidos contra uma stack viva. Com o limiar `>= 2` ele é
+verdadeiro. Com `>= 999` e com o rótulo trocado por `status_renomeado`, é falso.
+
+### Validação
+
+- **`scripts/smoke.sh` contra a stack recém-criada** (`docker compose down` sem `-v`): `exit=0`.
+  A espera rodou 7 vezes, cerca de 70 s. O painel 4xx trouxe 3 amostras e o 5xx trouxe 1.
+- **`scripts/smoke.sh` logo depois, com a stack em uso**: `exit=0`. A espera não rodou nenhuma vez.
+  O 4xx trouxe 12 amostras e o 5xx trouxe 4.
+- **`scripts/persistencia-rabbitmq.sh`**: `exit=0`. Os 3 comandos foram preservados, e o smoke
+  encadeado numa stack isolada e nova passou depois de 7 esperas.
+- `./mvnw test` não rodou, porque nenhum código de serviço mudou.
+
+### Limites que ficam
+
+- **O 404 que some continua sem explicação.** Depois das duas corridas verdes na stack da demo,
+  uma fria e uma em uso, o contador 404 marcava 2, como o 401 e o 409: o 404 do passo 9 foi
+  contado nas duas. O sumiço é intermitente, e a espera não depende dele.
+- **O painel 5xx passou com 1 amostra na corrida fria.** O denominador dele é todo o tráfego HTTP
+  do `videos`, e a série 200 do healthcheck nasce antes de qualquer 4xx, então a espera o cobre.
+  Mesmo assim ele fica perto do limite. Se um dia o laço reprovar ali, a causa provável é a mesma
+  deste ticket.
+- **Uma stack recém-criada custa cerca de 70 s a mais no smoke.** É o preço de não baixar o
+  intervalo do SDK.
+- **A espera não se generaliza sozinha.** Um painel novo com `rate()` sobre outra métrica precisa
+  de condição própria, ou reprova do mesmo jeito em stack nova.

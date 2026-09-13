@@ -372,17 +372,25 @@ passo "12. Nenhuma query do painel curado devolve série vazia"
 # medido numa stack recem-subida. Um passo posto cedo demais reprovaria um sistema saudavel.
 #
 # A linha `Borda` do painel (ticket 097) e coberta por este mesmo laco, e quem a alimenta e o
-# PROPRIO smoke: o passo 9 cobra 404 no Video de outro dono, e foi medido subindo o contador
-# daquele status (13 -> 14) numa corrida desta. Um painel de erro com dado numa corrida VERDE nao e
-# contradicao: 4xx e a borda recusando o que o contrato manda recusar, e o RED Metrics de fabrica
-# nao conta nenhuma delas, porque conta so `5..`. Basta esse 404 para a query ter serie; as outras
-# tres classes (415, 400, 409) so aparecem depois de uma corrida do `scripts/trafego.sh`, que e
-# quem exercita o cenario `erro` inteiro.
+# PROPRIO smoke: o 401 do passo 3, o 409 do passo 7 e o 404 do passo 9 sao 4xx. Um painel de erro
+# com dado numa corrida VERDE nao e contradicao: 4xx e a borda recusando o que o contrato manda
+# recusar, e o RED Metrics de fabrica nao conta nenhuma delas, porque conta so `5..`. As outras
+# classes (415, 400) so aparecem depois de uma corrida do `scripts/trafego.sh`, que e quem
+# exercita o cenario `erro` inteiro.
 #
-# O 401 do passo 3 TAMBEM conta como 4xx — medido a parte: requisicoes sem token criam a serie
-# `http_response_status_code="401"` no `fiapx-videos`. Mas na corrida que fechou o 097 essa serie
-# nao existia no fim, e o porque ficou sem explicacao; por isso o paragrafo acima se apoia no 404,
-# que foi medido subindo, e nao nela.
+# Nenhuma das tres series e garantida sozinha. O 097 viu a 401 faltar no fim de uma corrida, e o
+# 110 viu a 404 faltar: numa stack recem-criada, o 404 do passo 9 nao entrou no contador, que
+# nasceu com 2 depois de dois 404 manuais. Nenhum dos dois sumicos tem explicacao ainda. Por isso
+# a espera abaixo aceita QUALQUER serie 4xx, e nao uma em particular.
+#
+# E ha uma espera, porque os dois paineis da `Borda` usam `rate()`, que exige DUAS amostras na
+# janela, e o `videos` exporta metrica por OTLP a cada 60 s (default do SDK). Numa stack recem-
+# criada o smoke inteiro cabe na primeira janela de exportacao — medido no ticket 110: o script
+# terminou 5 s antes da primeira amostra HTTP do `videos` chegar ao Prometheus — e o painel 4xx
+# reprovava um sistema saudavel. Com a stack em uso ele passava, o que escondia o defeito de quem
+# roda o smoke duas vezes. Os paineis de fila e de Extracao consultam valor instantaneo e nao
+# dependem disso. O intervalo do SDK nao foi baixado para o smoke caber: isso mudaria o Compose
+# que o smoke existe para julgar.
 #
 # O painel de 5xx ao lado passa com ZERO, e nao vazio, que e exatamente o ponto dele — o
 # `or vector(0)` no numerador —, e este laco aprova o zero de proposito: ele conta amostra
@@ -525,6 +533,22 @@ busca_no_tempo() {
         --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
         --data-urlencode "limit=20"
 }
+
+# A espera olha a metrica e o rotulo CRUS que o painel usa, e nao a query dele: esperar a
+# propria query ficar verde aprovaria, por cansaco, o que o laco existe para julgar. O teto e
+# duas exportacoes mais margem. Estourado, as causas sao duas, e a mensagem diz as duas.
+duas_amostras_4xx() {
+    curl -sS -G "$grafana_url/api/datasources/proxy/uid/prometheus/api/v1/query" \
+        --data-urlencode 'query=max(count_over_time(http_server_request_duration_seconds_count{job="fiapx-videos", http_response_status_code=~"4.."}[5m])) >= 2' \
+        | jq -e '.data.result | length > 0' > /dev/null 2>&1
+}
+inicio=$SECONDS
+until duas_amostras_4xx; do
+    (( SECONDS - inicio > 150 )) \
+        && falha "nenhuma série 4xx do fiapx-videos tem duas amostras no Prometheus 150s depois do passo 11 — a exportação OTLP do videos parou, ou a métrica ou o rótulo que a linha Borda do painel usa mudou de nome"
+    printf '    ... aguardando a segunda exportação de métrica do videos\n'
+    sleep 10
+done
 
 agora=$(date +%s)
 desde=$(( agora - 3600 ))

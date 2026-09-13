@@ -2,7 +2,7 @@
 
 - id: 103
 - label: ready-for-agent
-- status: aberto
+- status: fechado
 - assignee: claude (sessão de 2026-09-13, SHA inicial 689b7d9)
 - bloqueado-por: 110
 - prioridade: P1
@@ -49,9 +49,8 @@ entrega hoje o regime que o ADR 0001 diz ter recusado.
 
 - [x] Política efetiva de todas as filas quorum com `dead-letter-strategy=at-least-once` e
       `overflow=reject-publish`, conferida no broker do Compose.
-- [ ] `scripts/persistencia-rabbitmq.sh` e `scripts/smoke.sh` verdes contra o Compose atualizado.
-- [ ] Emenda no ADR 0001 e linha em "Decisões até aqui" no mapa. A emenda está feita; a linha
-      espera o fechamento.
+- [x] `scripts/persistencia-rabbitmq.sh` e `scripts/smoke.sh` verdes contra o Compose atualizado.
+- [x] Emenda no ADR 0001 e linha em "Decisões até aqui" no mapa.
 
 ## Andamento (2026-09-13)
 
@@ -128,3 +127,11 @@ tamanho não há efeito, porque o regime de dead-lettering é da fila de origem.
   Deixados de fora: a grafia `at-most-once` em código ou itálico, o verbo no assunto do commit e o
   link para *Vídeo perdido*. O termo está no `CONTEXT.md` do working tree, fora deste commit,
   junto com a série 104–109.
+
+## Fechamento (2026-09-13)
+
+Fechado depois do [110](110-passo-12-do-smoke-antes-da-segunda-exportacao.md). Com a espera do
+passo 12, `scripts/smoke.sh` passou contra a stack recém-criada e contra a stack em uso, e
+`scripts/persistencia-rabbitmq.sh` passou inteiro (`exit=0`). As três corridas usaram a policy
+deste ticket. Antes delas, o broker foi reiniciado para recarregar o `definitions.json` com
+`overflow=reject-publish`, e as 7 filas quorum foram conferidas com o campo.

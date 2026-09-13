@@ -4,7 +4,7 @@
 - label: ready-for-agent
 - status: aberto
 - assignee: claude (sessão de 2026-09-13, SHA inicial 689b7d9)
-- bloqueado-por:
+- bloqueado-por: 110
 - prioridade: P1
 
 ## Origem
@@ -56,8 +56,9 @@ entrega hoje o regime que o ADR 0001 diz ter recusado.
 ## Andamento (2026-09-13)
 
 Implementado em 2026-09-13 sobre `develop @ 689b7d9`. O ticket **continua aberto**: o critério
-dos dois scripts verdes não foi cumprido, pelo motivo de *Validação*, abaixo. Fechar, corrigir o
-passo 12 do smoke antes ou mudar o critério é decisão do mantenedor.
+dos dois scripts verdes não foi cumprido, pelo motivo de *Validação*, abaixo. O mantenedor
+escolheu corrigir antes o passo 12 do smoke, no
+[110](110-passo-12-do-smoke-antes-da-segunda-exportacao.md), e fechar este depois.
 
 A policy `dead-letter-at-least-once` do `docker/rabbitmq/definitions.json` passou a definir
 `"overflow": "reject-publish"` ao lado de `dead-letter-strategy`. Mais nada mudou no código.
@@ -87,8 +88,8 @@ medida com uma policy temporária `t103-sonda`, de prioridade 5 e casando só `^
 removida depois. Com `{"overflow":"reject-publish"}` ela casou. Com os dois campos, a fila
 voltou a `#{}`. No RabbitMQ 4.3, uma chave que a classic não suporta, aqui
 `dead-letter-strategy`, faz a policy inteira deixar de casar com ela. A policy antiga tinha a
-mesma chave, então isso já devia valer para ela, mas não a sondei à parte. Sem limite de tamanho não há efeito, porque o regime de dead-lettering é da fila de
-origem.
+mesma chave, então isso já devia valer para ela, mas não a sondei à parte. Sem limite de
+tamanho não há efeito, porque o regime de dead-lettering é da fila de origem.
 
 ### Efeitos colaterais
 
@@ -107,13 +108,13 @@ origem.
   preservados depois de recriar o broker, e marcas, filas, bindings e **policies** saíram
   idênticos. O smoke que o script encadeia no fim roda numa stack isolada e nova, e **reprovou
   no mesmo passo e no mesmo painel**. O script terminou com `exit=1`.
-- **Por que o painel reprova numa stack fria.** Os contadores
-  `http_server_request_duration_seconds_count` de 401, 404 e 409 existem, nascem com valor 1 e
-  ficam só com duas amostras, porque o passo 11 para e religa a observabilidade. O
-  `rate(...[5m])` sai vazio. Numa stack com tráfego anterior o contador sobe, e o painel tem
-  série. A consulta é métrica HTTP do `videos` e não passa pelo broker. **Não medi com a policy
-  antiga**, então dizer que a falha é anterior a este ticket é inferência pelo mecanismo, e não
-  medição.
+- **Por que o painel reprova numa stack fria.** Medido depois, no
+  [110](110-passo-12-do-smoke-antes-da-segunda-exportacao.md). O `videos` exporta métrica a cada
+  60 s, e numa stack recém-criada o smoke chega ao passo 12 antes de duas exportações; o
+  `rate()` do painel precisa de duas amostras. Com o `definitions.json` de `689b7d9`, ou seja,
+  com a **policy antiga**, o passo reprova igual. O defeito é anterior a este ticket. A primeira
+  versão desta seção atribuía a falha ao restart da observabilidade no passo 11. Estava errada:
+  o restart preserva as amostras.
 - **`./mvnw test` não rodou.** Não mudou código Java nem `application.properties`, e os Dev
   Services não leem `definitions.json`.
 - **`/code-review 689b7d9`, padrões e spec.** Foram acatados:

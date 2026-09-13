@@ -49,7 +49,7 @@ test-first por construção); `writing-for-agents` ao editar `AGENTS.md`.
 | Dono do status | `videos` é o dono; `extracao` é worker sem estado que publica eventos |
 | Estados do Vídeo | `RECEBIDO` → `PROCESSANDO` → `CONCLUIDO` \| `FALHOU` |
 | Falhas | Fila quorum, `x-delivery-limit=3` (conta **entregas**, crash incluído), `failure-strategy=requeue`, `@Retry` com backoff de segundos nos adapters de I/O. `extracao` consome a própria DLQ; DLQs de `videos` e `notificacao` são terminais. Unicidade da notificação na transição de estado em `videos`. E-mail é *pelo menos uma vez*. Ver [ADR 0001](../adr/0001-politica-de-falhas.md) e, para as janelas não-atômicas entre gravar e publicar, [ADR 0003](../adr/0003-reconciliacao-por-varredura.md) |
-| RabbitMQ | `rabbitmq:4.3.5-management-alpine` fixado nos Dev Services e no Compose; policy `dead-letter-strategy=at-least-once` só no Compose (é policy de broker, não queue argument) |
+| RabbitMQ | `rabbitmq:4.3.5-management-alpine` fixado nos Dev Services e no Compose; policy `dead-letter-strategy=at-least-once` + `overflow=reject-publish` só no Compose (é policy de broker, não queue argument; sem o `overflow` o regime cai para *at-most-once*, ticket 103) |
 | Autenticação | Keycloak, bearer-only via `quarkus-oidc`; dono do vídeo vem do `sub` do token, nunca do request |
 | Notificação | SMTP com MailHog no Compose |
 | Health checks | Sim (`quarkus-smallrye-health`), para `depends_on: service_healthy` |
@@ -1426,6 +1426,15 @@ verificadas por teste, não são sugestão). Projeto original em
   filtro que exclui esses dois casos é só do download — divergência registrada no `AGENTS.md`. A
   posse vale pelo caminho, não pelo arquivo: troca deliberada dentro do diretório exclusivo da
   tentativa fica fora da guarda.
+
+- [O dead-lettering at-least-once que não estava
+  ligado](tickets/103-dead-lettering-at-least-once-sem-reject-publish.md) — a policy do Compose
+  definia só `dead-letter-strategy`, e sem `overflow=reject-publish` o RabbitMQ volta a
+  *at-most-once*, que é exatamente o regime que o ADR 0001 recusou. A policy ganhou o segundo
+  campo e não foi preciso recriar fila, porque policy é dinâmica. As sete filas quorum trazem os
+  dois campos na política efetiva. `reject-publish` não dispara porque nenhuma fila tem limite de
+  tamanho; dead-lettered sem confirmação do destino fica retida na origem, e não some. Emenda no
+  ADR 0001. Dev Services seguem *at-most-once*.
 
 ## Ainda não especificado
 

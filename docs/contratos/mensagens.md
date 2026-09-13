@@ -100,7 +100,8 @@ Em teste, cada serviço declara pelo conector SmallRye o que publica e o que con
 (`exchange.declare`, `queue.declare`, `auto-bind-dlq`, `dead-letter-*`). No Compose, o
 `definitions.json` pré-provisiona a mesma topologia durável — exchanges, filas, DLQs,
 argumentos quorum e bindings — antes de os serviços de negócio subirem. Ele também carrega
-os usuários e a policy `dead-letter-strategy=at-least-once`. As declarações dos conectores
+os usuários e a policy `dead-letter-strategy=at-least-once` com `overflow=reject-publish` (sem o
+segundo campo o broker volta a *at-most-once*, ticket 103). As declarações dos conectores
 continuam ativas em produção e são idempotentes no Compose.
 
 O motivo da declaração duplicada é o teste: os Dev Services sobem um broker limpo em

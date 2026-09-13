@@ -115,6 +115,29 @@ sem transactional outbox está no
   roda `at-most-once`; a diferença só se manifesta em failover, que o `@QuarkusTest` não
   exercita. Com broker de nó único, o que de fato carrega peso na escolha de quorum é o
   `x-delivery-limit`, não o `at-least-once`.
+
+  Emendado no
+  [ticket 103](../wayfinder/tickets/103-dead-lettering-at-least-once-sem-reject-publish.md):
+  até ali, **nem no Compose** o regime era `at-least-once`. A policy definia só a estratégia, e
+  a documentação de quorum queues do RabbitMQ exige também `overflow=reject-publish`: com o
+  `drop-head` default, *"even if a queue length limit is not set"*, o dead-lettering volta a
+  `at-most-once`. A pesquisa do ticket 003 já registrava o par; o `definitions.json` levou só
+  metade. A policy `dead-letter-at-least-once` passou a carregar os dois campos. Policy é
+  dinâmica, então não é preciso recriar fila: com o volume antigo do broker, a política efetiva
+  das sete filas quorum passou a trazer `dead-letter-strategy=at-least-once` e
+  `overflow=reject-publish` (`rabbitmqctl list_queues name type policy
+  effective_policy_definition arguments`). As duas DLQs classic, `videos.dlq` e
+  `notificacao.dlq`, não mostram policy nenhuma; elas são destino, e o regime vale na fila de
+  origem.
+
+  Há dois efeitos colaterais. **`reject-publish` recusa publicação com a fila cheia**, em vez de
+  descartar a mais antiga. Hoje não dispara, porque nenhuma fila tem `x-max-length` nem
+  `x-max-length-bytes`, nem por argumento nem por policy. Quem puser limite de tamanho passa a
+  receber nack no publicador, que o `publish-confirms` obrigatório já trata. O segundo efeito é
+  que **mensagem dead-lettered fica viva na fila de origem até a DLQ confirmar**. Se a DLX não
+  existe, se a mensagem não tem rota ou se o destino não confirma, ela fica retida e é
+  retentada, e pode chegar duplicada à DLQ. Em vez de sumir, ela ocupa a fila de origem. É o
+  preço esperado de `at-least-once`, e o *"pelo menos uma vez"* do e-mail acima já o absorve.
 - **A DLQ do `extracao` tem consumidor; a do `videos` e a do `notificacao` não — e por
   isso ela própria deixou de ser terminal (ticket 029).** O `extracao` consome a própria DLQ
   e publica a falha definitiva — sem isso, nada reage à DLQ e o Vídeo trava em

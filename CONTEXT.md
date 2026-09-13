@@ -83,6 +83,36 @@ palavra *tentativa* gasta nas duas contagens, que fez a mesma frase do ADR ser i
 dois números e custou o
 [ticket 086](docs/wayfinder/tickets/086-contagem-de-repeticoes-em-dois-numeros.md).
 
+## Vídeo perdido
+
+Um Vídeo que o sistema **aceitou** e que nunca chega a um desfecho que o Dono consiga
+observar. É o que o requisito "não perder uma requisição" proíbe, lido pelo lado do Dono. Há
+três formas:
+
+- o Vídeo nunca chega a `CONCLUIDO` nem a `FALHOU`;
+- chega a `FALHOU`, mas o Dono nunca é avisado;
+- o arquivo enviado deixa de existir antes de o Vídeo chegar a um estado terminal.
+
+Não é Vídeo perdido:
+
+- **Pacote expirado.** O prazo é um desfecho previsto, e o sistema o comunica a quem pede o
+  download.
+- **Envio recusado.** Quando o sistema recusa o envio, ele não assumiu o Vídeo: quem enviou
+  sabe que precisa tentar de novo. Recusar de forma explícita é legítimo, inclusive por falta
+  de capacidade. Perder é outra coisa: aceitar e depois não entregar desfecho.
+
+Um Vídeo **preso** é um Vídeo perdido visto por dentro: parado num estado não-terminal. Nem
+todo Vídeo não-terminal está preso, porque um Vídeo esperando na fila durante um pico é
+`RECEBIDO` legítimo.
+
+Por isso o arquivo enviado é guardado **enquanto o Vídeo não tiver desfecho**. Ele também tem
+prazo, como o Pacote, mas esse prazo só pode vencer depois de o Vídeo chegar a um estado
+terminal. Um Vídeo preso pode ser descoberto tarde sem deixar de ser recuperável.
+
+Um **resgate** é a ação humana que recoloca um Vídeo preso a caminho do desfecho: pede de novo
+a Extração, ou anuncia de novo a falha, pelo mesmo caminho do envio original. O resgate começa
+uma nova série de tentativas. Ele não se aplica a Vídeo com desfecho: terminal é terminal.
+
 ## Estacionamento
 
 Uma fila terminal: destino de uma mensagem que esgotou o próprio fundo — inclusive o fundo

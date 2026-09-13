@@ -1446,6 +1446,19 @@ verificadas por teste, não são sugestão). Projeto original em
   intervalo do SDK não mudou. O 404 do passo 9, que às vezes não entra no contador, continua sem
   explicação.
 
+- [O Vídeo é aceito no commit da linha, não no
+  publish](tickets/104-aceite-do-video-no-commit-da-linha.md) — depois do `INSERT`, a varredura do
+  ADR 0003 já garante o comando, então o publish que falha ou não confirma não falha mais o `POST`:
+  ele responde `202` com a marca nula. O publish no envio espera no máximo **2 s**, e o teto limita
+  a espera, não o publish, porque o que for confirmado tarde ainda grava a marca. A leitura do
+  ticket previa `500`, mas a medição com o broker em alarme de disco mostrou coisa pior: a
+  requisição **pendurava** 60 s sem resposta. Com o teto, o envio respondeu `202` em 2,03 s e o
+  Vídeo chegou a `CONCLUIDO` no desbloqueio, sem republicação. Depois do teto, a continuação sai na
+  thread do timer do JDK, e a borda vazava o `idVideo` no MDC dela, o defeito do 063. A ponte do
+  `VideosResource` agora devolve a continuação ao contexto Vert.x, pelo mesmo helper
+  (`framework/vertx/ContextoDeChamada`) que o adapter do MinIO já usava em cópia própria. Emenda no
+  ADR 0003 e seção nova no contrato HTTP.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

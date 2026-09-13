@@ -90,6 +90,27 @@ em `RECEBIDO`.
 comunicar é que o trabalho **não terminou** — e `202` admite explicitamente um `Location`
 como monitor de status. A escolha é reversível e não custa nada mudar.
 
+### O que o `202` promete
+
+**O `202` é o aceite, e o aceite é o commit da linha** (ticket 104). Quando ele sai, o arquivo
+está no MinIO e o Vídeo está no Postgres em `RECEBIDO`: o sistema assumiu o Vídeo e deve a ele
+um desfecho, `CONCLUIDO` ou `FALHOU`, observável pelo `Location`. Reenviar o mesmo arquivo cria
+**outro** Vídeo.
+
+O `202` **não** promete que o comando de Extração já chegou ao broker. O `videos` tenta
+publicar antes de responder, mas espera no máximo **2 s**
+(`fiapx.mensageria.teto-do-publish-no-envio`). Se o broker recusar ou não confirmar nesse
+prazo, o `POST` responde `202` do mesmo jeito e a
+[reconciliação do ADR 0003](../adr/0003-reconciliacao-por-varredura.md) publica o comando
+depois. Um publish que chega a ser confirmado depois do teto também conta: a marca é gravada
+e a varredura não o repete. Para o cliente, a diferença é só o tempo em `RECEBIDO`.
+
+Qualquer falha **antes** do commit, no armazenamento ou no `INSERT`, continua sem `202`: sai o
+`500` de "Erro interno" e o Vídeo não existe.
+
+Somado ao teto, o `202` pode demorar até ~6 s no pior caso previsto: os 4 s de repetição do
+MinIO do [ADR 0001](../adr/0001-politica-de-falhas.md) mais os 2 s do publish.
+
 ### Rejeições na borda
 
 Este contrato fixa **quais rejeições existem e qual a forma delas**; os *valores* foram

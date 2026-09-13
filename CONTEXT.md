@@ -21,7 +21,7 @@ Estados de um Vídeo:
 
 | Estado | Significado |
 |---|---|
-| `RECEBIDO` | Armazenado e enfileirado; nada foi extraído ainda |
+| `RECEBIDO` | Armazenado e aceito; nada foi extraído ainda |
 | `PROCESSANDO` | A Extração está em andamento |
 | `CONCLUIDO` | A Extração terminou e há um Pacote disponível para download |
 | `FALHOU` | A Extração falhou definitivamente, após esgotadas as tentativas |

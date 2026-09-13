@@ -49,6 +49,7 @@ final class GatewaysEmMemoria {
         final List<Instant> cortesDeComandos = new ArrayList<>();
         final List<Instant> cortesDeFalhas = new ArrayList<>();
         private final Map<UUID, EstadoVideo> corridasArmadas = new LinkedHashMap<>();
+        RuntimeException falhaAoAdicionar;
 
         /**
          * Arma a corrida perdida deste Video: assim que a leitura dele acontecer, outra
@@ -62,6 +63,9 @@ final class GatewaysEmMemoria {
 
         @Override
         public CompletableFuture<Void> adicionar(Video video) {
+            if (falhaAoAdicionar != null) {
+                return CompletableFuture.failedFuture(falhaAoAdicionar);
+            }
             armazenados.put(video.id(), video);
             return CompletableFuture.completedFuture(null);
         }
@@ -197,9 +201,19 @@ final class GatewaysEmMemoria {
         String ultimaChaveVideo;
         String ultimaChaveDestinoPacote;
         private RuntimeException falhaNoProximoEnvio;
+        private CompletableFuture<Void> confirmacaoDoProximoEnvio;
 
         void falharNoProximoEnvio(RuntimeException falha) {
             falhaNoProximoEnvio = falha;
+        }
+
+        /**
+         * O broker bloqueado: o proximo envio so completa quando o teste completar o future
+         * devolvido — e, se o teste nao o completar, nunca.
+         */
+        CompletableFuture<Void> segurarOProximoEnvio() {
+            confirmacaoDoProximoEnvio = new CompletableFuture<>();
+            return confirmacaoDoProximoEnvio;
         }
 
         @Override
@@ -207,6 +221,11 @@ final class GatewaysEmMemoria {
             idsEnviados.add(idVideo);
             ultimaChaveVideo = chaveVideo;
             ultimaChaveDestinoPacote = chaveDestinoPacote;
+            if (confirmacaoDoProximoEnvio != null) {
+                var confirmacao = confirmacaoDoProximoEnvio;
+                confirmacaoDoProximoEnvio = null;
+                return confirmacao;
+            }
             if (falhaNoProximoEnvio != null) {
                 var falha = falhaNoProximoEnvio;
                 falhaNoProximoEnvio = null;
@@ -243,9 +262,13 @@ final class GatewaysEmMemoria {
 
         final Map<String, Flow.Publisher<ByteBuffer>> pacotes = new LinkedHashMap<>();
         Path ultimoArquivoGravado;
+        RuntimeException falhaAoGravar;
 
         @Override
         public CompletableFuture<String> gravarVideo(UUID idVideo, String nome, Path arquivo) {
+            if (falhaAoGravar != null) {
+                return CompletableFuture.failedFuture(falhaAoGravar);
+            }
             ultimoArquivoGravado = arquivo;
             return CompletableFuture.completedFuture(idVideo + "/original.mp4");
         }

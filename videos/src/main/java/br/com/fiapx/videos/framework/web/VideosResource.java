@@ -4,6 +4,7 @@ import br.com.fiapx.videos.core.entities.EstadoVideo;
 import br.com.fiapx.videos.core.exceptions.ArquivoAusenteException;
 import br.com.fiapx.videos.core.usecases.video.BaixarPacoteUseCase;
 import br.com.fiapx.videos.framework.observabilidade.Rastro;
+import br.com.fiapx.videos.framework.vertx.ContextoDeChamada;
 import br.com.fiapx.videos.interfaces.controllers.VideosController;
 import br.com.fiapx.videos.interfaces.presenters.VideoPresenterAdapter;
 import br.com.fiapx.videos.interfaces.presenters.VideosPaginadosPresenterAdapter;
@@ -84,9 +85,10 @@ public class VideosResource {
     @Consumes(MediaType.MULTIPART_FORM_DATA)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Envia um Vídeo para extração de frames",
-            description = "Responde 202: o Vídeo foi armazenado e enfileirado, e a Extração ainda"
-                    + " não começou. Acompanhe pelo Location. Formatos aceitos: mp4, avi, mov, mkv,"
-                    + " webm, até 200 MB. Vídeos com mais de 20 minutos são recusados depois do 202,"
+            description = "Responde 202: o Vídeo foi armazenado e registrado, e a Extração ainda"
+                    + " não começou. O 202 já garante um desfecho: se o broker não confirmar o"
+                    + " comando a tempo, ele é publicado depois, sem ação sua. Acompanhe pelo Location."
+                    + " Formatos aceitos: mp4, avi, mov, mkv, webm, até 200 MB. Vídeos com mais de 20 minutos são recusados depois do 202,"
                     + " por e-mail — esta borda não decodifica o arquivo.")
     @APIResponse(responseCode = "202", description = "Vídeo recebido, em RECEBIDO")
     @APIResponse(responseCode = "400", description = "Campo arquivo ausente ou vazio")
@@ -181,11 +183,15 @@ public class VideosResource {
      * Ponte CompletableFuture -> Uni, desembrulhando o CompletionException que as cadeias
      * assincronas colocam por cima da excecao de dominio — sem isso, toda falha do core
      * cairia no mapper de 500 em vez do seu.
+     *
+     * <p>Tambem devolve a continuacao ao contexto Vert.x da requisicao ({@link ContextoDeChamada}):
+     * desde o ticket 104 o envio pode completar na thread do timer do JDK, e o que vem depois
+     * daqui — o {@link Rastro#marcar} e o presenter request-scoped — precisa do contexto.
      */
     private static <T> Uni<T> doController(Supplier<CompletableFuture<T>> chamada) {
-        return Uni.createFrom().completionStage(chamada)
+        return ContextoDeChamada.retomarNele(Uni.createFrom().completionStage(chamada)
                 .onFailure(CompletionException.class)
-                .transform(falha -> falha.getCause() == null ? falha : falha.getCause());
+                .transform(falha -> falha.getCause() == null ? falha : falha.getCause()));
     }
 
     /** O dono do Video. {@code getName()} viria do upn e seria outro campo (ticket 004). */

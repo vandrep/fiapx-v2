@@ -24,6 +24,9 @@ import br.com.fiapx.videos.interfaces.presenters.VideosPaginadosPresenterAdapter
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.RequestScoped;
 import jakarta.enterprise.inject.Produces;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+import java.time.Duration;
 
 /**
  * O unico lugar que conhece o grafo de objetos: os use cases sao POJOs sem anotacao de CDI,
@@ -31,6 +34,15 @@ import jakarta.enterprise.inject.Produces;
  */
 @ApplicationScoped
 public class VideosConfiguration {
+
+    /**
+     * Quanto o {@code POST /videos} espera a confirmacao do {@code ExtrairVideo} depois do commit
+     * da linha (ticket 104). Passado o teto, o Video sai aceito e a varredura do ADR 0003 cobre o
+     * comando. O default vive aqui, e nao no {@code .properties}, pelo mesmo motivo das esperas
+     * de repeticao (ticket 080).
+     */
+    @ConfigProperty(name = "fiapx.mensageria.teto-do-publish-no-envio", defaultValue = "2s")
+    Duration tetoDoPublishNoEnvio;
 
     @Produces
     @ApplicationScoped
@@ -53,7 +65,8 @@ public class VideosConfiguration {
                                       VideosPaginadosPresenter videosPaginadosPresenter,
                                       PublicarExtrairVideo publicarExtrairVideo) {
         return new VideosController(
-                new EnviarVideoUseCase(arquivoGateway, videoGateway, publicarExtrairVideo, videoPresenter),
+                new EnviarVideoUseCase(arquivoGateway, videoGateway, publicarExtrairVideo, videoPresenter,
+                        tetoDoPublishNoEnvio),
                 new ListarVideosDoDonoUseCase(videoGateway, videosPaginadosPresenter),
                 new ConsultarVideoUseCase(videoGateway, videoPresenter),
                 new BaixarPacoteUseCase(videoGateway, arquivoGateway));

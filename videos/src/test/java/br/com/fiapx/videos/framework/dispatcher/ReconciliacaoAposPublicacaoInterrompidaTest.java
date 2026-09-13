@@ -51,6 +51,7 @@ class ReconciliacaoAposPublicacaoInterrompidaTest {
     private static final String INTERRUPCAO = "conexao caiu antes do publish";
     private static final Duration PRAZO_ATE_NAO_HAVER_COMANDO = Duration.ofMillis(300);
     private static final Duration PRAZO_DO_REPUBLICADO = Duration.ofSeconds(10);
+    private static final Duration TETO_DO_PUBLISH = Duration.ofSeconds(2);
 
     @Inject
     VideoDataSourceAdapter adapter;
@@ -75,7 +76,7 @@ class ReconciliacaoAposPublicacaoInterrompidaTest {
     int rabbitmqPort;
 
     @Test
-    void publicacaoInterrompidaDepoisDoCommitNaoMarcaEAVarreduraRepublica(@TempDir Path diretorio) throws Throwable {
+    void publicacaoInterrompidaDepoisDoCommitAceitaOVideoSemMarcaEAVarreduraRepublica(@TempDir Path diretorio) throws Throwable {
         var arquivo = Files.write(diretorio.resolve("interrompido.mp4"), "video interrompido".getBytes());
 
         try (var broker = new BrokerDeTeste(rabbitmqHost, rabbitmqPort, objectMapper)) {
@@ -103,8 +104,9 @@ class ReconciliacaoAposPublicacaoInterrompidaTest {
 
     /**
      * O envio percorre gravacao do arquivo, insercao e publicacao; a falha entra no ultimo
-     * passo, com a linha ja commitada por {@link VideoDataSourceAdapter#adicionar}. O id sai
-     * pelo proprio sender porque o {@link EnviarVideoUseCase} nao chega a devolver o Video.
+     * passo, com a linha ja commitada por {@link VideoDataSourceAdapter#adicionar}. Desde o
+     * ticket 104 o envio <b>completa</b> assim mesmo: o aceite e o commit da linha, e o comando
+     * fica com a varredura.
      */
     private UUID enviarComPublicacaoInterrompida(Path arquivo) throws Throwable {
         var id = new UUID[1];
@@ -113,16 +115,14 @@ class ReconciliacaoAposPublicacaoInterrompidaTest {
             return CompletableFuture.failedFuture(new IllegalStateException(INTERRUPCAO));
         };
         var envio = new EnviarVideoUseCase(arquivoGateway, adapter,
-                new PublicarExtrairVideo(arquivoGateway, interrompido, adapter), video -> { });
+                new PublicarExtrairVideo(arquivoGateway, interrompido, adapter), video -> { },
+                TETO_DO_PUBLISH);
         var command = new EnviarVideoUseCase.Command(
                 "interrompido.mp4", "video/mp4", Files.size(arquivo), arquivo, DONO);
 
-        var falha = falhaDe(() -> noContextoDoVertx(() ->
-                Uni.createFrom().completionStage(() -> envio.executar(command))));
-        assertNotNull(falha, "o envio tinha de propagar a interrupcao da publicacao");
-        assertEquals(INTERRUPCAO, raizDe(falha).getMessage(),
-                "a falha propagada tem de ser a injetada, e nao outra qualquer");
+        var aceito = noContextoDoVertx(() -> Uni.createFrom().completionStage(() -> envio.executar(command)));
         assertNotNull(id[0], "a interrupcao so vale se o caminho chegou ao publish");
+        assertEquals(id[0], aceito.id(), "o Video aceito e o mesmo cuja publicacao foi interrompida");
         return id[0];
     }
 
@@ -148,29 +148,6 @@ class ReconciliacaoAposPublicacaoInterrompidaTest {
         return noContextoDoVertx(() -> pool.preparedQuery(
                         "select comando_publicado_em is not null from video where id = $1")
                 .execute(Tuple.of(id))).iterator().next().getBoolean(0);
-    }
-
-    /** A falha que o trabalho levantou, ou {@code null} se ele completou. */
-    private static Throwable falhaDe(TrabalhoQuePodeFalhar trabalho) {
-        try {
-            trabalho.executar();
-            return null;
-        } catch (Throwable falha) {
-            return falha;
-        }
-    }
-
-    /** O {@code subscribeAndAwait} embrulha; o que interessa julgar e a causa original. */
-    private static Throwable raizDe(Throwable falha) {
-        var raiz = falha;
-        while (raiz.getCause() != null) {
-            raiz = raiz.getCause();
-        }
-        return raiz;
-    }
-
-    private interface TrabalhoQuePodeFalhar {
-        void executar() throws Throwable;
     }
 
     /**

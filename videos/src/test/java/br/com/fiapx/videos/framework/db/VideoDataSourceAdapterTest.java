@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -55,6 +56,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class VideoDataSourceAdapterTest {
 
     private static final Dono DONO = new Dono("sub-adapter", "adapter@exemplo.com");
+    /**
+     * Folgado de proposito: estes cenarios julgam a ordem entre commit e publish, e precisam que
+     * o envio espere o consumidor simulado terminar — o teto do ticket 104 nao esta em jogo.
+     */
+    private static final Duration TETO_DO_PUBLISH = Duration.ofSeconds(30);
 
     @Test
     @RunOnVertxContext
@@ -256,7 +262,7 @@ class VideoDataSourceAdapterTest {
                 });
         VideoPresenter presenter = video -> { };
         var envio = new EnviarVideoUseCase(arquivo, adapter,
-                new PublicarExtrairVideo(arquivo, extracao, adapter), presenter);
+                new PublicarExtrairVideo(arquivo, extracao, adapter), presenter, TETO_DO_PUBLISH);
         var id = new UUID[1];
 
         asserter.execute(() -> Uni.createFrom().completionStage(() -> envio.executar(
@@ -317,7 +323,7 @@ class VideoDataSourceAdapterTest {
                         .subscribeAsCompletionStage();
         VideoPresenter presenter = video -> { };
         return new EnviarVideoUseCase(arquivo, adapter,
-                new PublicarExtrairVideo(arquivo, consumidor, adapter), presenter);
+                new PublicarExtrairVideo(arquivo, consumidor, adapter), presenter, TETO_DO_PUBLISH);
     }
 
     private static EnviarVideoUseCase.Command envioDe(String nome) {

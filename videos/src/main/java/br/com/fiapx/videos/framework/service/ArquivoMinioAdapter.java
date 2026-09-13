@@ -3,9 +3,8 @@ package br.com.fiapx.videos.framework.service;
 import br.com.fiapx.videos.core.entities.FormatoDoArquivo;
 import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.framework.observabilidade.Rastro;
+import br.com.fiapx.videos.framework.vertx.ContextoDeChamada;
 import io.smallrye.mutiny.Uni;
-import io.vertx.core.Context;
-import io.vertx.core.Vertx;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -88,13 +87,7 @@ public class ArquivoMinioAdapter implements ArquivoGateway {
      * sexta regra do teste arquitetural proibe o interceptor desde entao.
      */
     private static <T> CompletableFuture<T> noContextoDeChamada(Uni<T> operacao) {
-        Context contexto = Vertx.currentContext();
-        if (contexto == null) {
-            return operacao.subscribeAsCompletionStage();
-        }
-        return operacao
-                .emitOn(comando -> contexto.runOnContext(ignorado -> comando.run()))
-                .subscribeAsCompletionStage();
+        return ContextoDeChamada.retomarNele(operacao).subscribeAsCompletionStage();
     }
 
     /**

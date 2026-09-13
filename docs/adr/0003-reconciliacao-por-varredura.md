@@ -12,7 +12,9 @@ janelas sem tabela nova, sem payload serializado e sem reescrever o dispatcher.
 
 Decidido no [ticket 018](../wayfinder/tickets/018-outbox-transacional.md) e corrigido no
 [ticket 027](../wayfinder/tickets/027-melhorias-medidas.md), que descobriu que a marca podia
-mentir — ver a primeira consequência abaixo.
+mentir — ver a primeira consequência abaixo. Emendado no
+[ticket 104](../wayfinder/tickets/104-aceite-do-video-no-commit-da-linha.md), que tirou o publish do
+caminho do aceite — ver a consequência sobre o aceite.
 
 ## Considered Options
 
@@ -88,6 +90,28 @@ dizer se o evento saiu.
   `ExtracaoConcluida` é engolido pela guarda de transição do
   [ADR 0002](0002-maquina-de-estados-em-duas-camadas.md). Marcar antes de publicar nunca
   duplicaria, e seria o buraco original com passos extras.
+- **O aceite do Vídeo é o commit da linha, não o publish** (emenda do
+  [ticket 104](../wayfinder/tickets/104-aceite-do-video-no-commit-da-linha.md)). Depois do
+  `INSERT`, esta varredura já garante o comando, então a falha do publish no envio não falha mais
+  a requisição. O `POST /videos` responde `202` com a marca nula, e a varredura publica depois.
+  Antes, a exceção subia e o cliente recebia erro por um Vídeo que o sistema ia processar de
+  qualquer jeito. A leitura do ticket dizia `500`, mas **medido** com o broker em alarme de disco
+  (`set_disk_free_limit` acima do disco, imagem anterior ao 104) não havia erro nenhum: o publish
+  com confirms não falha nem confirma, e a requisição pendurou 60 s sem um byte, até o cliente
+  desistir. O `500` da leitura só valeria para recusa explícita, como canal fechado ou `nack`, e
+  essa não foi medida. O publish no
+  envio ganhou por isso um **teto de 2 s** (`fiapx.mensageria.teto-do-publish-no-envio`), e o teto
+  limita **quanto a requisição espera, não o publish**: o `ExtrairVideo` preso continua pendente
+  e, se o broker o confirmar depois, a marca é gravada tarde e esta varredura não o repete. Isso
+  também foi medido: três envios com o broker bloqueado responderam `202` em 2,03 s, ficaram ~37 s
+  sem marca, receberam a marca no desbloqueio, antes da folga de um minuto, e chegaram a
+  `CONCLUIDO` sem republicação. O valor segue a mesma régua do [ADR 0001](0001-politica-de-falhas.md),
+  que já aceita segurar a borda por até 4 s num blip do MinIO. Com 2 s, a espera fica numa só
+  daquelas esperas, contra um `POST` inteiro de 61–256 ms com o broker sadio (20 envios de um
+  fixture de 3 s). Recusadas: desfazer linha e objeto e responder `503`, porque essa compensação
+  também pode falhar e deixaria o mesmo Vídeo meio aceito; e manter a resposta ambígua. A varredura
+  continua em um minuto de folga, então um Vídeo aceito sem comando espera no máximo esse minuto
+  mais uma passada.
 - **Duas réplicas de `videos` varrem ao mesmo tempo, e tudo bem.** Ambas publicam, o consumo
   é idempotente e o `UPDATE ... WHERE marca IS NULL` serializa a marca. `SKIP LOCKED` ou
   eleição de líder pagariam complexidade para evitar uma duplicata que o sistema inteiro foi

@@ -8,7 +8,9 @@ com três serviços Quarkus que só conversam por mensagem.
 Três decisões estruturais sustentam tudo o que vem abaixo:
 
 1. **O trabalho é aceito antes de ser feito.** O envio responde `202 Accepted` assim que o
-   arquivo está durável e o comando enfileirado — não quando a extração termina.
+   arquivo e a linha do Vídeo estão duráveis — não quando a extração termina. O comando é
+   publicado antes da resposta quando o broker confirma em até 2 s, e pela reconciliação
+   quando não confirma ([ticket 104](wayfinder/tickets/104-aceite-do-video-no-commit-da-linha.md)).
 2. **Um único serviço é dono do estado.** O `videos` é a borda pública e a única autoridade
    sobre o que aconteceu com um Vídeo; `extracao` e `notificacao` não têm banco.
 3. **Cada serviço é Clean Architecture, verificada por teste.** A regra de dependência não é

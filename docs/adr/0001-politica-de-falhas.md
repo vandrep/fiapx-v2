@@ -123,21 +123,26 @@ sem transactional outbox está no
   `drop-head` default, *"even if a queue length limit is not set"*, o dead-lettering volta a
   `at-most-once`. A pesquisa do ticket 003 já registrava o par; o `definitions.json` levou só
   metade. A policy `dead-letter-at-least-once` passou a carregar os dois campos. Policy é
-  dinâmica, então não é preciso recriar fila: com o volume antigo do broker, a política efetiva
-  das sete filas quorum passou a trazer `dead-letter-strategy=at-least-once` e
-  `overflow=reject-publish` (`rabbitmqctl list_queues name type policy
-  effective_policy_definition arguments`). As duas DLQs classic, `videos.dlq` e
-  `notificacao.dlq`, não mostram policy nenhuma; elas são destino, e o regime vale na fila de
-  origem.
+  dinâmica, então não é preciso recriar fila, e as sete filas quorum trazem os dois campos na
+  política efetiva. A verificação está no ticket. As duas DLQs classic não recebem a policy.
+  Medido no RabbitMQ 4.3: uma policy com chave que a classic não suporta, como
+  `dead-letter-strategy`, deixa de casar com ela **inteira**. Sem limite de tamanho, isso não
+  muda nada, porque o regime de dead-lettering é da fila de origem.
 
-  Há dois efeitos colaterais. **`reject-publish` recusa publicação com a fila cheia**, em vez de
-  descartar a mais antiga. Hoje não dispara, porque nenhuma fila tem `x-max-length` nem
-  `x-max-length-bytes`, nem por argumento nem por policy. Quem puser limite de tamanho passa a
-  receber nack no publicador, que o `publish-confirms` obrigatório já trata. O segundo efeito é
-  que **mensagem dead-lettered fica viva na fila de origem até a DLQ confirmar**. Se a DLX não
+  Onde o parágrafo acima diz que a diferença "só se manifesta em failover", leia: **também em nó
+  único**. Mensagem dead-lettered fica viva na fila de origem até a DLQ confirmar. Se a DLX não
   existe, se a mensagem não tem rota ou se o destino não confirma, ela fica retida e é
   retentada, e pode chegar duplicada à DLQ. Em vez de sumir, ela ocupa a fila de origem. É o
   preço esperado de `at-least-once`, e o *"pelo menos uma vez"* do e-mail acima já o absorve.
+
+  Há mais dois efeitos colaterais. **`reject-publish` recusa publicação com a fila cheia**, em
+  vez de descartar a mais antiga. Hoje não dispara, porque nenhuma fila tem `x-max-length` nem
+  `x-max-length-bytes`, nem por argumento nem por policy. Quem puser limite de tamanho passa a
+  receber nack no publicador, que o `publish-confirms` obrigatório já trata. O outro efeito:
+  **sair do regime descarta o que está retido**. A documentação diz que trocar a estratégia para
+  `at-most-once`, ou `overflow` para `drop-head`, apaga as mensagens dead-lettered ainda sem
+  confirmação. Tirar qualquer dos dois campos da policy, inclusive por edição do
+  `definitions.json`, é perda, e não reconfiguração inócua.
 - **A DLQ do `extracao` tem consumidor; a do `videos` e a do `notificacao` não — e por
   isso ela própria deixou de ser terminal (ticket 029).** O `extracao` consome a própria DLQ
   e publica a falha definitiva — sem isso, nada reage à DLQ e o Vídeo trava em

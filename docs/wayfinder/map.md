@@ -1427,15 +1427,6 @@ verificadas por teste, não são sugestão). Projeto original em
   posse vale pelo caminho, não pelo arquivo: troca deliberada dentro do diretório exclusivo da
   tentativa fica fora da guarda.
 
-- [O dead-lettering at-least-once que não estava
-  ligado](tickets/103-dead-lettering-at-least-once-sem-reject-publish.md) — a policy do Compose
-  definia só `dead-letter-strategy`, e sem `overflow=reject-publish` o RabbitMQ volta a
-  *at-most-once*, que é exatamente o regime que o ADR 0001 recusou. A policy ganhou o segundo
-  campo e não foi preciso recriar fila, porque policy é dinâmica. As sete filas quorum trazem os
-  dois campos na política efetiva. `reject-publish` não dispara porque nenhuma fila tem limite de
-  tamanho; dead-lettered sem confirmação do destino fica retida na origem, e não some. Emenda no
-  ADR 0001. Dev Services seguem *at-most-once*.
-
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

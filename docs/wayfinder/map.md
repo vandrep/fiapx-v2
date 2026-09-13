@@ -1436,6 +1436,7 @@ verificadas por teste, não são sugestão). Projeto original em
   ela. `reject-publish` não dispara, porque nenhuma fila tem limite de tamanho. O risco ficou
   registrado na emenda do ADR 0001: **tirar qualquer dos dois campos descarta** as mensagens
   dead-lettered retidas. O ticket fechou depois do 110.
+
 - [O passo 12 do smoke julga o painel antes da segunda
   exportação](tickets/110-passo-12-do-smoke-antes-da-segunda-exportacao.md) — o defeito é
   anterior ao 103, e isso foi medido com a policy antiga. O `videos` exporta métrica a cada 60 s, e

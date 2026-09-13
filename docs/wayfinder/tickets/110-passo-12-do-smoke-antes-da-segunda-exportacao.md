@@ -121,3 +121,21 @@ verdadeiro. Com `>= 999` e com o rótulo trocado por `status_renomeado`, é fals
   intervalo do SDK.
 - **A espera não se generaliza sozinha.** Um painel novo com `rate()` sobre outra métrica precisa
   de condição própria, ou reprova do mesmo jeito em stack nova.
+
+## Correção (revisão do 110)
+
+A revisão de spec corrigiu o segundo item de *Limites que ficam*. A espera cobre o painel 5xx, mas
+não pelo motivo que o item dá. O motivo é que o denominador `sum(rate(...{job="fiapx-videos"}[5m]))`
+não filtra status, então inclui a própria série 4xx que a espera exige com duas amostras. O
+numerador tem `or vector(0)`. O passo final do `query_range` sempre tem valor, e 1 amostra é o
+mínimo esperado, não um sinal de risco. Também não verifiquei que o `/q/health` entra nessa
+métrica. O comentário do 5xx no `smoke.sh`, que ainda se apoiava nas "dezenas de requisições" que
+o 110 desmentiu, foi corrigido junto.
+
+A revisão de padrões mudou três coisas:
+- a espera foi para junto da espera do Grafana, logo depois do comentário que a explica;
+- o `curl` dela passou a `-sf`, para não imprimir erro a cada tentativa com o Prometheus fora;
+- o comentário justifica a cópia do seletor pelo que ela separa, a exportação atrasada da query
+  quebrada, e não mais por um "aprovaria por cansaço" que não é verdade.
+
+A seção final do 103 passou a se chamar `## Resolução`.

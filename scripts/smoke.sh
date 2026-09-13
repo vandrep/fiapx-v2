@@ -396,9 +396,10 @@ passo "12. Nenhuma query do painel curado devolve série vazia"
 # `or vector(0)` no numerador —, e este laco aprova o zero de proposito: ele conta amostra
 # nao-`NaN`, e nao valor diferente de zero. Um 5xx aqui, alias, seria defeito de verdade.
 # Ele PODERIA voltar vazio num caso, e a `description` dele diz qual: borda ociosa por mais de
-# 5 min zera tambem o DENOMINADOR, e razao sem denominador nao existe. Nao e mais uma excecao a
-# lista abaixo porque aqui esse caso nao acontece — este passo roda depois do ciclo do Video, e o
-# proprio smoke acabou de fazer dezenas de requisicoes na janela de uma hora que ele consulta.
+# 5 min zera tambem o DENOMINADOR, e razao sem denominador nao existe. Numa stack recem-criada o
+# denominador tambem saia vazio, antes da segunda exportacao (ticket 110). Nao e mais uma excecao
+# a lista abaixo porque a espera da `Borda` cobre os dois casos: o denominador nao filtra status,
+# entao inclui a propria serie 4xx que a espera exige com duas amostras.
 #
 # UM painel escapa deste passo, e escapa de proposito: o `count(...) or vector(0)` das filas sem
 # consumidor nunca volta vazio, porque sem o `or vector(0)` ele diria "No data" justamente com o
@@ -415,6 +416,24 @@ until curl -sf "$grafana_url/api/health" > /dev/null 2>&1; do
     (( SECONDS - inicio > 120 )) && falha "Grafana não voltou 120s depois do religa do passo 11"
     printf '    ... aguardando o Grafana voltar\n'
     sleep 3
+done
+
+# A espera do paragrafo sobre `rate()`, acima. Ela olha a metrica e o rotulo CRUS que a linha
+# `Borda` usa, e nao a query do painel, e isso e uma copia deliberada: esperando a query, o teto
+# estourado nao separaria "a exportacao ainda nao chegou" de "a query quebrou", que e o que o
+# laco abaixo julga. A copia e so do seletor; renomeado no painel, esta espera reprova no teto e
+# a mensagem cita o rotulo. O teto e duas exportacoes mais margem.
+duas_amostras_4xx() {
+    curl -sf -G "$grafana_url/api/datasources/proxy/uid/prometheus/api/v1/query" \
+        --data-urlencode 'query=max(count_over_time(http_server_request_duration_seconds_count{job="fiapx-videos", http_response_status_code=~"4.."}[5m])) >= 2' \
+        | jq -e '.data.result | length > 0' > /dev/null 2>&1
+}
+inicio=$SECONDS
+until duas_amostras_4xx; do
+    (( SECONDS - inicio > 150 )) \
+        && falha "nenhuma série 4xx do fiapx-videos tem duas amostras no Prometheus 150s depois do passo 11 — a exportação OTLP do videos parou, ou a métrica ou o rótulo que a linha Borda do painel usa mudou de nome"
+    printf '    ... aguardando a segunda exportação de métrica do videos\n'
+    sleep 10
 done
 
 # O painel e a home: abrir localhost:3000 cai nele sem navegar. Sem isso ele e mais um item
@@ -533,22 +552,6 @@ busca_no_tempo() {
         --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
         --data-urlencode "limit=20"
 }
-
-# A espera olha a metrica e o rotulo CRUS que o painel usa, e nao a query dele: esperar a
-# propria query ficar verde aprovaria, por cansaco, o que o laco existe para julgar. O teto e
-# duas exportacoes mais margem. Estourado, as causas sao duas, e a mensagem diz as duas.
-duas_amostras_4xx() {
-    curl -sS -G "$grafana_url/api/datasources/proxy/uid/prometheus/api/v1/query" \
-        --data-urlencode 'query=max(count_over_time(http_server_request_duration_seconds_count{job="fiapx-videos", http_response_status_code=~"4.."}[5m])) >= 2' \
-        | jq -e '.data.result | length > 0' > /dev/null 2>&1
-}
-inicio=$SECONDS
-until duas_amostras_4xx; do
-    (( SECONDS - inicio > 150 )) \
-        && falha "nenhuma série 4xx do fiapx-videos tem duas amostras no Prometheus 150s depois do passo 11 — a exportação OTLP do videos parou, ou a métrica ou o rótulo que a linha Borda do painel usa mudou de nome"
-    printf '    ... aguardando a segunda exportação de métrica do videos\n'
-    sleep 10
-done
 
 agora=$(date +%s)
 desde=$(( agora - 3600 ))

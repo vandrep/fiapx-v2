@@ -128,9 +128,9 @@ tamanho não há efeito, porque o regime de dead-lettering é da fila de origem.
   link para *Vídeo perdido*. O termo está no `CONTEXT.md` do working tree, fora deste commit,
   junto com a série 104–109.
 
-## Fechamento (2026-09-13)
+## Resolução
 
-Fechado depois do [110](110-passo-12-do-smoke-antes-da-segunda-exportacao.md). Com a espera do
+Fechado em 2026-09-13, depois do [110](110-passo-12-do-smoke-antes-da-segunda-exportacao.md). Com a espera do
 passo 12, `scripts/smoke.sh` passou contra a stack recém-criada e contra a stack em uso, e
 `scripts/persistencia-rabbitmq.sh` passou inteiro (`exit=0`). As três corridas usaram a policy
 deste ticket. Antes delas, o broker foi reiniciado para recarregar o `definitions.json` com

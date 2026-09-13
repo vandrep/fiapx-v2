@@ -205,6 +205,13 @@ e nenhum `@QuarkusTest` desses dois serviços injeta blip — um `%test.` neles 
 (ticket 085). O código das três continua com a mesma forma; o que diverge é onde o teste baixa a
 espera.
 
+Outra divergência viva, e só do download do `extracao` (ticket 102): lá `comRepeticao` ganhou uma
+sobrecarga com filtro, e `baixar` repete por `deferred`, porque cada chamada toma posse do arquivo
+de destino antes de baixar. Colisão no destino e falha ao descartar o parcial encerram o download
+sem repetir. O upload do `extracao` e as cópias dos outros dois serviços continuam repetindo toda
+`Exception` pela forma de um argumento. A gestão do parcial é do download, e só dele: quem mexer na
+parte comum aplica nas cópias o que é comum e deixa o filtro onde está.
+
 A sexta família é a única que se repete **dentro** de um serviço, e não entre eles: o `videos`
 carrega duas implementações da mesma forma reativa — `RepeticaoNoPostgres.executar` em
 `framework/db` e `comRepeticao` no `ArquivoMinioClient`. Elas não se fundem porque repetem por

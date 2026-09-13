@@ -12,15 +12,30 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.utils.async.SimplePublisher;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,12 +66,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * cenario. O piso e 1 ms e nao zero: o Mutiny recusa backoff zero com
  * {@code IllegalArgumentException} na subscricao.
  *
- * <p>O que ele <b>nao</b> cobre, e vale saber antes de confiar demais nele: o dublê falha
- * <i>antes</i> de {@code prepare()}, entao nenhuma repeticao aqui encontra o arquivo de
- * destino ja criado. O caminho "blip depois de a escrita comecar", em que
- * {@code AsyncResponseTransformer.toFile} recusa o arquivo existente, fica de fora — e o
- * {@code @Retry} anterior tinha exatamente o mesmo buraco (ver o javadoc de
- * {@link ArquivoMinioClient}).
+ * <p><b>Dois dublês, porque falham em pontos diferentes.</b> O {@link S3QueFalhaAsPrimeiras} falha
+ * <i>antes</i> de {@code prepare()}, entao julga so a contagem. O {@link S3QueFalhaDepoisDeEscrever}
+ * (ticket 102) passa pelo transformador real do SDK e derruba o stream depois de ver bytes no
+ * disco, que e onde mora o arquivo local. Com ele, a separacao que a sondagem daquele ticket fez
+ * fica registrada nos cenarios:
+ *
+ * <ul>
+ * <li><b>ja passava antes do 102</b>, pela limpeza do proprio SDK: blip depois da escrita baixa de
+ *     novo com conteudo exato, falha persistente esgota as tres chamadas sem sobra, e downloads em
+ *     espacos diferentes nao se misturam. O comentario antigo — de que esse blip queimava as
+ *     repeticoes com {@code FileAlreadyExistsException} — estava errado;</li>
+ * <li><b>ficou vermelho ate o 102</b>, porque a exclusao do SDK nao olha posse nem relata falha:
+ *     destino preexistente apagado, arquivo alheio criado no instante da abertura apagado, e
+ *     limpeza que falha seguida de mais repeticoes sobre estado local desconhecido.</li>
+ * </ul>
  */
 class RepeticaoNoMinioTest {
 
@@ -102,6 +126,129 @@ class RepeticaoNoMinioTest {
         clienteCom(s3).gravar("pacotes", "chave.zip", origem).toCompletableFuture().get();
 
         assertEquals(3, s3.chamadas(), "duas falhas mais a que sucedeu");
+    }
+
+    @Test
+    void blipDepoisDaEscritaObservadaBaixaDeNovoDoZero() throws Exception {
+        var destino = Files.createTempDirectory("t102").resolve("original.mp4");
+        var s3 = new S3QueFalhaDepoisDeEscrever(2, Map.of("chave/original.mp4", destino));
+
+        clienteCom(s3).baixar("videos", "chave/original.mp4", destino).toCompletableFuture().get(10, SECONDS);
+
+        assertEquals("inicio-chave/original.mp4-fim", Files.readString(destino),
+                "sem prefixo duplicado nem sobra do parcial anterior");
+        assertEquals(3, s3.chamadas(), "duas falhas depois da escrita mais a que sucedeu");
+        assertEquals(2, s3.escritasObservadas(), "o blip tinha de chegar depois de bytes em disco");
+    }
+
+    @Test
+    void falhaPersistenteDepoisDaEscritaEsgotaAsChamadasSemDeixarParcial() throws Exception {
+        var espaco = Files.createTempDirectory("t102");
+        var destino = espaco.resolve("original.mp4");
+        var s3 = new S3QueFalhaDepoisDeEscrever(SEMPRE, Map.of("chave/original.mp4", destino));
+
+        var falha = assertThrows(ExecutionException.class,
+                () -> clienteCom(s3).baixar("videos", "chave/original.mp4", destino).toCompletableFuture().get(10, SECONDS));
+
+        assertTrue(falha.getCause() instanceof IOException, "a falha da transferencia chega ao chamador: " + falha.getCause());
+        assertEquals(3, s3.chamadas(), "a primeira chamada mais as duas repeticoes do ADR 0001");
+        assertEquals(3, s3.escritasObservadas());
+        try (var sobras = Files.list(espaco)) {
+            assertEquals(List.of(), sobras.toList(), "nenhum parcial proprio pode sobrar");
+        }
+    }
+
+    @Test
+    void destinoPreexistenteFicaIntactoEAOperacaoFalha() throws Exception {
+        var destino = Files.createTempDirectory("t102").resolve("original.mp4");
+        Files.writeString(destino, "arquivo de outro dono");
+        var s3 = new S3QueFalhaDepoisDeEscrever(0, Map.of("chave/original.mp4", destino));
+
+        var falha = assertThrows(ExecutionException.class,
+                () -> clienteCom(s3).baixar("videos", "chave/original.mp4", destino).toCompletableFuture().get(10, SECONDS));
+
+        assertTrue(falha.getCause() instanceof FileAlreadyExistsException, "e colisao, e chegou " + falha.getCause());
+        assertEquals("arquivo de outro dono", Files.readString(destino));
+        assertEquals(0, s3.chamadas(), "colisao nao e blip: nao gasta chamada ao MinIO nem repeticao");
+    }
+
+    /**
+     * A corrida que um teste de existencia antes da abertura nao fecha: outro dono cria o destino
+     * no instante em que a transferencia vai comecar — na primeira chamada e depois de cada limpeza.
+     * O dublê tenta esse {@code CREATE_NEW} antes de entregar os bytes; se conseguir, a operacao
+     * ainda nao tinha tomado posse do caminho, e o transformador apagaria o arquivo alheio.
+     */
+    @Test
+    void posseDoDestinoETomadaAntesDeCadaChamada() throws Exception {
+        var destino = Files.createTempDirectory("t102").resolve("original.mp4");
+        var alheioCriado = new AtomicBoolean();
+        var s3 = new S3QueFalhaDepoisDeEscrever(2, Map.of("chave/original.mp4", destino));
+        s3.antesDaTransferencia = caminho -> {
+            try {
+                Files.writeString(caminho, "arquivo de outro dono", StandardOpenOption.CREATE_NEW);
+                alheioCriado.set(true);
+            } catch (FileAlreadyExistsException esperado) {
+                // o caminho ja e da operacao
+            } catch (IOException erro) {
+                throw new UncheckedIOException(erro);
+            }
+        };
+
+        clienteCom(s3).baixar("videos", "chave/original.mp4", destino).toCompletableFuture().get(10, SECONDS);
+
+        assertFalse(alheioCriado.get(), "outro dono conseguiu criar o destino no meio da operacao");
+        assertEquals("inicio-chave/original.mp4-fim", Files.readString(destino));
+        assertEquals(3, s3.chamadas());
+    }
+
+    /**
+     * A limpeza falha de forma deterministica, sem depender de permissao que {@code root} ignora:
+     * depois dos bytes em disco, o dublê troca o parcial por um diretorio nao vazio no mesmo
+     * caminho, e {@code Files.delete} recusa diretorio nao vazio para qualquer usuario.
+     */
+    @Test
+    void falhaNaLimpezaInterrompeODownloadComAsDuasFalhas() throws Exception {
+        var destino = Files.createTempDirectory("t102").resolve("original.mp4");
+        var s3 = new S3QueFalhaDepoisDeEscrever(SEMPRE, Map.of("chave/original.mp4", destino));
+        s3.depoisDaEscrita = caminho -> {
+            try {
+                Files.delete(caminho);
+                Files.createFile(Files.createDirectory(caminho).resolve("impede-a-limpeza"));
+            } catch (IOException erro) {
+                throw new UncheckedIOException(erro);
+            }
+        };
+
+        var falha = assertThrows(ExecutionException.class,
+                () -> clienteCom(s3).baixar("videos", "chave/original.mp4", destino).toCompletableFuture().get(10, SECONDS));
+
+        var interrupcao = assertInstanceOf(ArquivoMinioClient.LimpezaDoParcialFalhouException.class, falha.getCause());
+        assertEquals("conexao caiu no meio do corpo", interrupcao.falhaDaTransferencia().getMessage());
+        assertInstanceOf(DirectoryNotEmptyException.class, interrupcao.falhaDaLimpeza());
+        assertEquals(1, s3.chamadas(), "estado local invalido nao pode ser repetido");
+    }
+
+    @Test
+    void downloadsEmEspacosDiferentesNaoInterferemEntreSi() throws Exception {
+        var destinoA = Files.createTempDirectory("t102").resolve("original.mp4");
+        var destinoB = Files.createTempDirectory("t102").resolve("original.mp4");
+        var s3 = new S3QueFalhaDepoisDeEscrever(2, Map.of("a/original.mp4", destinoA, "b/original.mp4", destinoB));
+        var cliente = clienteCom(s3);
+
+        // Executor proprio, e nao o common pool: na suite inteira as threads dele herdam o
+        // classloader de um @QuarkusTest anterior, e o Mutiny recusa a propria extensao de
+        // contexto carregada por ele (ServiceConfigurationError "not a subtype").
+        try (var threads = Executors.newFixedThreadPool(2)) {
+            var a = CompletableFuture.supplyAsync(() -> cliente.baixar("videos", "a/original.mp4", destinoA), threads)
+                    .thenCompose(f -> f);
+            var b = CompletableFuture.supplyAsync(() -> cliente.baixar("videos", "b/original.mp4", destinoB), threads)
+                    .thenCompose(f -> f);
+
+            assertEquals(destinoA, a.get(10, SECONDS));
+            assertEquals(destinoB, b.get(10, SECONDS));
+        }
+        assertEquals("inicio-a/original.mp4-fim", Files.readString(destinoA));
+        assertEquals("inicio-b/original.mp4-fim", Files.readString(destinoB));
     }
 
     private static ArquivoMinioClient clienteCom(S3AsyncClient s3) {
@@ -159,6 +306,89 @@ class RepeticaoNoMinioTest {
 
         private static SdkClientException inalcancavel() {
             return SdkClientException.create("MinIO inalcancavel nesta chamada");
+        }
+
+        @Override
+        public String serviceName() {
+            return SERVICE_NAME;
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    /**
+     * O blip que o dublê anterior nao alcanca: a chamada chega ao transformador <b>real</b> do SDK,
+     * que abre o destino e grava o comeco do corpo; o dublê espera esses bytes ficarem visiveis no
+     * disco e so entao derruba o stream com {@link IOException}. As chamadas seguintes as
+     * {@code falhasIniciais} entregam o corpo inteiro. O corpo leva a chave, para que dois downloads
+     * simultaneos denunciem troca de conteudo entre destinos.
+     */
+    private static class S3QueFalhaDepoisDeEscrever implements S3AsyncClient {
+
+        private static final String PREFIXO = "inicio-";
+
+        private final int falhasIniciais;
+        private final Map<String, Path> destinos;
+        private final Map<String, AtomicInteger> chamadasPorChave = new ConcurrentHashMap<>();
+        private final AtomicInteger chamadas = new AtomicInteger();
+        private final AtomicInteger escritasObservadas = new AtomicInteger();
+        private volatile Consumer<Path> antesDaTransferencia = caminho -> { };
+        private volatile Consumer<Path> depoisDaEscrita = caminho -> { };
+
+        private S3QueFalhaDepoisDeEscrever(int falhasIniciais, Map<String, Path> destinos) {
+            this.falhasIniciais = falhasIniciais;
+            this.destinos = destinos;
+        }
+
+        private int chamadas() {
+            return chamadas.get();
+        }
+
+        private int escritasObservadas() {
+            return escritasObservadas.get();
+        }
+
+        @Override
+        public <T> CompletableFuture<T> getObject(
+                GetObjectRequest requisicao, AsyncResponseTransformer<GetObjectResponse, T> transformador) {
+            chamadas.incrementAndGet();
+            var chave = requisicao.key();
+            var destino = destinos.get(chave);
+            var falhar = chamadasPorChave.computeIfAbsent(chave, k -> new AtomicInteger()).incrementAndGet() <= falhasIniciais;
+            antesDaTransferencia.accept(destino);
+
+            var corpo = (PREFIXO + chave + "-fim").getBytes(StandardCharsets.UTF_8);
+            var resultado = transformador.prepare();
+            transformador.onResponse(GetObjectResponse.builder().contentLength((long) corpo.length).build());
+            var bytes = new SimplePublisher<ByteBuffer>();
+            transformador.onStream(SdkPublisher.adapt(bytes));
+            if (!falhar) {
+                bytes.send(ByteBuffer.wrap(corpo));
+                bytes.complete();
+                return resultado;
+            }
+            bytes.send(ByteBuffer.wrap(PREFIXO.getBytes(StandardCharsets.UTF_8)));
+            esperarBytesEmDisco(destino, PREFIXO.length());
+            escritasObservadas.incrementAndGet();
+            depoisDaEscrita.accept(destino);
+            bytes.error(new IOException("conexao caiu no meio do corpo"));
+            return resultado;
+        }
+
+        private static void esperarBytesEmDisco(Path destino, long quantos) {
+            var limite = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+            try {
+                while (!(Files.isRegularFile(destino) && Files.size(destino) >= quantos)) {
+                    if (System.nanoTime() > limite) {
+                        throw new AssertionError("os bytes nunca apareceram em " + destino);
+                    }
+                    Thread.onSpinWait();
+                }
+            } catch (IOException erro) {
+                throw new UncheckedIOException(erro);
+            }
         }
 
         @Override

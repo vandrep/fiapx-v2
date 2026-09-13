@@ -4,15 +4,22 @@ import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import software.amazon.awssdk.core.FileTransformerConfiguration;
+import software.amazon.awssdk.core.FileTransformerConfiguration.FailureBehavior;
+import software.amazon.awssdk.core.FileTransformerConfiguration.FileWriteOption;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
+import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Predicate;
 
 /**
  * As duas idas ao MinIO com a retentativa do ADR 0001, isoladas do
@@ -53,12 +60,9 @@ import java.util.concurrent.CompletionStage;
  * remove e o desvio pelo contexto Vert.x: o {@code Uni} repete na propria cadeia, sem
  * reagendar nada em fila de ninguem.
  *
- * <p>Um limite herdado, e que continua igual: em {@link #baixar}, cada resubscricao refaz o
- * {@code AsyncResponseTransformer.toFile(destino)}, que recusa arquivo existente. Um blip que
- * chegue <b>depois</b> de a escrita comecar queima as repeticoes com
- * {@code FileAlreadyExistsException} em vez de baixar de novo. O {@code @Retry} reinvocava o
- * metodo inteiro e fazia exatamente o mesmo; nao e regressao desta mudanca, e nao foi
- * corrigido aqui para nao misturar duas coisas no mesmo commit.
+ * <p>O que o download faz com o arquivo local entre uma chamada e outra — posse do destino,
+ * descarte do parcial e o que acontece quando o descarte falha — esta em {@link #baixar}
+ * (ticket 102).
  *
  * <p>O motivo original de este bean ser separado do adapter — self-invocation nao dispara
  * interceptor de CDI — morreu junto com o interceptor. A separacao fica porque continua
@@ -80,6 +84,17 @@ public class ArquivoMinioClient {
      * 200 ms; sobre uma espera reduzida dao proporcionalmente menos.
      */
     private static final double JITTER = 0.1;
+    /**
+     * O destino ja foi criado por {@link Files#createFile} na mesma chamada, entao
+     * {@code CREATE_OR_REPLACE_EXISTING} escreve sobre o caminho que esta operacao acabou de
+     * tomar. {@code LEAVE} existe por causa da falha na limpeza, e nao da posse: a exclusao do SDK
+     * so loga quando falha, e a desta classe precisa interromper o download. Deixar as duas ligadas
+     * seria limpar duas vezes. Ver {@link #baixar}.
+     */
+    private static final FileTransformerConfiguration SOBRE_O_PROPRIO_ARQUIVO = FileTransformerConfiguration.builder()
+            .fileWriteOption(FileWriteOption.CREATE_OR_REPLACE_EXISTING)
+            .failureBehavior(FailureBehavior.LEAVE)
+            .build();
 
     @Inject
     S3AsyncClient s3;
@@ -99,12 +114,74 @@ public class ArquivoMinioClient {
     @ConfigProperty(name = "fiapx.armazenamento.espera-entre-repeticoes", defaultValue = "2s")
     Duration esperaEntreRepeticoes;
 
+    /**
+     * Cada chamada ao recurso baixa o objeto inteiro de novo, do zero, sobre um arquivo que ela
+     * mesma acabou de criar; nao ha retomada por posicao (ticket 102).
+     *
+     * <p><b>O que o SDK ja fazia, medido no 2.41.18.</b> O {@code toFile(destino)} padrao abre com
+     * {@code CREATE_NEW} e, em qualquer falha, apaga o destino. Um blip depois de bytes em disco
+     * deixava o caminho livre, e a repeticao seguinte baixava de novo sem problema — o comentario
+     * antigo, que dizia que ela queimava as repeticoes com {@code FileAlreadyExistsException},
+     * estava errado. Dois buracos continuavam abertos, e sao eles que este metodo fecha:
+     *
+     * <ol>
+     * <li><b>posse.</b> A exclusao do SDK nao olha quem criou o arquivo: se a abertura falha porque
+     *     o destino ja existia, ele apaga o arquivo alheio. Aqui a posse e tomada por
+     *     {@link Files#createFile}, que e atomico ({@code O_EXCL}) — nao um teste de existencia
+     *     seguido de abertura. Colisao falha na hora, sem repetir e sem apagar nada; o
+     *     transformador so escreve sobre o arquivo ja criado por esta chamada, com
+     *     {@code FailureBehavior.LEAVE}, e o descarte e desta classe;</li>
+     * <li><b>falha na limpeza.</b> O SDK apaga por {@code runAndLogError}: se a exclusao falha,
+     *     vira log e a repeticao segue sobre estado local desconhecido. Aqui ela interrompe o
+     *     download com {@link LimpezaDoParcialFalhouException}, que carrega as duas falhas e nao e
+     *     repetida. Nesse caso nao ha promessa de remocao: a limpeza do espaco da tentativa e a
+     *     varredura de orfaos do {@link EspacoDeTrabalhoAdapter} continuam valendo.</li>
+     * </ol>
+     *
+     * <p>A limpeza entre chamadas e ao esgotar as repeticoes e a mesma: toda chamada que falha
+     * descarta o proprio parcial antes de a falha chegar a {@link #comRepeticao}. Sucesso deixa
+     * o arquivo completo no destino.
+     *
+     * <p><b>O limite da posse.</b> Ela vale pelo caminho, e nao pelo arquivo: quem apagasse o
+     * parcial e criasse outro no mesmo caminho entre o {@code createFile} e a abertura, ou antes do
+     * descarte, teria o arquivo truncado ou apagado. So esta operacao escreve no diretorio
+     * exclusivo da tentativa ({@link EspacoDeTrabalhoAdapter#prepararNovo}); a guarda cobre o
+     * arquivo que ja estava ali e o que aparece no instante da criacao, nao troca deliberada.
+     */
     public CompletionStage<Path> baixar(String bucket, String chave, Path destino) {
         var requisicao = GetObjectRequest.builder().bucket(bucket).key(chave).build();
-        return comRepeticao(Uni.createFrom()
-                .completionStage(() -> s3.getObject(requisicao, AsyncResponseTransformer.toFile(destino)))
-                .map(resposta -> destino))
+        return comRepeticao(Uni.createFrom().deferred(() -> umDownload(requisicao, destino)), ArquivoMinioClient::eBlipDoDownload)
                 .subscribeAsCompletionStage();
+    }
+
+    /**
+     * Colisao no destino e limpeza que falhou nao sao blip: repetir da o mesmo resultado, e no
+     * segundo caso sobre estado local desconhecido.
+     */
+    private static boolean eBlipDoDownload(Throwable falha) {
+        return !(falha instanceof FileAlreadyExistsException || falha instanceof LimpezaDoParcialFalhouException);
+    }
+
+    private Uni<Path> umDownload(GetObjectRequest requisicao, Path destino) {
+        try {
+            Files.createFile(destino);
+        } catch (IOException colisaoOuFalhaAoCriar) {
+            return Uni.createFrom().failure(colisaoOuFalhaAoCriar);
+        }
+        return Uni.createFrom()
+                .completionStage(() -> s3.getObject(requisicao, AsyncResponseTransformer.toFile(destino, SOBRE_O_PROPRIO_ARQUIVO)))
+                .map(resposta -> destino)
+                .onFailure().recoverWithUni(falha -> descartarParcial(destino, falha));
+    }
+
+    private static Uni<Path> descartarParcial(Path parcial, Throwable falhaDaTransferencia) {
+        try {
+            Files.deleteIfExists(parcial);
+            return Uni.createFrom().failure(falhaDaTransferencia);
+        } catch (IOException falhaDaLimpeza) {
+            return Uni.createFrom().failure(
+                    new LimpezaDoParcialFalhouException(parcial, falhaDaTransferencia, falhaDaLimpeza));
+        }
     }
 
     public CompletionStage<Void> gravar(String bucket, String chave, Path origem) {
@@ -135,9 +212,41 @@ public class ArquivoMinioClient {
      * — a chamada que nao volta — era o travamento daquele ticket.
      */
     private <T> Uni<T> comRepeticao(Uni<T> chamada) {
-        return chamada.onFailure(Exception.class::isInstance).retry()
+        return comRepeticao(chamada, falha -> true);
+    }
+
+    /**
+     * A mesma repeticao, com um filtro a mais que e so do download (ticket 102), e nao parte comum
+     * das copias: ver {@link #eBlipDoDownload}.
+     */
+    private <T> Uni<T> comRepeticao(Uni<T> chamada, Predicate<Throwable> repetivel) {
+        return chamada.onFailure(falha -> falha instanceof Exception && repetivel.test(falha)).retry()
                 .withBackOff(esperaEntreRepeticoes, esperaEntreRepeticoes)
                 .withJitter(JITTER)
                 .atMost(MAXIMO_DE_REPETICOES);
+    }
+
+    /**
+     * O download parou porque o parcial de uma chamada que falhou nao pode ser descartado. A causa
+     * e a falha da transferencia; a da limpeza vem em {@link #falhaDaLimpeza} e tambem como
+     * suprimida, para aparecer no stack trace de quem so loga.
+     */
+    public static final class LimpezaDoParcialFalhouException extends IOException {
+
+        private final Throwable falhaDaLimpeza;
+
+        LimpezaDoParcialFalhouException(Path parcial, Throwable falhaDaTransferencia, Throwable falhaDaLimpeza) {
+            super("download interrompido: nao consegui descartar o parcial " + parcial, falhaDaTransferencia);
+            this.falhaDaLimpeza = falhaDaLimpeza;
+            addSuppressed(falhaDaLimpeza);
+        }
+
+        public Throwable falhaDaTransferencia() {
+            return getCause();
+        }
+
+        public Throwable falhaDaLimpeza() {
+            return falhaDaLimpeza;
+        }
     }
 }

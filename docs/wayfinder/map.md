@@ -1414,6 +1414,19 @@ verificadas por teste, não são sugestão). Projeto original em
   esconde), e por isso o passo 12 do `smoke.sh` passou a contar: o Grafana lista exatamente o
   painel curado e os dois linkados no topo dele.
 
+- [Posse do arquivo no download do Vídeo e limpeza dos
+  parciais](tickets/102-posse-do-arquivo-no-download-e-limpeza-dos-parciais.md) — a premissa foi
+  **desmentida por medição**: no SDK 2.41.18 um blip depois de bytes em disco já baixava de novo com
+  conteúdo exato, porque o `toFile` apaga o destino na falha. O comentário que dizia o contrário
+  saiu. O defeito real era outro, em dois pedaços: essa exclusão não olha quem criou o arquivo
+  (apaga o destino preexistente) e, quando falha, só vira log. Cada chamada ao recurso agora toma
+  posse do destino por `Files.createFile` atômico, o SDK escreve com `LEAVE` e o descarte do parcial
+  é do `ArquivoMinioClient`. Colisão falha sem repetir e sem apagar; falha ao descartar interrompe
+  com as duas falhas em `LimpezaDoParcialFalhouException`. A política do ADR 0001 é a mesma, e o
+  filtro que exclui esses dois casos é só do download — divergência registrada no `AGENTS.md`. A
+  posse vale pelo caminho, não pelo arquivo: troca deliberada dentro do diretório exclusivo da
+  tentativa fica fora da guarda.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

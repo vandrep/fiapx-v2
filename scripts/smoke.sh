@@ -27,7 +27,9 @@
 # e a parte que envelhece primeiro, e envelhecer, aqui, e mostrar "No data" e nao quebrar nada.
 # Ele tambem confere ONDE o painel mora (ticket 099): a pasta que ele divide com os tres alertas
 # e casada por titulo entre dois arquivos de provisionamento, e uma divergencia ali nao levanta
-# erro nenhum — o Grafana cria a segunda pasta calado.
+# erro nenhum — o Grafana cria a segunda pasta calado. E confere QUANTOS dashboards o Grafana
+# lista (ticket 101): o repositorio agora escolhe os de fabrica, e escolha assim erra calada nos
+# dois sentidos — o morto que volta no upgrade e o novo que o override esconde.
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -408,7 +410,7 @@ until curl -sf "$grafana_url/api/health" > /dev/null 2>&1; do
 done
 
 # O painel e a home: abrir localhost:3000 cai nele sem navegar. Sem isso ele e mais um item
-# numa lista de quatro, e o avaliador abre o RED por engano.
+# numa lista de tres (eram quatro ate o ticket 101), e o avaliador abre o RED por engano.
 home="$(curl -sS "$grafana_url/api/dashboards/home" | jq -r '.redirectUri // empty' || true)"
 [[ "$home" == *infraestrutura* ]] \
     || falha "a home do Grafana é '$home', e não o painel de infraestrutura"
@@ -456,16 +458,39 @@ ok "os três datasources do painel existem: prometheus, loki, tempo"
 # quem os mantem muda sozinho no upgrade da imagem. Link morto RENDERIZA COMO LINK NORMAL: e a
 # mesma mentira silenciosa que este passo existe para pegar, e vale ainda mais aqui, porque e
 # do lado de la deste link que moram o HTTP e a JVM que o painel deliberadamente nao repete.
+uids_linkados="$(jq -r '.links[]? | select(.url != null) | .url | ltrimstr("/d/")' "$painel" || true)"
 links=0
 while read -r uid_link; do
     [[ -n "$uid_link" ]] || continue
     links=$(( links + 1 ))
     curl -sf "$grafana_url/api/dashboards/uid/$uid_link" > /dev/null \
         || falha "o painel linka para o dashboard '$uid_link', que não existe nesta imagem"
-done <<< "$(jq -r '.links[]? | select(.url != null) | .url | ltrimstr("/d/")' "$painel" || true)"
+done <<< "$uids_linkados"
 (( links == 2 )) \
     || falha "o painel deveria linkar os dois dashboards de fábrica do 091, e linka $links"
 ok "os $links links para os dashboards de fábrica resolvem"
+
+# E o Grafana nao lista NADA alem desses tres — o curado e os dois linkados (ticket 101). O
+# `grafana-dashboards.yaml` da imagem provisionava um terceiro de fabrica, o *RED Metrics (native
+# histogram)*, que respondia "No data" sobre um sistema saudavel porque consulta histograma nativo
+# contra um exportador classico; o 101 o tirou da lista, sobrescrevendo aquele arquivo por
+# `docker/observabilidade/grafana-dashboards.yaml`. Essa subtracao mente em silencio dos DOIS
+# lados, e por isso esta guarda conta em vez de procurar o que sumiu: o upgrade da imagem
+# reintroduz o dashboard morto para quem esquecer de rederivar o arquivo, e um dashboard de
+# fabrica NOVO — que o override tambem esconde — nunca apareceria na tela. Nos dois casos a demo
+# fica plausivel, e e aqui que a conta nao fecha.
+dashboards_esperados=$(( links + 1 ))
+uids_do_repositorio="$(jq -r '.uid' "$painel"; printf '%s\n' "$uids_linkados")"
+uids_no_grafana="$(curl -sS "$grafana_url/api/search?type=dash-db" | jq -r '.[].uid' || true)"
+listados="$(grep -c . <<< "$uids_no_grafana")"
+(( listados == dashboards_esperados )) \
+    || falha "o Grafana lista $listados dashboards, e não os $dashboards_esperados que este repositório provisiona"
+while read -r uid_listado; do
+    [[ -n "$uid_listado" ]] || continue
+    grep -qx "$uid_listado" <<< "$uids_do_repositorio" \
+        || falha "o Grafana lista o dashboard '$uid_listado', que não é o curado nem está linkado no topo dele"
+done <<< "$uids_no_grafana"
+ok "o Grafana lista exatamente os $dashboards_esperados dashboards do repositório, sem o RED native"
 
 # As variaveis do painel nao chegam ate aqui resolvidas — resolve-las e o trabalho do browser.
 # `$servico` vira o `allValue` LIDO DO ARQUIVO, e `$idVideo` vira o Video que CONCLUIU: e o

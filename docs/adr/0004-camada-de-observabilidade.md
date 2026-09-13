@@ -260,7 +260,9 @@ remove o bean `Meter` e derruba o build do `extracao`, pela mesma
 
 ## Os três dashboards de fábrica, e o que cada um responde
 
-A imagem `grafana/otel-lgtm` **provisiona três dashboards sozinha**, e este documento os ignorou
+A imagem `grafana/otel-lgtm` **traz três dashboards sozinha** — dois deles provisionados desde o
+[ticket 101](../wayfinder/tickets/101-mediana-no-quantil-da-extracao-e-o-red-native-que-ninguem-le.md),
+que tirou o terceiro da lista; o parágrafo depois da tabela diz como. Este documento os ignorou
 até o [ticket 091](../wayfinder/tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md)
 — a camada foi registrada como se a exploração ad-hoc no *Explore* fosse a única superfície de
 leitura. Não era: havia três telas na home do Grafana, e as três respondiam *"No data"* sobre um
@@ -270,7 +272,19 @@ sistema saudável.
 |---|---|---|
 | *RED Metrics (classic histogram)* | **sim** | taxa e duração do HTTP dos três serviços |
 | *JVM Overview (OpenTelemetry)* | **sim** | heap, threads, classes e GC, uma série por container; o `Error %` dele é HTTP, e vazio em ciclo saudável |
-| *RED Metrics (native histogram)* | **não** | consulta histograma nativo; o Quarkus exporta clássico |
+| *RED Metrics (native histogram)* | **não** | consulta histograma nativo; o Quarkus exporta clássico — e **desde o [ticket 101](../wayfinder/tickets/101-mediana-no-quantil-da-extracao-e-o-red-native-que-ninguem-le.md) ele não é mais provisionado** |
+
+O 091 deixou o terceiro de pé como fato conhecido, e o 101 o tirou da lista: um dashboard que
+responde *"No data"* inteiro sobre um sistema saudável é a mesma mentira silenciosa que aquele
+ticket perseguiu, e numa demo de dez minutos ninguém sabe qual das três telas é a morta. O que
+mudou foi a **lista**, não o JSON: `docker/observabilidade/grafana-dashboards.yaml` é derivado do
+homônimo da imagem menos um provider, e sobrescrevê-lo custa 500 bytes de YAML a rederivar no
+upgrade — duas ordens de grandeza abaixo dos 15,9 kB de JSON que este documento recusou
+sobrescrever quatro vezes, e o mesmo preço que o `otelcol-config.yaml` já paga. O motivo
+estrutural não mudou e não foi consertado: histograma nativo contra exportador clássico.
+Escolher a lista à mão erra calado nos dois sentidos — o dashboard morto voltando num upgrade sem
+rederivação, e um dashboard de fábrica novo que o override esconderia —, e quem conta é o passo 12
+do `scripts/smoke.sh`: o Grafana lista exatamente o painel curado e os dois linkados no topo dele.
 
 Os painéis de **erro** dos dois que servem — o `Error Rate` do *RED classic* e o `Error %` do
 *JVM Overview* — são os únicos que continuam podendo aparecer vazios, e isso não é defeito: os
@@ -524,5 +538,10 @@ Três decisões de forma que o arquivo carrega, e o porquê de cada uma:
   onde nada mais fala dela. A segunda medição do 092 continua de pé e moldou a expressão do
   painel: quantil sobre `rate()` devolve `NaN` no volume da demo, porque numa janela sem Extração
   nenhuma todos os buckets rendem zero — então o painel consulta o **contador acumulado**, e o
-  que se lê é o p95/p99 desde que a réplica subiu, não o da janela do gráfico. O corte por
-  `resultado` — que é o ponto da métrica — sobrevive inteiro nas duas leituras.
+  que se lê são os quantis desde que a réplica subiu, não os da janela do gráfico. O corte por
+  `resultado` — que é o ponto da métrica — sobrevive inteiro nas duas leituras. O
+  [ticket 101](../wayfinder/tickets/101-mediana-no-quantil-da-extracao-e-o-red-native-que-ninguem-le.md)
+  acrescentou a **p50** ao lado da p95 e da p99, e ela não repete a média: as duas juntas é que
+  dizem se a cauda está puxando o número. Nesta população isso não é hipótese — a moda é a recusa
+  do ffprobe, ~0,05 s, e a cauda é Extração de vídeo grande —, e média bem acima da mediana é
+  exatamente o caso em que a "duração típica" da média não é a de Extração nenhuma.

@@ -6,9 +6,13 @@
 # unico que a imagem traz la (`sample.yaml`) esta inteiro comentado. Dai o custo de dois
 # mounts para um painel: este arquivo e o JSON que ele aponta.
 #
-# O `grafana-dashboards.yaml` da imagem, que provisiona os tres dashboards de fabrica, nao e
-# tocado: um provider a mais convive com ele, e sobrescreve-lo custaria rederivar aquele
-# arquivo a cada upgrade (o mesmo preco que o `otelcol-config.yaml` ja paga).
+# Este arquivo e um provider A MAIS, e convive com o `grafana-dashboards.yaml` da imagem, que
+# provisiona os dashboards de fabrica. Ate o ticket 101 aquele arquivo NAO era tocado, e o
+# comentario daqui dizia isso; o ticket 101 passou a sobrescreve-lo, por
+# `docker/observabilidade/grafana-dashboards.yaml`, para tirar da lista o *RED Metrics (native
+# histogram)* — que e dashboard morto contra um exportador de histograma classico. Sao dois
+# arquivos com papeis distintos: aqui mora o provider do painel NOSSO, la a lista dos de
+# fabrica, com a instrucao de rederivar no upgrade.
 #
 # `allowUiUpdates: false` e `disableDeletion: true` deixam o arquivo ser a verdade: o painel
 # volta ao versionado a cada boot, e ninguem o apaga por engano no meio da demo. O ganho e o

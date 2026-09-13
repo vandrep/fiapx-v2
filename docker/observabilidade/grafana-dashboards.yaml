@@ -1,0 +1,34 @@
+# Provider dos dashboards de FABRICA, derivado do arquivo homonimo da imagem
+# `grafana/otel-lgtm:0.32.1` (`/otel-lgtm/grafana/conf/provisioning/dashboards/grafana-dashboards.yaml`)
+# com uma UNICA subtracao: o provider do *RED Metrics (native histogram)* nao esta aqui
+# (ticket 101) — a imagem o nomeia `"RED Metrics (exponential/native histogram)"`, e o
+# repositorio inteiro o chama pelo nome curto, que e o do 091 e o do ADR 0004. Ele provisionava
+# um dashboard morto — consulta histograma NATIVO
+# (`http_server_request_duration_seconds` sem sufixo) e o Quarkus exporta CLASSICO
+# (`_bucket`/`_count`/`_sum`) —, e um dashboard que responde "No data" sobre um sistema saudavel
+# custa mais do avaliador do que paga. O 091 o deixou de pe como fato conhecido; o 101 o tira da
+# lista, porque nao ha leitor para ele.
+#
+# Isto REVERTE o "o `grafana-dashboards.yaml` da imagem nao e tocado" do `dashboards.yaml` ao
+# lado. O preco e o mesmo que o `otelcol-config.yaml` ja paga, e e por isso que ele cabe:
+# **no upgrade da imagem, rederive este arquivo do dela e reaplique a subtracao** — sao 500
+# bytes de YAML, contra os 15,9 kB de JSON que o ADR 0004 recusou sobrescrever quatro vezes.
+# Consequencia direta da mesma escolha: dashboard de fabrica NOVO que a imagem venha a trazer
+# nao aparece ate alguem rederivar. Quem avisa e o passo 12 do `scripts/smoke.sh`, que reprova
+# quando o Grafana lista dashboard que nem e o curado nem esta linkado no topo dele.
+#
+# O JSON dos dois que ficam continua intocado — o que se sobrescreve aqui e a LISTA, nao o
+# conteudo de nenhum dashboard.
+apiVersion: 1
+
+providers:
+  - name: "RED Metrics (classic histogram)"
+    type: file
+    options:
+      path: /otel-lgtm/grafana-dashboard-red-metrics-classic.json
+      foldersFromFilesStructure: false
+  - name: "JVM Metrics"
+    type: file
+    options:
+      path: /otel-lgtm/grafana-dashboard-jvm-metrics.json
+      foldersFromFilesStructure: false

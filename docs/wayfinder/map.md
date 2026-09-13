@@ -1397,6 +1397,23 @@ verificadas por teste, não são sugestão). Projeto original em
   o que a demo abre e ficou com guarda própria no passo 12 do `smoke.sh`, vista vermelha antes de
   verde.
 
+- [A mediana no quantil da Extração, e o *RED native* que ninguém
+  lê](tickets/101-mediana-no-quantil-da-extracao-e-o-red-native-que-ninguem-le.md) — duas mudanças
+  de tela, e a segunda é **reversão de decisão registrada**. A p50 entra ao lado da p95 e da p99
+  no painel curado, e não repete a média que está no painel acima: média bem acima da mediana é a
+  cauda puxando o número, e nesta população — moda na recusa do ffprobe (~0,05 s), cauda em vídeo
+  grande — é o caso provável, não hipótese. A segunda tira o *RED Metrics (native histogram)* da
+  lista de dashboards: o [091](tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md)
+  o deixou de pé como *fato conhecido* e o ADR 0004 registrou o **não** dele numa tabela, mas
+  decidir não **consertá-lo** (histograma nativo contra exportador clássico, o que exigiria mudar
+  os três exportadores) não é decidir mantê-lo na tela. Cai também o *"o `grafana-dashboards.yaml`
+  da imagem não é tocado"* do `dashboards.yaml`: o override são **500 bytes** de YAML a rederivar
+  no upgrade, contra os 15,9 kB de JSON que o ADR recusou sobrescrever quatro vezes — mesmo tipo
+  de custo, duas ordens de grandeza menor. Escolher a lista de dashboards à mão erra calado nos
+  dois sentidos (o morto que volta num upgrade sem rederivação, o de fábrica novo que o override
+  esconde), e por isso o passo 12 do `smoke.sh` passou a contar: o Grafana lista exatamente o
+  painel curado e os dois linkados no topo dele.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

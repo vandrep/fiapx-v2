@@ -143,9 +143,14 @@ services:
       # subdiretorio `fiapx/`, onde o JSON entra.
       - ./docker/observabilidade/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/dashboards.yaml:ro
       - ./docker/observabilidade/painel-infraestrutura.json:/otel-lgtm/grafana/conf/provisioning/dashboards/fiapx/painel-infraestrutura.json:ro
+      # Este SOBRESCREVE o arquivo homonimo da imagem — o segundo mount daqui a fazer isso, ao
+      # lado do `otelcol-config.yaml` acima. E a lista dos providers de FABRICA, menos o do
+      # *RED Metrics (native histogram)* (ticket 101). No upgrade da imagem, rederive-o do dela;
+      # o cabecalho do proprio arquivo diz como, e por que o preco cabe.
+      - ./docker/observabilidade/grafana-dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/grafana-dashboards.yaml:ro
     environment:
-      # Sem isto o painel e mais um item numa lista de quatro, e quem abre localhost:3000 cai
-      # na home de fabrica do Grafana — ou abre o RED por engano. O caminho e o do arquivo
+      # Sem isto o painel e mais um item numa lista de tres (eram quatro ate o ticket 101), e
+      # quem abre localhost:3000 cai na home de fabrica do Grafana — ou abre o RED por engano. O caminho e o do arquivo
       # montado acima, e nao o uid: esta variavel le dashboard do disco.
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /otel-lgtm/grafana/conf/provisioning/dashboards/fiapx/painel-infraestrutura.json
     # `test -f /tmp/ready`, e nao um `wget` na porta do Grafana: a imagem nao traz `wget` nem

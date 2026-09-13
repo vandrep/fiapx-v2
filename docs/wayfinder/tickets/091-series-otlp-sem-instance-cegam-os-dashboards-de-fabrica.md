@@ -178,3 +178,5 @@ coletor — nenhum processador as alcança. Não afetam os três dashboards, que
 *RED Metrics (native histogram)* segue morto, como o corpo do ticket previu, e por motivo
 estrutural: histograma nativo contra um exportador clássico. Registrado no ADR como fato
 conhecido, não como pendência.
+
+*Revertido em parte pelo [ticket 101](101-mediana-no-quantil-da-extracao-e-o-red-native-que-ninguem-le.md): o RED Metrics (native histogram) deixou de ser provisionado — o motivo estrutural continua o mesmo, o que mudou foi ele sair da lista.*

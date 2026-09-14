@@ -249,7 +249,7 @@ Os dois requisitos que não aparecem numa demonstração. Ambos têm mecanismo, 
 | Serviço | Escala | Por quê |
 |---|---|---|
 | `extracao` | réplicas, **linear até 6 réplicas nesta máquina** | sem estado, `max-outstanding-messages=1` — cada réplica pega **uma** extração por vez e só volta à fila quando termina. *Competing consumers* puro. **Medido** ([ticket 026](wayfinder/tickets/026-linearidade-horizontal.md)): eficiência de escala 0,99 / 0,90 / 0,88 em 2 / 4 / 6 réplicas, de 2,96 para 15,6 Vídeo/min. Acima disso é desconhecido — os 20 núcleos do host já estavam a 77% |
-| `videos` | réplicas atrás de um proxy L7 | o estado está no Postgres, não em memória; a transição é `UPDATE` condicional, então duas réplicas processando a mesma mensagem chegam ao mesmo resultado. **Medido** ([ticket 028](wayfinder/tickets/028-escala-da-borda.md)): com N=3 atrás de um proxy, a mediana de latência do `202` cai **5,5×** (630→114 ms) sob 400 conexões simultâneas contra N=1; matar uma réplica durante a rajada custou **39 recusados de 400 (9,75%)**, contra 361/400 (90,25%) com réplica única — não chega a zero porque o proxy recusa, por padrão, reencaminhar um `POST` (não-idempotente) para outra réplica depois de a conexão falhar, para não arriscar duplicar o Vídeo |
+| `videos` | réplicas atrás de um proxy L7 | o estado está no Postgres, não em memória; a transição é `UPDATE` condicional, então duas réplicas processando a mesma mensagem chegam ao mesmo resultado. **Medido** ([ticket 028](wayfinder/tickets/028-escala-da-borda.md)): com N=3 atrás de um proxy, a mediana de latência do `202` cai **5,5×** (630→114 ms) sob 400 conexões simultâneas contra N=1; matar uma réplica durante a rajada custou **39 envios sem `202` de 400 (9,75%)**, contra 361/400 (90,25%) com réplica única — não chega a zero porque o proxy recusa, por padrão, reencaminhar um `POST` (não-idempotente) para outra réplica depois de a conexão falhar, para não arriscar duplicar o Vídeo |
 | `notificacao` | réplicas | idempotente por construção — a unicidade mora na transição de estado do `videos`, não aqui |
 
 O `prefetch=1` do `extracao` é a escolha central: extração de vídeo é limitada por CPU e
@@ -355,7 +355,7 @@ Três coisas a medição **não** mostrou, e que valem tanto quanto o que ela mo
   demonstração só é possível depois de corrigidos os dois primeiros defeitos, que envenenam
   justamente o cenário que a exercitaria. *Resolvido no ticket 027: a varredura passou a
   registrar o que republica, e foi observada fazendo-o.*
-- **A borda é réplica única, e derrubá-la perde envio.** Nessa mesma rodada, 361 dos 400 envios
+- **A borda é réplica única, e derrubá-la derruba envios.** Nessa mesma rodada, 361 dos 400 envios
   não chegaram a ser aceitos — 239 timeouts de conexão, 53 EOF, 46 conexões resetadas, 22
   recusadas. O critério de "zero não-`202`" foi dispensado ali de propósito, porque a queda era
   provocada; o número fica registrado assim mesmo, porque a garantia do enunciado não distingue
@@ -443,13 +443,16 @@ pontos) porque quem limita o dreno é o `extracao`, não o `videos` — a répli
 alivia o aceite, não tem o que acelerar depois dele.
 
 A segunda — **matar uma réplica de N custa zero requisição, como o desenho promete?** — quase:
-**39 recusados de 400 (9,75%)**, contra **361 de 400 (90,25%)** com a réplica única do
+**39 envios sem `202` de 400 (9,75%)**, contra **361 de 400 (90,25%)** com a réplica única do
 [ticket 025](wayfinder/tickets/025-carga-conservacao.md). Os 39 são todos `502` — nenhum
 timeout, EOF ou conexão recusada — e a causa é uma regra deliberada do nginx, não um defeito:
 ele recusa reencaminhar um `POST` (não-idempotente) para outra réplica depois que a conexão com
 a réplica morta já falhou esperando resposta, porque ela pode já ter completado o efeito
 colateral (linha gravada, ZIP no bucket) antes de morrer — reencaminhar arriscaria duplicar o
-Vídeo. O parâmetro que destravaria isso (`non_idempotent`) não foi ligado: fecharia a lacuna às
+Vídeo. Nenhum dos 39 é *Vídeo perdido* ([`CONTEXT.md`](../CONTEXT.md)) nem recusa explícita: um
+`502` não diz ao cliente se o envio foi aceito. Ou não foi, ou foi, e então a linha existe e a
+varredura do [ADR 0003](adr/0003-reconciliacao-por-varredura.md) o leva a desfecho. A rodada não
+conferiu esse segundo caso: o portão de zero presos olhou só os 361 envios com `202`. O parâmetro que destravaria isso (`non_idempotent`) não foi ligado: fecharia a lacuna às
 custas desse risco, e o endpoint `/videos` não tem hoje chave de idempotência que o absorva.
 Fica registrado como candidato não implementado, não como conserto pendente.
 
@@ -469,7 +472,7 @@ Fica registrado como candidato não implementado, não como conserto pendente.
 | Requisito | Como é atendido | Onde |
 |---|---|---|
 | Processar mais de um vídeo ao mesmo tempo | *competing consumers* no `extracao`, `prefetch=1`, réplicas independentes — e a stack padrão sobe **duas**, então o requisito é demonstrável sem overlay: `./scripts/concorrencia.sh` envia a rajada e reprova se nunca houver duas extrações no mesmo instante (ticket 049) | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
-| Não perder requisição em pico | Lido como nenhum *Vídeo perdido* ([`CONTEXT.md`](../CONTEXT.md)). `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit` com dead-lettering *at-least-once* (ticket 103), reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada. O aceite é o commit da linha, não o publish (104); o original só expira depois do desfecho (105); Vídeo preso é detectado pelo estado (106) e resgatado pela marca (107); sem capacidade, a borda recusa com `503` antes do corpo, e recusa não é Vídeo perdido (108). Os 39 `502` com uma réplica da borda derrubada (ticket 028) também não são Vídeo perdido: ou o envio não foi aceito, ou foi e chegou a desfecho, porque a rodada terminou com zero presos. Fora do modelo de falha: perda de volume, cota por Dono e idempotência do envio — *Limitações conhecidas* | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
+| Não perder requisição em pico | Lido como nenhum *Vídeo perdido* ([`CONTEXT.md`](../CONTEXT.md)). `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit` com dead-lettering *at-least-once* (ticket 103), reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada. O aceite é o commit da linha, não o publish (104); o original só expira depois do desfecho (105); Vídeo preso é detectado pelo estado (106) e resgatado pela marca (107); sem capacidade, a borda recusa com `503` antes do corpo, e recusa não é Vídeo perdido (108). Os 39 `502` com uma réplica da borda derrubada (ticket 028) também não são Vídeo perdido: ou o envio não foi aceito, ou foi e a varredura o leva a desfecho, o que a rodada não conferiu. Fora do modelo de falha: perda de volume, cota por Dono e idempotência do envio — *Limitações conhecidas* | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
 | Protegido por usuário e senha | Keycloak, OIDC *bearer-only*; o dono vem do `sub` do token | [pesquisa](pesquisa/oidc-keycloak.md) |
 | Listagem de status dos vídeos do usuário | `GET /videos` paginado, escopado pelo dono; não existe consulta sem dono na interface do gateway | [contrato HTTP](contratos/http-videos.md) |
 | Notificar o usuário em caso de erro | `VideoFalhou` → `notificacao` → SMTP; unicidade garantida pela transição de estado | [ADR 0001](adr/0001-politica-de-falhas.md) |
@@ -534,7 +537,7 @@ O que eu não defendo — apenas aceitei.
   [ticket 028](wayfinder/tickets/028-escala-da-borda.md) mediu N=3 réplicas atrás de um proxy
   no overlay de carga (não no `docker-compose.yml` da demo, que segue com uma só, porque
   escalar a borda exige o proxy na frente da porta publicada): matar uma
-  durante a rajada caiu de 361/400 recusados para **39/400 (9,75%)** — melhor por 9,3×, mas não
+  durante a rajada caiu de 361/400 envios sem `202` para **39/400 (9,75%)** — melhor por 9,3×, mas não
   zero, porque o proxy recusa reencaminhar um `POST` para outra réplica depois que a conexão já
   falhou esperando resposta, para não arriscar duplicar o Vídeo. A varredura do
   [ADR 0003](adr/0003-reconciliacao-por-varredura.md), essa **já foi vista funcionando**: ela

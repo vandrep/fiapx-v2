@@ -69,3 +69,19 @@ da borda e o critério "chegou a desfecho", no lugar de "aparece na listagem", s
 **Fora.** § *Escalar* e § *quarta medição* ainda chamam os 39 de "recusados". É vocabulário da
 medição, do lado do cliente, e não foi reescrito. Pelo glossário, "recusa" é explícita, e um `502`
 não é.
+
+## Correção (109)
+
+Pedido do mantenedor em 2026-09-14, logo depois do fechamento.
+
+**Os "recusados" que ficaram em *Fora* foram alinhados.** § *Escalar*, § *quarta medição* e a
+limitação da borda passaram a dizer "envios sem `202`", tanto para os 39 do 028 quanto para os 361
+do 025. Os 361 também não eram recusa explícita: eram timeouts, EOF e resets. O item do 025 em
+§ *O que a medição mostrou* trocou "derrubá-la perde envio" por "derrubá-la derruba envios". §
+*quarta medição* ganhou uma frase dizendo por que os 39 não são Vídeo perdido nem recusa.
+
+**Erro de fato na Resolução.** Ela dizia que os 39 `502` que tinham sido aceitos chegaram a desfecho
+"porque a rodada terminou com zero presos". O portão de zero presos do 028 olhou só os 361 envios
+com `202` (`docs/pesquisa/carga-escala-borda.md` § 5). Um `502` cujo `INSERT` tenha sido commitado
+chega a desfecho pela varredura do ADR 0003, mas a rodada não conferiu isso. A tabela de requisitos
+e § *quarta medição* agora dizem exatamente isso.

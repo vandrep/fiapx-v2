@@ -1514,8 +1514,8 @@ verificadas por teste, não são sugestão). Projeto original em
   replica. Falta de cota por Dono, que é equidade e não conservação. `POST /videos` sem
   idempotência: o reenvio depois de uma conexão caída pode duplicar o Vídeo, e duplicar não é
   perder. A linha "Não perder requisição em pico" da tabela de requisitos passou a se ler pelo termo
-  do glossário e a citar 103–108. Nela e no título da limitação da borda, os 39 `502` do 028
-  deixaram de ser chamados de perda; a tabela de § *O que impede a perda* deixou de chamar a fila
+  do glossário e a citar 103–108. Em todo o documento, os 39 `502` do 028 deixaram de ser
+  chamados de perda ou de recusa, e viraram envios sem `202`; a tabela de § *O que impede a perda* deixou de chamar a fila
   de replicada.
 
 ## Ainda não especificado

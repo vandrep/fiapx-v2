@@ -143,6 +143,59 @@ class EnviarVideoUseCaseTest {
     }
 
     @Test
+    void insertQueFalhaApagaOOriginalOrfao() {
+        videos.falhaAoAdicionar = new IllegalStateException("Postgres fora");
+
+        assertThrows(CompletionException.class, () -> useCase.executar(comando("ferias.mp4", "video/mp4")).join());
+
+        assertEquals(List.of(), arquivos.originais, "sem linha, o objeto nao teria dono nem desfecho");
+    }
+
+    @Test
+    void insertAmbiguoQueCommitouNaoApagaOOriginal() {
+        // Ticket 105: a chamada falhou, mas a linha existe — a varredura do ADR 0003 vai
+        // publicar o comando dela. Apagar aqui seria Video perdido na terceira forma; deixar
+        // e, no pior caso, vazamento.
+        videos.falhaAoAdicionar = new IllegalStateException("conexao caiu depois do COMMIT");
+        videos.commitaAntesDeFalhar = true;
+
+        assertThrows(CompletionException.class, () -> useCase.executar(comando("ferias.mp4", "video/mp4")).join());
+
+        assertEquals(1, arquivos.originais.size());
+    }
+
+    @Test
+    void semConfirmarQueALinhaNaoExisteOOriginalFica() {
+        videos.falhaAoAdicionar = new IllegalStateException("Postgres fora");
+        videos.falhaAoBuscar = new IllegalStateException("Postgres ainda fora");
+
+        var falha = assertThrows(CompletionException.class,
+                () -> useCase.executar(comando("ferias.mp4", "video/mp4")).join());
+
+        assertEquals("Postgres fora", falha.getCause().getMessage(), "a falha do envio e a do INSERT");
+        assertEquals(1, arquivos.originais.size());
+    }
+
+    @Test
+    void limpezaQueFalhaNaoTrocaAFalhaDoEnvio() {
+        videos.falhaAoAdicionar = new IllegalStateException("Postgres fora");
+        arquivos.falhaAoApagar = new IllegalStateException("MinIO fora");
+
+        var falha = assertThrows(CompletionException.class,
+                () -> useCase.executar(comando("ferias.mp4", "video/mp4")).join());
+
+        assertEquals("Postgres fora", falha.getCause().getMessage());
+        assertNull(presenter.recebido);
+    }
+
+    @Test
+    void oEnvioNaoMarcaODesfechoDoOriginal() {
+        useCase.executar(comando("ferias.mp4", "video/mp4")).join();
+
+        assertEquals(List.of(), arquivos.originaisComDesfecho);
+    }
+
+    @Test
     void formatoRecusadoNaoTocaArmazenamentoNemBanco() {
         assertThrows(FormatoNaoSuportadoException.class,
                 () -> useCase.executar(comando("relatorio.pdf", "application/pdf")));

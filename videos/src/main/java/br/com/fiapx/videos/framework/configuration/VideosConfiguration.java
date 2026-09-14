@@ -74,11 +74,12 @@ public class VideosConfiguration {
 
     @Produces
     ExtracaoEventosController extracaoEventosController(VideoGateway videoGateway,
+                                                        ArquivoGateway arquivoGateway,
                                                         PublicarVideoFalhou publicarVideoFalhou) {
         return new ExtracaoEventosController(
                 new ProcessarExtracaoIniciadaUseCase(videoGateway),
-                new ProcessarExtracaoConcluidaUseCase(videoGateway),
-                new ProcessarExtracaoFalhouUseCase(videoGateway, publicarVideoFalhou));
+                new ProcessarExtracaoConcluidaUseCase(videoGateway, arquivoGateway),
+                new ProcessarExtracaoFalhouUseCase(videoGateway, arquivoGateway, publicarVideoFalhou));
     }
 
     @Produces

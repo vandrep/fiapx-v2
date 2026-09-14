@@ -8,6 +8,7 @@ import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
@@ -32,13 +33,18 @@ import java.util.concurrent.Flow;
  * {@code @Retry}: o interceptor reagendava a chamada no contexto Vert.x do chamador e podia
  * prende-la la para sempre — ver o javadoc de la.
  *
- * <p>As duas idas ao MinIO ganham span (ticket 059): a extensao da AWS traz a instrumentacao do
- * SDK, mas nenhum span de S3 chegou ao Tempo num ciclo completo de Video, e sem estes dois o
+ * <p>A retencao do original tambem pousa aqui (ticket 105): o bucket {@code videos} so expira o
+ * que carrega a tag {@link #TAG_DO_DESFECHO}, gravada quando o Video chega a um estado terminal.
+ *
+ * <p>As idas ao MinIO ganham span (ticket 059): a extensao da AWS traz a instrumentacao do
+ * SDK, mas nenhum span de S3 chegou ao Tempo num ciclo completo de Video, e sem o da gravacao o
  * upload de um Video de 200 MB era um vao mudo dentro do span do POST. O span cobre a operacao
  * inteira, retentativas incluidas — que e o que interessa a quem investiga.
  */
 @ApplicationScoped
 public class ArquivoMinioAdapter implements ArquivoGateway {
+
+    private static final Logger LOG = Logger.getLogger(ArquivoMinioAdapter.class);
 
     @Inject
     ArquivoMinioClient minioClient;
@@ -58,6 +64,34 @@ public class ArquivoMinioAdapter implements ArquivoGateway {
         return rastro.emTorno("videos.gravar-video", () -> noContextoDeChamada(Uni.createFrom()
                 .completionStage(() -> minioClient.gravar(bucketVideos, chave, arquivo))
                 .replaceWith(chave)));
+    }
+
+    /**
+     * A tag que a regra de ciclo de vida do bucket {@code videos} filtra
+     * ({@code docker/minio/seed.sh}). Os dois lados tem de dizer o mesmo par, e nada no build
+     * os amarra: quem confere e o {@code smoke.sh}.
+     */
+    static final String TAG_DO_DESFECHO = "desfecho";
+    static final String VALOR_DO_DESFECHO = "sim";
+
+    /**
+     * A falha fica registrada aqui porque o {@code core} a engole (ticket 105): o original sem
+     * marca nao expira nunca, e esta linha e o unico rastro do vazamento.
+     */
+    @Override
+    public CompletableFuture<Void> marcarDesfechoDoOriginal(String chaveVideo) {
+        return rastro.emTorno("videos.marcar-desfecho-do-original", () -> noContextoDeChamada(Uni.createFrom()
+                .completionStage(() -> minioClient.marcarComTag(bucketVideos, chaveVideo, TAG_DO_DESFECHO, VALOR_DO_DESFECHO))
+                .onFailure().invoke(falha -> LOG.warnf(falha,
+                        "Original sem a marca do desfecho, nao vai expirar: chaveVideo=%s", chaveVideo))));
+    }
+
+    @Override
+    public CompletableFuture<Void> apagarOriginal(String chaveVideo) {
+        return rastro.emTorno("videos.apagar-original", () -> noContextoDeChamada(Uni.createFrom()
+                .completionStage(() -> minioClient.apagar(bucketVideos, chaveVideo))
+                .onFailure().invoke(falha -> LOG.warnf(falha,
+                        "Original sem linha nao foi apagado, nao vai expirar: chaveVideo=%s", chaveVideo))));
     }
 
     @Override

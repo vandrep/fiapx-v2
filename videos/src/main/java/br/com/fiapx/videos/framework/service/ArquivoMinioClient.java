@@ -8,9 +8,13 @@ import org.reactivestreams.FlowAdapters;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectTaggingRequest;
+import software.amazon.awssdk.services.s3.model.Tag;
+import software.amazon.awssdk.services.s3.model.Tagging;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
@@ -21,7 +25,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Flow;
 
 /**
- * As duas chamadas ao MinIO com a retentativa do ADR 0001, isoladas num bean proprio — o
+ * As chamadas ao MinIO com a retentativa do ADR 0001, isoladas num bean proprio — o
  * mesmo desenho que o `extracao` e o `notificacao` usam.
  *
  * <p>A retentativa e do Mutiny, e nao do {@code @Retry} do SmallRye Fault Tolerance: o
@@ -77,6 +81,30 @@ public class ArquivoMinioClient {
         var requisicao = PutObjectRequest.builder().bucket(bucket).key(chave).build();
         return comRepeticao(Uni.createFrom()
                 .completionStage(() -> s3.putObject(requisicao, AsyncRequestBody.fromFile(arquivo)))
+                .replaceWithVoid())
+                .subscribeAsCompletionStage();
+    }
+
+    /**
+     * Substitui o conjunto inteiro de tags do objeto por esta uma — a API S3 nao acrescenta tag,
+     * so troca o conjunto. Nenhum objeto deste servico carrega outra tag, entao trocar e
+     * acrescentar dao no mesmo.
+     */
+    public CompletionStage<Void> marcarComTag(String bucket, String chave, String tag, String valor) {
+        var requisicao = PutObjectTaggingRequest.builder().bucket(bucket).key(chave)
+                .tagging(Tagging.builder().tagSet(Tag.builder().key(tag).value(valor).build()).build())
+                .build();
+        return comRepeticao(Uni.createFrom()
+                .completionStage(() -> s3.putObjectTagging(requisicao))
+                .replaceWithVoid())
+                .subscribeAsCompletionStage();
+    }
+
+    /** Apagar chave que nao existe e sucesso na API S3, entao repetir e seguro. */
+    public CompletionStage<Void> apagar(String bucket, String chave) {
+        var requisicao = DeleteObjectRequest.builder().bucket(bucket).key(chave).build();
+        return comRepeticao(Uni.createFrom()
+                .completionStage(() -> s3.deleteObject(requisicao))
                 .replaceWithVoid())
                 .subscribeAsCompletionStage();
     }

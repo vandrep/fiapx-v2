@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,13 +19,15 @@ class ProcessarExtracaoConcluidaUseCaseTest {
     private static final Dono DONO = new Dono("sub-1", "usuario@exemplo.com");
 
     private GatewaysEmMemoria.Videos videos;
+    private GatewaysEmMemoria.Arquivos arquivos;
     private ProcessarExtracaoConcluidaUseCase useCase;
     private Video video;
 
     @BeforeEach
     void montar() {
         videos = new GatewaysEmMemoria.Videos();
-        useCase = new ProcessarExtracaoConcluidaUseCase(videos);
+        arquivos = new GatewaysEmMemoria.Arquivos();
+        useCase = new ProcessarExtracaoConcluidaUseCase(videos, arquivos);
         video = Video.novo("ferias.mp4", 1_024L, DONO).armazenadoEm("id/original.mp4");
         video.marcaComoIniciada();
         videos.armazenados.put(video.id(), video);
@@ -101,5 +104,37 @@ class ProcessarExtracaoConcluidaUseCaseTest {
         useCase.executar(comando).join();
 
         assertEquals(EstadoVideo.CONCLUIDO, video.estado());
+    }
+
+    @Test
+    void oConcluidoMarcaODesfechoDoOriginal() {
+        useCase.executar(new ProcessarExtracaoConcluidaUseCase.Command(
+                video.id(), new ResultadoExtracao(Instant.now(), video.id() + ".zip", 1_200, 4_096L))).join();
+
+        assertEquals(List.of("id/original.mp4"), arquivos.originaisComDesfecho);
+    }
+
+    @Test
+    void marcacaoQueFalhaNaoDesfazNemSeguraOConcluido() {
+        // Ticket 105: a transicao e o que o Dono observa; a marca so decide quando o original
+        // pode expirar. Sem marca, ele fica — vazamento, nao perda.
+        arquivos.falhaAoMarcar = new IllegalStateException("MinIO fora");
+
+        useCase.executar(new ProcessarExtracaoConcluidaUseCase.Command(
+                video.id(), new ResultadoExtracao(Instant.now(), video.id() + ".zip", 1_200, 4_096L))).join();
+
+        assertEquals(EstadoVideo.CONCLUIDO, video.estado());
+    }
+
+    @Test
+    void quemPerdeACorridaParaOutroTerminalAindaMarcaODesfecho() {
+        // A linha ficou terminal do mesmo jeito, so que por outra entrega. Marcar de novo e
+        // idempotente, e tapa o buraco se a entrega vencedora caiu entre o UPDATE e a marca.
+        videos.outraEntregaVenceACorridaPara(video.id(), EstadoVideo.FALHOU);
+
+        useCase.executar(new ProcessarExtracaoConcluidaUseCase.Command(
+                video.id(), new ResultadoExtracao(Instant.now(), video.id() + ".zip", 1_200, 4_096L))).join();
+
+        assertEquals(List.of("id/original.mp4"), arquivos.originaisComDesfecho);
     }
 }

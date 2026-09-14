@@ -8,10 +8,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * A guarda de unicidade do e-mail (ADR 0001): tres entregas do mesmo {@code ExtracaoFalhou}
@@ -24,6 +28,7 @@ class ProcessarExtracaoFalhouUseCaseTest {
 
     private GatewaysEmMemoria.Videos videos;
     private GatewaysEmMemoria.NotificacaoEnvios notificacao;
+    private GatewaysEmMemoria.Arquivos arquivos;
     private ProcessarExtracaoFalhouUseCase useCase;
     private Video video;
 
@@ -31,7 +36,8 @@ class ProcessarExtracaoFalhouUseCaseTest {
     void montar() {
         videos = new GatewaysEmMemoria.Videos();
         notificacao = new GatewaysEmMemoria.NotificacaoEnvios();
-        useCase = new ProcessarExtracaoFalhouUseCase(videos, new PublicarVideoFalhou(notificacao, videos));
+        arquivos = new GatewaysEmMemoria.Arquivos();
+        useCase = new ProcessarExtracaoFalhouUseCase(videos, arquivos, new PublicarVideoFalhou(notificacao, videos));
 
         video = Video.novo("ferias.mp4", 1_024L, DONO).armazenadoEm("id/original.mp4");
         video.marcaComoIniciada();
@@ -103,5 +109,62 @@ class ProcessarExtracaoFalhouUseCaseTest {
         useCase.executar(comando).join();
 
         assertEquals(0, notificacao.idsEnviados.size());
+    }
+
+    @Test
+    void oFalhouMarcaODesfechoDoOriginal() {
+        useCase.executar(new ProcessarExtracaoFalhouUseCase.Command(
+                video.id(), MotivoFalha.ARQUIVO_INVALIDO, Instant.now())).join();
+
+        assertEquals(List.of("id/original.mp4"), arquivos.originaisComDesfecho);
+    }
+
+    @Test
+    void marcacaoQueFalhaNaoSeguraOFalhouNemOAviso() {
+        arquivos.falhaAoMarcar = new IllegalStateException("MinIO fora");
+
+        useCase.executar(new ProcessarExtracaoFalhouUseCase.Command(
+                video.id(), MotivoFalha.ARQUIVO_INVALIDO, Instant.now())).join();
+
+        assertEquals(EstadoVideo.FALHOU, video.estado());
+        assertEquals(List.of(video.id()), notificacao.idsEnviados);
+        assertNotNull(videos.falhaPublicadaEm.get(video.id()));
+    }
+
+    @Test
+    void oAvisoNaoEsperaAMarca() {
+        // Com o MinIO fora, a marca gasta as repeticoes do ADR 0001. O aviso ao Dono sai antes.
+        arquivos.marcaSegurada = new CompletableFuture<>();
+
+        var processando = useCase.executar(new ProcessarExtracaoFalhouUseCase.Command(
+                video.id(), MotivoFalha.ARQUIVO_INVALIDO, Instant.now()));
+
+        assertEquals(List.of(video.id()), notificacao.idsEnviados);
+        arquivos.marcaSegurada.complete(null);
+        processando.join();
+    }
+
+    @Test
+    void avisoQueFalhaAindaMarcaODesfechoEVoltaAFila() {
+        // O UPDATE ja gravou FALHOU: a reentrega nao marcaria de novo, entao a marca vem mesmo
+        // assim. O aviso fica com a varredura do ADR 0003, e a falha continua subindo.
+        notificacao.falhaNoEnvio = new IllegalStateException("broker fora");
+
+        assertThrows(CompletionException.class, () -> useCase.executar(new ProcessarExtracaoFalhouUseCase.Command(
+                video.id(), MotivoFalha.ARQUIVO_INVALIDO, Instant.now())).join());
+
+        assertEquals(List.of("id/original.mp4"), arquivos.originaisComDesfecho);
+        assertNull(videos.falhaPublicadaEm.get(video.id()));
+    }
+
+    @Test
+    void quemPerdeACorridaParaOutroTerminalAindaMarcaODesfecho() {
+        videos.outraEntregaVenceACorridaPara(video.id(), EstadoVideo.CONCLUIDO);
+
+        useCase.executar(new ProcessarExtracaoFalhouUseCase.Command(
+                video.id(), MotivoFalha.ARQUIVO_INVALIDO, Instant.now())).join();
+
+        assertEquals(List.of("id/original.mp4"), arquivos.originaisComDesfecho);
+        assertEquals(List.of(), notificacao.idsEnviados);
     }
 }

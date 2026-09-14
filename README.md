@@ -216,7 +216,9 @@ prova de que o arquivo é vídeo mora no `extracao`, que a obtém do `ffmpeg`.
 Upload até **200 MB** e vídeo até **20 minutos**. A duração é cobrada no `extracao`, onde o
 `ffprobe` já roda — então um vídeo longo demais é aceito com `202` e só depois vira `FALHOU`
 com `DURACAO_EXCEDIDA`, por e-mail. Formatos: `mp4`, `avi`, `mov`, `mkv`, `webm`. O Pacote
-expira em 7 dias por regra de ciclo de vida do MinIO.
+expira em 7 dias por regra de ciclo de vida do MinIO. O arquivo enviado fica guardado enquanto o
+Vídeo não tiver desfecho, e só depois disso pode expirar
+([ADR 0005](docs/adr/0005-retencao-do-original.md)).
 
 ## Desenvolver
 

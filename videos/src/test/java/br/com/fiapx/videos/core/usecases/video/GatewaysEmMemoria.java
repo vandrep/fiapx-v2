@@ -50,6 +50,12 @@ final class GatewaysEmMemoria {
         final List<Instant> cortesDeFalhas = new ArrayList<>();
         private final Map<UUID, EstadoVideo> corridasArmadas = new LinkedHashMap<>();
         RuntimeException falhaAoAdicionar;
+        /**
+         * O {@code INSERT} ambiguo: a linha fica commitada e mesmo assim a chamada falha, como
+         * a conexao que cai depois do {@code COMMIT} chegar ao servidor.
+         */
+        boolean commitaAntesDeFalhar;
+        RuntimeException falhaAoBuscar;
 
         /**
          * Arma a corrida perdida deste Video: assim que a leitura dele acontecer, outra
@@ -64,6 +70,9 @@ final class GatewaysEmMemoria {
         @Override
         public CompletableFuture<Void> adicionar(Video video) {
             if (falhaAoAdicionar != null) {
+                if (commitaAntesDeFalhar) {
+                    armazenados.put(video.id(), video);
+                }
                 return CompletableFuture.failedFuture(falhaAoAdicionar);
             }
             armazenados.put(video.id(), video);
@@ -86,6 +95,9 @@ final class GatewaysEmMemoria {
          */
         @Override
         public CompletableFuture<Optional<Video>> buscarPorId(UUID id) {
+            if (falhaAoBuscar != null) {
+                return CompletableFuture.failedFuture(falhaAoBuscar);
+            }
             var lido = Optional.ofNullable(armazenados.get(id)).map(Videos::copia);
             var destinoDaCorrida = corridasArmadas.remove(id);
             if (destinoDaCorrida != null) {
@@ -242,6 +254,7 @@ final class GatewaysEmMemoria {
         String ultimoNomeArquivo;
         MotivoFalha ultimoMotivo;
         Instant ultimoOcorridoEm;
+        RuntimeException falhaNoEnvio;
 
         @Override
         public CompletableFuture<Void> enviarVideoFalhou(UUID idVideo,
@@ -254,6 +267,9 @@ final class GatewaysEmMemoria {
             ultimoNomeArquivo = nomeArquivoOriginal;
             ultimoMotivo = motivo;
             ultimoOcorridoEm = ocorridoEm;
+            if (falhaNoEnvio != null) {
+                return CompletableFuture.failedFuture(falhaNoEnvio);
+            }
             return CompletableFuture.completedFuture(null);
         }
     }
@@ -261,8 +277,14 @@ final class GatewaysEmMemoria {
     static final class Arquivos implements ArquivoGateway {
 
         final Map<String, Flow.Publisher<ByteBuffer>> pacotes = new LinkedHashMap<>();
+        final List<String> originais = new ArrayList<>();
+        final List<String> originaisComDesfecho = new ArrayList<>();
         Path ultimoArquivoGravado;
         RuntimeException falhaAoGravar;
+        RuntimeException falhaAoMarcar;
+        RuntimeException falhaAoApagar;
+        /** A marca que nao volta: o MinIO fora, com as repeticoes ainda em curso. */
+        CompletableFuture<Void> marcaSegurada;
 
         @Override
         public CompletableFuture<String> gravarVideo(UUID idVideo, String nome, Path arquivo) {
@@ -270,7 +292,30 @@ final class GatewaysEmMemoria {
                 return CompletableFuture.failedFuture(falhaAoGravar);
             }
             ultimoArquivoGravado = arquivo;
-            return CompletableFuture.completedFuture(idVideo + "/original.mp4");
+            var chave = idVideo + "/original.mp4";
+            originais.add(chave);
+            return CompletableFuture.completedFuture(chave);
+        }
+
+        @Override
+        public CompletableFuture<Void> marcarDesfechoDoOriginal(String chaveVideo) {
+            if (falhaAoMarcar != null) {
+                return CompletableFuture.failedFuture(falhaAoMarcar);
+            }
+            originaisComDesfecho.add(chaveVideo);
+            if (marcaSegurada != null) {
+                return marcaSegurada;
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> apagarOriginal(String chaveVideo) {
+            if (falhaAoApagar != null) {
+                return CompletableFuture.failedFuture(falhaAoApagar);
+            }
+            originais.remove(chaveVideo);
+            return CompletableFuture.completedFuture(null);
         }
 
         @Override

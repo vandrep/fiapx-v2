@@ -30,6 +30,9 @@
 # erro nenhum — o Grafana cria a segunda pasta calado. E confere QUANTOS dashboards o Grafana
 # lista (ticket 101): o repositorio agora escolhe os de fabrica, e escolha assim erra calada nos
 # dois sentidos — o morto que volta no upgrade e o novo que o override esconde.
+#
+# O passo 13 e do ticket 105 e julga a retencao do original: a regra de ciclo de vida que o seed
+# aplicou ao MinIO e a marca que o `videos` grava no desfecho, que precisam dizer o mesmo par.
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -667,6 +670,50 @@ while IFS=$'\037' read -r titulo refid uid consulta; do
 done <<< "$consultas"
 (( travessias > 0 )) || falha "nenhuma query de trace lida de $painel; o estado de idVideo vazio ficou sem guarda"
 ok "a tabela de trace lista as travessias recentes sem o idVideo preenchido"
+
+# ---------------------------------------------------------------------------------------
+passo "13. O original só expira depois do desfecho"
+
+# Ticket 105, ADR 0005. A regra de ciclo de vida conta dias, e o MinIO nao tem como adiantar o
+# relogio: um prazo que venca dentro desta execucao nao existe. O que se julga e a regra que o
+# seed aplicou e a marca que ela le. O que esta sob guarda e a costura entre os dois lados, que
+# nada no build amarra: a tag vem da regra, e nao de um literal aqui, e so passa se o `videos`
+# gravou exatamente ela nos originais dos dois terminais deste smoke.
+mc_local() {
+    docker compose run --rm --no-deps -T --entrypoint /bin/sh minio-seed -c \
+        "mc alias set local http://minio:9000 \"\$MINIO_ROOT_USER\" \"\$MINIO_ROOT_PASSWORD\" >/dev/null && $1" \
+        2> "$trabalho/mc.log"
+}
+
+regra_videos="$(mc_local 'mc ilm export local/videos')" \
+    || { cat "$trabalho/mc.log" >&2; falha "nao consegui ler a regra de ciclo de vida do bucket videos"; }
+# Uma regra so, e com filtro: qualquer regra sem filtro ao lado dela expiraria o original de um
+# Video preso, que e o defeito do ticket. Por isso a contagem, e nao "existe uma com tag".
+jq -e '.Rules | length == 1 and .[0].Status == "Enabled" and .[0].Expiration.Days == 7
+        and (.[0].Filter.Tag.Key | type) == "string"' <<< "$regra_videos" > /dev/null \
+    || falha "bucket videos deveria ter uma regra so, filtrada por tag, de 7 dias; tem: $regra_videos"
+tag_chave="$(jq -r '.Rules[0].Filter.Tag.Key' <<< "$regra_videos")"
+tag_valor="$(jq -r '.Rules[0].Filter.Tag.Value' <<< "$regra_videos")"
+ok "bucket videos: expira em 7 dias só o que tem $tag_chave=$tag_valor; original sem a marca nunca expira"
+
+regra_pacotes="$(mc_local 'mc ilm export local/pacotes')" \
+    || { cat "$trabalho/mc.log" >&2; falha "nao consegui ler a regra de ciclo de vida do bucket pacotes"; }
+jq -e '.Rules | length == 1 and .[0].Status == "Enabled" and .[0].Expiration.Days == 7
+        and (.[0].Filter.Tag == null)' <<< "$regra_pacotes" > /dev/null \
+    || falha "bucket pacotes deveria ter uma regra so, sem filtro, de 7 dias; tem: $regra_pacotes"
+ok "bucket pacotes: expira em 7 dias, sem filtro (inalterado)"
+
+for par in "CONCLUIDO:$id" "FALHOU:$id_falha"; do
+    estado_alvo="${par%%:*}"; id_alvo="${par#*:}"
+    chave="$(docker compose exec -T postgres psql -U fiapx -d fiapx_videos -tAc \
+        "select chave_video from video where id = '$id_alvo'")"
+    [[ -n "$chave" ]] || falha "nao achei a chave do original do Video $id_alvo no Postgres"
+    marcas="$(mc_local "mc tag list --json local/videos/$chave")" \
+        || { cat "$trabalho/mc.log" >&2; falha "nao consegui ler as tags de videos/$chave"; }
+    [[ "$(jq -r --arg k "$tag_chave" '.tagset[$k] // empty' <<< "$marcas")" == "$tag_valor" ]] \
+        || falha "original do Video $estado_alvo ($chave) sem a marca $tag_chave=$tag_valor; tem: $marcas"
+    ok "original do Video $estado_alvo marcado: $chave"
+done
 
 # ---------------------------------------------------------------------------------------
 echo

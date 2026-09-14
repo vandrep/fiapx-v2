@@ -198,3 +198,5 @@ deliberadamente não enumera códigos — só afirma que motivo é código, nunc
   `fiapx-extracao-scratch` (em `extracao`, `/var/fiapx/extracao`), este com folga de **4 GB**.
 - Seed do MinIO cria **dois** buckets, `videos` e `pacotes`.
 - Regra de ciclo de vida de **7 dias** nos dois buckets.
+
+*Retenção do original revertida em parte pelo [ticket 105](105-original-so-expira-depois-do-desfecho.md): no bucket `videos`, só expira o original de Vídeo com desfecho.*

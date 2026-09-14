@@ -252,7 +252,8 @@ class VideoDataSourceAdapterTest {
     void confirmacaoDeEventoRapidoEnxergaOVideoEProduzFalha(UniAsserter asserter) {
         var arquivo = new ArquivoGatewayDeTeste();
         NotificacaoSender notificacao = (id, dono, nome, motivo, ocorridoEm) -> CompletableFuture.completedFuture(null);
-        var processarFalha = new ProcessarExtracaoFalhouUseCase(adapter, new PublicarVideoFalhou(notificacao, adapter));
+        var processarFalha = new ProcessarExtracaoFalhouUseCase(adapter, arquivo,
+                new PublicarVideoFalhou(notificacao, adapter));
         ExtracaoSender extracao = (id, chaveVideo, chaveDestinoPacote) -> adapter.buscarPorId(id)
                 .thenCompose(encontrado -> {
                     assertTrue(encontrado.isPresent(),
@@ -343,6 +344,16 @@ class VideoDataSourceAdapterTest {
         @Override
         public CompletableFuture<String> gravarVideo(UUID idVideo, String nome, Path arquivo) {
             return CompletableFuture.completedFuture(idVideo + "/original.mp4");
+        }
+
+        @Override
+        public CompletableFuture<Void> marcarDesfechoDoOriginal(String chaveVideo) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> apagarOriginal(String chaveVideo) {
+            return CompletableFuture.completedFuture(null);
         }
 
         @Override

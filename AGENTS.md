@@ -30,6 +30,7 @@ O resto do contexto está atrás de ponteiros, cada um com o seu gatilho:
 | tocar em transição de estado do Vídeo | [ADR 0002](docs/adr/0002-maquina-de-estados-em-duas-camadas.md) |
 | tocar em publicação de comando ou de falha no `videos` | [ADR 0003](docs/adr/0003-reconciliacao-por-varredura.md) |
 | tocar em span, métrica, log estruturado ou na stack de observabilidade | [ADR 0004](docs/adr/0004-camada-de-observabilidade.md) — e § Nomes na observabilidade, abaixo |
+| tocar em retenção do MinIO, no `seed.sh` ou em quem grava e apaga o original | [ADR 0005](docs/adr/0005-retencao-do-original.md) |
 
 ## Layout
 

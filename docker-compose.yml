@@ -53,8 +53,8 @@ services:
       timeout: 5s
       retries: 20
 
-  # One-shot: cria os buckets `videos`/`pacotes` e a regra de retencao de 7 dias
-  # (ticket 011). Os tres servicos de negocio so sobem depois dele terminar.
+  # One-shot: cria os buckets `videos`/`pacotes` e a retencao de cada um (ticket 011).
+  # No `videos`, so o original com desfecho expira (ticket 105, ADR 0005). Os tres servicos de negocio so sobem depois dele terminar.
   minio-seed:
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:

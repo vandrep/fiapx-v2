@@ -148,6 +148,9 @@ verificadas por teste, não são sugestão). Projeto original em
   código**: o original **não** é apagado após sucesso, ao contrário do `main.go`. Volumes
   nomeados para o `uploads-directory` e para o scratch do `extracao`, que orça **4 GB** e
   limpa em duas camadas, porque ali o worker morre no meio por desenho
+  *Revertido em parte pelo [ticket 105](tickets/105-original-so-expira-depois-do-desfecho.md): no
+  bucket `videos` só expira o original marcado no desfecho, e a retenção deixou de ser zero
+  código. A do `pacotes` vale.*
 
 - [Transactional outbox no videos, ou conviver com o Vídeo órfão](tickets/018-outbox-transacional.md)
   — **nem uma coisa nem outra: a tabela `video` é o outbox**. Duas colunas marcadoras
@@ -1458,6 +1461,17 @@ verificadas por teste, não são sugestão). Projeto original em
   `VideosResource` agora devolve a continuação ao contexto Vert.x, pelo mesmo helper
   (`framework/vertx/ContextoDeChamada`) que o adapter do MinIO já usava em cópia própria. Emenda no
   ADR 0003 e seção nova no contrato HTTP.
+
+- [O original só expira depois do
+  desfecho](tickets/105-original-so-expira-depois-do-desfecho.md) — reverte em parte a retenção
+  do 011. O `videos` grava a tag `desfecho=sim` no original quando o Vídeo chega a `CONCLUIDO`
+  ou `FALHOU`, e a regra do bucket `videos` expira só o que tem a tag. Original sem tag nunca
+  expira, e é isso que torna um Vídeo preso recuperável. A marca não reverte nem segura a
+  transição: se falhar, sobra objeto, nenhum Vídeo se perde. O envio que falha no `INSERT` apaga
+  o original **só depois de confirmar que a linha não existe**, porque o `INSERT` pode falhar
+  depois de commitar, e aí apagar seria perder o Vídeo. O seed trocou `mc ilm rule add`, que
+  acumulava uma regra por execução, por `mc ilm import`. Objetos de antes do deploy ficam sem tag
+  e sem backfill. Registrado no [ADR 0005](../adr/0005-retencao-do-original.md).
 
 ## Ainda não especificado
 

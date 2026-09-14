@@ -1506,6 +1506,18 @@ verificadas por teste, não são sugestão). Projeto original em
   escrita do envio também vira `503`; a do `INSERT` continua `500`. A recusa vem antes da
   autenticação, e recusa não é Vídeo perdido. Cota por Dono e fila justa ficam para o 109.
 
+- [Limitações da conservação no documento de
+  arquitetura](tickets/109-limitacoes-da-conservacao-no-documento-de-arquitetura.md) — "nenhum
+  Vídeo perdido" vale dentro de um modelo de falha, e três pontos ficam escritos como fora dele,
+  cada um com o que o cobriria. Perda do volume do Postgres, do MinIO, do RabbitMQ ou do
+  Keycloak, que no Compose são nó único sem backup: a fila quorum é durável, mas com um nó não
+  replica. Falta de cota por Dono, que é equidade e não conservação. `POST /videos` sem
+  idempotência: o reenvio depois de uma conexão caída pode duplicar o Vídeo, e duplicar não é
+  perder. A linha "Não perder requisição em pico" da tabela de requisitos passou a se ler pelo termo
+  do glossário e a citar 103–108. Nela e no título da limitação da borda, os 39 `502` do 028
+  deixaram de ser chamados de perda; a tabela de § *O que impede a perda* deixou de chamar a fila
+  de replicada.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

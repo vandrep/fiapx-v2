@@ -272,7 +272,7 @@ inviabilizaria o serviço na máquina de quem avalia.
 | Janela de risco | O que a fecha |
 |---|---|
 | Pico de envios | o `202` responde antes do trabalho; a fila absorve o excedente em disco, não em conexões HTTP abertas |
-| Broker reinicia | filas **quorum**, replicadas e duráveis — mensagem confirmada sobrevive |
+| Broker reinicia | filas **quorum**, duráveis — mensagem confirmada sobrevive. Replicáveis, mas no Compose o broker é nó único e não há para onde replicar (*Limitações conhecidas*) |
 | Worker morre no meio | ack **manual**, depois do trabalho; a mensagem volta para a fila |
 | **Deploy** no meio de uma Extração | o dreno cancela a assinatura de `extrair-video`, espera a Extração em voo terminar **e dar ack**, e só então deixa o conector fechar o canal. Zero reentregas no ensaio válido do [ticket 035](wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md) |
 | Mensagem envenenada | `x-delivery-limit=3` e DLQ — a mensagem sai do caminho, mas não some: o `extracao` consome a própria DLQ e transforma o esgotamento em `ExtracaoFalhou`, que vira e-mail |
@@ -469,7 +469,7 @@ Fica registrado como candidato não implementado, não como conserto pendente.
 | Requisito | Como é atendido | Onde |
 |---|---|---|
 | Processar mais de um vídeo ao mesmo tempo | *competing consumers* no `extracao`, `prefetch=1`, réplicas independentes — e a stack padrão sobe **duas**, então o requisito é demonstrável sem overlay: `./scripts/concorrencia.sh` envia a rajada e reprova se nunca houver duas extrações no mesmo instante (ticket 049) | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
-| Não perder requisição em pico | `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit`, reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada. Escalar a borda por réplicas atrás de um proxy reduz a perda ao derrubar uma delas de 90,25% para 9,75% (ticket 028) — a ressalva que resta é que esse número não é zero | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
+| Não perder requisição em pico | Lido como nenhum *Vídeo perdido* ([`CONTEXT.md`](../CONTEXT.md)). `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit` com dead-lettering *at-least-once* (ticket 103), reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada. O aceite é o commit da linha, não o publish (104); o original só expira depois do desfecho (105); Vídeo preso é detectado pelo estado (106) e resgatado pela marca (107); sem capacidade, a borda recusa com `503` antes do corpo, e recusa não é Vídeo perdido (108). Os 39 `502` com uma réplica da borda derrubada (ticket 028) também não são Vídeo perdido: ou o envio não foi aceito, ou foi e chegou a desfecho, porque a rodada terminou com zero presos. Fora do modelo de falha: perda de volume, cota por Dono e idempotência do envio — *Limitações conhecidas* | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
 | Protegido por usuário e senha | Keycloak, OIDC *bearer-only*; o dono vem do `sub` do token | [pesquisa](pesquisa/oidc-keycloak.md) |
 | Listagem de status dos vídeos do usuário | `GET /videos` paginado, escopado pelo dono; não existe consulta sem dono na interface do gateway | [contrato HTTP](contratos/http-videos.md) |
 | Notificar o usuário em caso de erro | `VideoFalhou` → `notificacao` → SMTP; unicidade garantida pela transição de estado | [ADR 0001](adr/0001-politica-de-falhas.md) |
@@ -526,7 +526,7 @@ O que eu não defendo — apenas aceitei.
   mesmo cenário e 0 em 133 com a borda derrubada. Deixa de ser limitação; fica aqui como
   histórico porque foi a única a contrariar um requisito explícito do enunciado, e porque
   ninguém a teria encontrado sem medir.
-- **A borda da demo sobe réplica única, e escalar por réplicas não zera a perda.** O
+- **A borda da demo sobe réplica única, e escalar por réplicas não zera os envios que falham.** O
   `extracao` da demo passou a subir com duas réplicas no
   [ticket 049](wayfinder/tickets/049-compose-da-demo-processa-em-paralelo.md) — processar mais
   de um vídeo ao mesmo tempo é requisito do enunciado, e até ali a stack do README o exercia
@@ -540,6 +540,31 @@ O que eu não defendo — apenas aceitei.
   [ADR 0003](adr/0003-reconciliacao-por-varredura.md), essa **já foi vista funcionando**: ela
   passou a registrar o que republica, e um Vídeo órfão em `RECEBIDO` foi observado sendo
   republicado e chegando a `CONCLUIDO` (ticket 027).
+- **"Nenhum Vídeo perdido" vale dentro de um modelo de falha, e perder volume ou nó está fora
+  dele.** O modelo cobre crash de processo ou de réplica, queda de rede, dependência fora do ar e
+  bug que manda mensagem para o Estacionamento. Não cobre perder o volume do Postgres, do MinIO, do
+  RabbitMQ ou do Keycloak: no Compose cada um é **nó único**, com um volume nomeado, sem backup e
+  sem replicação. A fila quorum de [§ O que impede a perda](#o-que-impede-a-perda) é durável, mas com um nó só
+  ela não tem para onde replicar. Perdido o volume do Postgres, somem o Vídeo e o seu estado; o do
+  MinIO, o original e o Pacote; o do RabbitMQ, os comandos e eventos em trânsito — e desses a
+  varredura do [ADR 0003](adr/0003-reconciliacao-por-varredura.md) só recupera os que o Postgres
+  ainda conhece; o do Keycloak, os usuários, e um Dono recriado ganha outro `sub` e deixa de
+  ver os próprios Vídeos. O que cobriria: cluster de broker com três nós, réplica do Postgres,
+  MinIO distribuído, Keycloak com banco externo replicado ou, no mínimo, backup dos quatro volumes
+  (ticket 109).
+- **Não há cota por Dono.** A fila de `extracao.extrair` é FIFO para todos: um único Dono que
+  envie centenas de Vídeos ocupa as réplicas e faz os outros esperarem atrás dele. É problema de
+  equidade, não de conservação — ninguém perde Vídeo, só espera. A recusa por capacidade do
+  [ticket 108](wayfinder/tickets/108-recusa-por-capacidade-antes-do-corpo.md) protege o recurso
+  da borda, não a vez de cada Dono. O que cobriria: cota de envios em andamento por Dono na borda,
+  ou fila justa entre Donos no lugar da FIFO única (ticket 109).
+- **`POST /videos` não é idempotente.** Se a conexão cai depois do commit da linha e antes de a
+  resposta chegar, o cliente não sabe que o Vídeo foi aceito e pode criá-lo de novo ao reenviar.
+  Parte dos 39 `502` do [ticket 028](wayfinder/tickets/028-escala-da-borda.md) pode estar nesse
+  caso — ninguém conferiu duplicatas no Postgres naquela rodada. Duplicar não é perder: o Vídeo
+  aceito chega a desfecho, e o Dono o vê na listagem. É também por isso que o `non_idempotent` do
+  nginx, que zeraria esses `502`, não foi ligado. O que cobriria: cabeçalho `Idempotency-Key`
+  gravado com índice único por Dono, devolvendo o Vídeo existente no reenvio (ticket 109).
 - **A latência do `202` não tem orçamento declarado.** Ela foi medida (med 3,3 s sob 400
   conexões simultâneas de 1 MB) e variou até 9,8 s entre rodadas de mesma configuração. O
   [ticket 026](wayfinder/tickets/026-linearidade-horizontal.md) descartou a hipótese de estado

@@ -33,6 +33,10 @@
 #
 # O passo 13 e do ticket 105 e julga a retencao do original: a regra de ciclo de vida que o seed
 # aplicou ao MinIO e a marca que o `videos` grava no desfecho, que precisam dizer o mesmo par.
+#
+# O passo 14 e do ticket 112 e faz pelos ALERTAS o que o 12 faz pelo painel: le os seletores das
+# regras em `alertas.yaml` e reprova o que nao tem serie no Prometheus. Com `noDataState: OK`, uma
+# metrica renomeada nao dispara nem avisa — a regra so fica `inactive` para sempre.
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -714,6 +718,110 @@ for par in "CONCLUIDO:$id" "FALHOU:$id_falha"; do
         || falha "original do Video $estado_alvo ($chave) sem a marca $tag_chave=$tag_valor; tem: $marcas"
     ok "original do Video $estado_alvo marcado: $chave"
 done
+
+# ---------------------------------------------------------------------------------------
+passo "14. Toda série que os alertas leem existe"
+
+# Ticket 112. As cinco regras de `alertas.yaml` declaram `noDataState: OK`, e e isso que as faz
+# calar num sistema saudavel. O preco e o mesmo do painel no passo 12, com um agravante: metrica
+# renomeada deixa a expressao vazia, e a regra fica `inactive` para sempre, sem erro e sem "No
+# data" na tela. As series do plugin do broker mudam de nome no upgrade da imagem, e a do
+# `videos` muda no codigo.
+#
+# O passo julga EXISTENCIA do seletor, e nao o valor da expressao: aqui as cinco devolvem vazio de
+# proposito. E julga o seletor INTEIRO, nome e rotulos, porque o rotulo tambem cala a regra — uma
+# fila renomeada, ou um `estado` que deixou de se chamar como no glossario. E assim que as duas
+# series de `fiapx_videos_presos` ficam cobertas sem lista aqui: cada uma aparece num seletor do
+# arquivo.
+#
+# Os seletores saem do ARQUIVO, e quem os tira da expressao e o parser do proprio Prometheus
+# (`/api/v1/parse_query`), e nao uma regex daqui: PromQL tem funcao, agregacao, `on ()` e string
+# com chave, e uma regex que confundisse um deles com metrica reprovaria regra correta — ou
+# pularia a metrica que devia julgar.
+#
+# Ha espera, com teto, pelo mesmo motivo do passo 12: `fiapx_videos_presos` vem por OTLP a cada
+# 60 s, e so depois da primeira contagem. Numa stack de pe o laco passa na primeira volta; o teto
+# e o custo de um defeito de verdade, que so reprova depois dele.
+
+prometheus_api="$grafana_url/api/datasources/proxy/uid/prometheus/api/v1"
+
+# `uid<US>titulo<US>expr`, uma linha por query. A regra e identificada pelo `uid`, que o Grafana
+# exige unico, e nao pelo titulo: o `title:` zera a cada `uid:`, entao regra sem titulo aparece
+# sem titulo, em vez de herdar o da regra de cima. O `expr:` e sempre de uma linha e entre aspas
+# simples neste arquivo; outra forma reprova abaixo em vez de ser lida pela metade.
+queries_dos_alertas="$(awk '
+    /^ *- uid:/ { sub(/^ *- uid: */, ""); uid = $0; titulo = "" }
+    /^ *title:/ { sub(/^ *title: */, ""); titulo = $0 }
+    /^ *expr:/  { sub(/^ *expr: */, ""); print uid "\037" titulo "\037" $0 }
+' "$alertas")"
+[[ -n "$queries_dos_alertas" ]] || falha "nenhuma expr lida de $alertas"
+
+# Regra sem query lida e regra sem guarda, e a contagem e o que impede o awk de pula-la calado.
+regras_no_arquivo="$(grep -c '^ *- uid:' "$alertas" || true)"
+regras_lidas="$(cut -d $'\037' -f1 <<< "$queries_dos_alertas" | sort -u | grep -c . || true)"
+(( regras_lidas == regras_no_arquivo )) \
+    || falha "$alertas tem $regras_no_arquivo regras, e o passo leu expr de $regras_lidas"
+
+# `titulo<US>seletor`, um por linha. O seletor e remontado dos matchers da arvore, e o valor sai
+# por `tojson`, que escapa como a string do PromQL.
+seletores=""
+while IFS=$'\037' read -r uid titulo expr; do
+    titulo="${titulo:-$uid}"
+    [[ "$expr" == \'*\' ]] \
+        || falha "regra '$titulo': expr fora de aspas simples, que este passo não sabe ler: $expr"
+    expr="${expr:1:${#expr}-2}"
+    expr="${expr//\'\'/\'}"
+
+    arvore="$(curl -sS -G "$prometheus_api/parse_query" --data-urlencode "query=$expr" || true)"
+    status="$(jq -r '.status // empty' <<< "$arvore" 2>/dev/null || true)"
+    [[ -n "$status" ]] \
+        || falha "regra '$titulo': o Prometheus não respondeu ao parse_query em $prometheus_api"
+    [[ "$status" == success ]] \
+        || falha "regra '$titulo': o Prometheus não entendeu a expr ($(jq -r '.error' <<< "$arvore")): $expr"
+
+    da_regra="$(jq -r --arg t "$titulo" '[.. | objects | select(.type == "vectorSelector")
+        | ([.matchers[] | select(.name != "__name__" or .type != "=")
+            | "\(.name)\(.type)\(.value | tojson)"] | join(",")) as $rotulos
+        | if $rotulos == "" then .name else "\(.name){\($rotulos)}" end]
+        | unique[] | [$t, .] | join("\u001f")' <<< "$arvore")"
+    [[ -n "$da_regra" ]] \
+        || falha "regra '$titulo' não lê série nenhuma; o passo não tem o que julgar: $expr"
+    seletores+="$da_regra"$'\n'
+done <<< "$queries_dos_alertas"
+
+# Consulta instantanea, com o lookback de 5 min do Prometheus: e a mesma janela em que a regra
+# enxerga a serie quando o Grafana a avalia. Resposta nao-numerica e o Prometheus fora do ar, e
+# nao serie ausente — como no passo 12, as duas saidas reprovam, e sao defeitos diferentes.
+sem_serie() {
+    local titulo seletor series
+    while IFS=$'\037' read -r titulo seletor; do
+        [[ -n "$seletor" ]] || continue
+        series="$(curl -sS -G "$prometheus_api/query" --data-urlencode "query=count($seletor)" \
+            | jq '.data.result | length' 2>/dev/null || true)"
+        [[ "$series" =~ ^[0-9]+$ ]] \
+            || falha "regra '$titulo': o Prometheus não respondeu um número consultável para $seletor"
+        (( series > 0 )) || printf '%s\037%s\n' "$titulo" "$seletor"
+    done <<< "$seletores"
+}
+
+inicio=$SECONDS
+while :; do
+    faltando="$(sem_serie)" || exit 1
+    [[ -z "$faltando" ]] && break
+    if (( SECONDS - inicio > 90 )); then
+        while IFS=$'\037' read -r titulo seletor; do
+            echo "    ${vermelho}sem série${normal}  $seletor  (regra '$titulo')" >&2
+        done <<< "$faltando"
+        falha "regra de alerta lendo série que não existe no Prometheus 90s depois — a métrica ou o rótulo mudou de nome, e com noDataState: OK a regra ficaria inactive para sempre; corrija $alertas ou quem emite a série"
+    fi
+    printf '    ... aguardando %s seletor(es) sem série\n' "$(grep -c . <<< "$faltando")"
+    sleep 10
+done
+
+while IFS=$'\037' read -r titulo seletor; do
+    [[ -n "$seletor" ]] && printf '    %-75s %s\n' "$seletor" "$titulo"
+done <<< "$seletores"
+ok "$(grep -c . <<< "$seletores") seletores das $regras_no_arquivo regras de alerta, todos com série"
 
 # ---------------------------------------------------------------------------------------
 echo

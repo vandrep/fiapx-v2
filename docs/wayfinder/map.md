@@ -1527,6 +1527,13 @@ verificadas por teste, não são sugestão). Projeto original em
   mantém 393/605/336 palavras. Ficou aberta a tomada dos passos 6 a 8, que ainda diz "três
   entregas depois" para uma falha permanente.
 
+- [As séries que os alertas leem, conferidas no
+  smoke](tickets/112-series-dos-alertas-conferidas-no-smoke.md) — o passo 14 do `smoke.sh` manda
+  cada `expr` de `alertas.yaml` ao `parse_query` do Prometheus e confere que cada seletor, com nome
+  e rótulos, tem série. Reprova com a regra e o seletor que faltam. As duas séries de `estado` de
+  `fiapx_videos_presos` ficam cobertas pelos seletores do arquivo, sem lista no script. Visto
+  reprovar com uma métrica e uma fila renomeadas, e verde de novo depois de desfazer.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

@@ -21,6 +21,10 @@
 #
 # Os dois do grupo `videos-presos` olham o ESTADO, e nao a fila: um Video pode ficar sem desfecho
 # sem mensagem nenhuma parada, e so o Postgres sabe disso (ticket 106).
+#
+# As cinco declaram `noDataState: OK`, entao metrica ou rotulo renomeado cala a regra sem erro. O
+# passo 14 do `scripts/smoke.sh` le os seletores das `expr` DESTE arquivo e reprova o que nao tem
+# serie (ticket 112). Ele le `expr` de uma linha entre aspas simples; outra forma ele reprova.
 apiVersion: 1
 
 groups:

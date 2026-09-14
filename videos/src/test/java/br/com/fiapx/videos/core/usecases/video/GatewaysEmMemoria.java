@@ -124,8 +124,8 @@ final class GatewaysEmMemoria {
         }
 
         @Override
-        public CompletableFuture<Boolean> marcarIniciada(UUID id) {
-            return transicionar(id, Video::marcaComoIniciada);
+        public CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm) {
+            return transicionar(id, linha -> linha.marcaComoIniciada(iniciadaEm));
         }
 
         @Override
@@ -187,6 +187,23 @@ final class GatewaysEmMemoria {
             return CompletableFuture.completedFuture(pendentes);
         }
 
+        @Override
+        public CompletableFuture<Long> contarProcessandoIniciadosAntesDe(Instant iniciadosAntesDe) {
+            return CompletableFuture.completedFuture(armazenados.values().stream()
+                    .filter(video -> video.estado() == EstadoVideo.PROCESSANDO)
+                    .filter(video -> video.iniciadaEm().isBefore(iniciadosAntesDe))
+                    .count());
+        }
+
+        @Override
+        public CompletableFuture<Long> contarRecebidosComComandoPublicadoAntesDe(Instant publicadosAntesDe) {
+            return CompletableFuture.completedFuture(armazenados.values().stream()
+                    .filter(video -> video.estado() == EstadoVideo.RECEBIDO)
+                    .filter(video -> comandoPublicadoEm.containsKey(video.id()))
+                    .filter(video -> comandoPublicadoEm.get(video.id()).isBefore(publicadosAntesDe))
+                    .count());
+        }
+
         /** A transicao do dominio aplicada a linha: muda a linha, e diz se mudou. */
         @FunctionalInterface
         private interface Transicao {
@@ -201,7 +218,7 @@ final class GatewaysEmMemoria {
         /** A mesma linha, no estado em que outra entrega a deixou. */
         private static Video copiaEm(Video video, EstadoVideo estado) {
             return Video.reconstituir(video.id(), video.nome(), video.tamanhoBytes(), video.dono(),
-                    video.chaveVideo(), estado, video.recebidoEm(), video.finalizadoEm(),
+                    video.chaveVideo(), estado, video.recebidoEm(), video.iniciadaEm(), video.finalizadoEm(),
                     video.chavePacote(), video.quantidadeFrames(), video.tamanhoPacoteBytes(),
                     video.motivo());
         }

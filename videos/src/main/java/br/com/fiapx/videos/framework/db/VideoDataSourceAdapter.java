@@ -103,10 +103,10 @@ public class VideoDataSourceAdapter implements VideoGateway {
      * predecessores desde o ticket 027.
      */
     @Override
-    public CompletableFuture<Boolean> marcarIniciada(UUID id) {
+    public CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm) {
         return repeticaoNoPostgres.executar(() -> Panache.withTransaction(() -> VideoEntity.update(
-                        "estado = ?1 where id = ?2 and estado in ?3",
-                        EstadoVideo.PROCESSANDO, id, EstadoVideo.PROCESSANDO.predecessores())
+                        "estado = ?1, iniciadaEm = ?2 where id = ?3 and estado in ?4",
+                        EstadoVideo.PROCESSANDO, iniciadaEm, id, EstadoVideo.PROCESSANDO.predecessores())
                         .map(linhasAlteradas -> linhasAlteradas > 0)))
                 .subscribeAsCompletionStage();
     }
@@ -173,6 +173,20 @@ public class VideoDataSourceAdapter implements VideoGateway {
                 .subscribeAsCompletionStage();
     }
 
+    @Override
+    public CompletableFuture<Long> contarProcessandoIniciadosAntesDe(Instant iniciadosAntesDe) {
+        return repeticaoNoPostgres.executar(() -> Panache.withSession(() -> VideoEntity.count(
+                        "estado = ?1 and iniciadaEm < ?2", EstadoVideo.PROCESSANDO, iniciadosAntesDe)))
+                .subscribeAsCompletionStage();
+    }
+
+    @Override
+    public CompletableFuture<Long> contarRecebidosComComandoPublicadoAntesDe(Instant publicadosAntesDe) {
+        return repeticaoNoPostgres.executar(() -> Panache.withSession(() -> VideoEntity.count(
+                        "estado = ?1 and comandoPublicadoEm < ?2", EstadoVideo.RECEBIDO, publicadosAntesDe)))
+                .subscribeAsCompletionStage();
+    }
+
     private static VideoEntity paraEntity(Video video) {
         var entity = new VideoEntity();
         entity.id = video.id();
@@ -182,6 +196,7 @@ public class VideoDataSourceAdapter implements VideoGateway {
         entity.tamanhoBytes = video.tamanhoBytes();
         entity.estado = video.estado();
         entity.recebidoEm = video.recebidoEm();
+        entity.iniciadaEm = video.iniciadaEm();
         entity.finalizadoEm = video.finalizadoEm();
         entity.chaveVideo = video.chaveVideo();
         entity.chavePacote = video.chavePacote();
@@ -200,6 +215,7 @@ public class VideoDataSourceAdapter implements VideoGateway {
                 entity.chaveVideo,
                 entity.estado,
                 entity.recebidoEm,
+                entity.iniciadaEm,
                 entity.finalizadoEm,
                 entity.chavePacote,
                 entity.quantidadeFrames,

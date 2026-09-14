@@ -418,6 +418,8 @@ overlay de carga nem chega à stack, já que o overlay a desliga.
   ele, uma Extração que morre no teto de 300 s entraria na mesma distribuição das que
   terminaram, e a mediana mediria a mistura de duas populações. Vídeos-por-estado ficou de fora:
   o endpoint de listagem já responde, e um gauge exigiria varredura periódica no banco.
+  *Uma segunda métrica entrou no [ticket 106](../wayfinder/tickets/106-deteccao-de-video-preso-pelo-estado.md) —
+  ver § A segunda métrica, no fim deste documento.*
 - **Nomes têm duas origens e duas regras.** O que a auto-instrumentação emite fica **como o
   OTel emite** — é contrato com a ferramenta, e traduzir quebra o ecossistema. O que é nosso usa
   o vocabulário do [`CONTEXT.md`](../../CONTEXT.md): `Extração`, `concluida`, `falhou`,
@@ -545,3 +547,30 @@ Três decisões de forma que o arquivo carrega, e o porquê de cada uma:
   dizem se a cauda está puxando o número. Nesta população isso não é hipótese — a moda é a recusa
   do ffprobe, ~0,05 s, e a cauda é Extração de vídeo grande —, e média bem acima da mediana é
   exatamente o caso em que a "duração típica" da média não é a de Extração nenhuma.
+
+## A segunda métrica, e por que ela não reabre Vídeos-por-estado
+
+O [ticket 106](../wayfinder/tickets/106-deteccao-de-video-preso-pelo-estado.md) acrescentou
+`fiapx.videos.presos`, um gauge do `videos` com o atributo `estado` (`PROCESSANDO`, `RECEBIDO`),
+alimentado por uma contagem no Postgres a cada minuto. Os três alertas de 058 olham **fila**, e um
+Vídeo pode ficar sem desfecho sem mensagem nenhuma parada: um `ack` sem transição, ou uma mensagem
+descartada. Só o banco sabe disso.
+
+A recusa de *Vídeos por estado* acima tinha dois argumentos, e nenhum alcança esta métrica. A
+listagem responde **por Dono**, e ninguém consegue perguntar a ela "há Vídeo preso de alguém". E o
+número não é "ninguém consulta em regime": um alerta o consulta a cada minuto. A varredura
+periódica, que era o custo, são duas contagens por minuto sobre dois índices parciais — metade
+do compasso da reconciliação do ADR 0003, que já varre a mesma tabela a cada 30 s. O que continua fora é o gauge de contagem por estado: esta série só
+conta o que passou do limiar, e não deve crescer para o resto.
+
+Três decisões de forma:
+
+- **O limiar mora no `videos`, não no alerta.** `fiapx.deteccao.limiar-de-video-preso=30m`, com a
+  derivação a partir dos tetos do `extracao` escrita ao lado do número. As regras 4 e 5 de
+  `alertas.yaml` só perguntam "> 0".
+- **A condição de fila do `RECEBIDO` mora no alerta, não no `videos`.** O `videos` não enxerga o
+  broker; o Prometheus enxerga os dois. A regra junta a série com
+  `rabbitmq_detailed_queue_messages_ready{queue="extracao.extrair"} == 0` por `and on ()`.
+- **Sem amostra, sem série.** Antes da primeira contagem, ou depois de uma que falhou, o gauge não
+  reporta nada, em vez de reportar zero. `noDataState: OK` faz o alerta calar nesse caso, como os
+  outros três quando a série some — e o `videos` sem banco já aparece no health check.

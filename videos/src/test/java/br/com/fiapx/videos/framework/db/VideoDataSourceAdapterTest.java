@@ -61,6 +61,7 @@ class VideoDataSourceAdapterTest {
      * o envio espere o consumidor simulado terminar — o teto do ticket 104 nao esta em jogo.
      */
     private static final Duration TETO_DO_PUBLISH = Duration.ofSeconds(30);
+    private static final Instant INICIADA_EM = Instant.parse("2026-09-14T10:00:00Z");
 
     @Test
     @RunOnVertxContext
@@ -71,7 +72,7 @@ class VideoDataSourceAdapterTest {
         carregarEsperado(asserter, id, esperado);
 
         asserter.execute(() -> {
-            esperado[0].marcaComoIniciada();
+            esperado[0].marcaComoIniciada(INICIADA_EM);
             return iniciar(id[0]);
         });
         asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
@@ -111,6 +112,42 @@ class VideoDataSourceAdapterTest {
         asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
     }
 
+    /**
+     * As duas contagens do ticket 106 em HQL contra o Postgres. Os instantes sao de 1999 para
+     * que nenhuma linha de outro cenario da mesma base caia antes do corte: a contagem e global,
+     * nao por Video.
+     */
+    @Test
+    @RunOnVertxContext
+    void contagemDePresosJulgaAColunaCertaDeCadaEstado(UniAsserter asserter) {
+        var antigo = Instant.parse("1999-01-01T00:00:00Z");
+        var corte = antigo.plus(Duration.ofDays(1));
+        var processando = new UUID[1];
+        var recebido = new UUID[1];
+        var concluido = new UUID[1];
+        gravarRecebido(asserter, processando);
+        gravarRecebido(asserter, recebido);
+        gravarRecebido(asserter, concluido);
+
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.marcarIniciada(processando[0], antigo)));
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.marcarComandoPublicado(recebido[0], antigo)));
+        // Comando antigo e terminal: nao conta, e o PROCESSANDO com marca antiga tambem nao
+        // entra na contagem de RECEBIDO.
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.marcarComandoPublicado(concluido[0], antigo)));
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.marcarComandoPublicado(processando[0], antigo)));
+        asserter.execute(() -> concluir(concluido[0]));
+
+        asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.contarProcessandoIniciadosAntesDe(corte)),
+                total -> assertEquals(1L, total));
+        asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.contarRecebidosComComandoPublicadoAntesDe(corte)),
+                total -> assertEquals(1L, total));
+        // Estrito: no proprio instante ainda nao passou do limiar.
+        asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.contarProcessandoIniciadosAntesDe(antigo)),
+                total -> assertEquals(0L, total));
+        asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.contarRecebidosComComandoPublicadoAntesDe(antigo)),
+                total -> assertEquals(0L, total));
+    }
+
     private void carregarEsperado(UniAsserter asserter, UUID[] id, Video[] esperado) {
         asserter.execute(() -> videoDe(id[0]).invoke(video -> esperado[0] = video));
     }
@@ -123,6 +160,7 @@ class VideoDataSourceAdapterTest {
         assertEquals(esperado.chaveVideo(), atual.chaveVideo());
         assertEquals(esperado.estado(), atual.estado());
         assertEquals(esperado.recebidoEm(), atual.recebidoEm());
+        assertEquals(esperado.iniciadaEm(), atual.iniciadaEm());
         assertEquals(esperado.finalizadoEm(), atual.finalizadoEm());
         assertEquals(esperado.chavePacote(), atual.chavePacote());
         assertEquals(esperado.quantidadeFrames(), atual.quantidadeFrames());
@@ -376,7 +414,7 @@ class VideoDataSourceAdapterTest {
     }
 
     private Uni<Boolean> iniciar(UUID id) {
-        return Uni.createFrom().completionStage(() -> adapter.marcarIniciada(id));
+        return Uni.createFrom().completionStage(() -> adapter.marcarIniciada(id, INICIADA_EM));
     }
 
     private Uni<Boolean> concluir(UUID id) {

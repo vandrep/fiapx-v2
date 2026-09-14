@@ -29,7 +29,7 @@ class ProcessarExtracaoConcluidaUseCaseTest {
         arquivos = new GatewaysEmMemoria.Arquivos();
         useCase = new ProcessarExtracaoConcluidaUseCase(videos, arquivos);
         video = Video.novo("ferias.mp4", 1_024L, DONO).armazenadoEm("id/original.mp4");
-        video.marcaComoIniciada();
+        video.marcaComoIniciada(Instant.now());
         videos.armazenados.put(video.id(), video);
     }
 
@@ -90,7 +90,7 @@ class ProcessarExtracaoConcluidaUseCaseTest {
                 video.id(),
                 new ResultadoExtracao(Instant.now(), video.id() + ".zip", 1_200, 4_096L))).join();
 
-        iniciada.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id())).join();
+        iniciada.executar(new ProcessarExtracaoIniciadaUseCase.Command(video.id(), Instant.now())).join();
 
         assertEquals(EstadoVideo.CONCLUIDO, video.estado());
     }

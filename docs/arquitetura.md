@@ -486,7 +486,9 @@ enquanto o CI/CD era o risco; entregue o CI/CD, ela perdeu a premissa. Um contai
 métrica e trace por OTLP ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)):
 buscar um `idVideo` devolve **um** trace com os três serviços dentro, com os registros de log
 pendurados nos spans certos, e três alertas binários avaliam Estacionamento não-vazio, DLQ com
-mensagem, e fila com mensagem e zero consumidores. Um painel — **um**, sobre o vão que nenhum
+mensagem, e fila com mensagem e zero consumidores. Desde o
+[ticket 106](wayfinder/tickets/106-deteccao-de-video-preso-pelo-estado.md), outros dois olham o
+estado no Postgres: Vídeo preso em `PROCESSANDO` e em `RECEBIDO` com a fila vazia. Um painel — **um**, sobre o vão que nenhum
 dashboard de fábrica olha — é a home do Grafana desde o
 [ticket 092](wayfinder/tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md), e o que
 continua de fora é o **canal de notificação de alerta** — veja a seção seguinte. O que a camada
@@ -564,7 +566,8 @@ O que eu não defendo — apenas aceitei.
   cancelada; o ensaio não prova zero reentregas em toda corrida de entrega. Trabalho que exceda esse teto, SIGKILL, OOM e queda de
   rede continuam podendo gastar entrega. A medição verde cobre redeploy com broker saudável.
 - **Os alertas existem, mas a detecção não mudou.** As três regras do
-  [ticket 058](wayfinder/tickets/058-piso-de-observabilidade.md) avaliam continuamente e
+  [ticket 058](wayfinder/tickets/058-piso-de-observabilidade.md) e as duas do
+  [106](wayfinder/tickets/106-deteccao-de-video-preso-pelo-estado.md) avaliam continuamente e
   guardam histórico, e nenhuma delas sai do Grafana: não há *contact point*, não há e-mail,
   não há webhook. Um alerta disparado só é visto por quem já foi olhar — que é exatamente a
   propriedade do health check no incidente de 06/09/2026, em que `docker ps` dizia `unhealthy`

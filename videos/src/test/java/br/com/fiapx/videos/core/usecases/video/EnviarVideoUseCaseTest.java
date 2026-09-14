@@ -222,7 +222,7 @@ class EnviarVideoUseCaseTest {
     private void envelhecerAlemDaFolgaDaVarredura(Video video) {
         videos.armazenados.put(video.id(), Video.reconstituir(
                 video.id(), video.nome(), video.tamanhoBytes(), video.dono(), video.chaveVideo(),
-                video.estado(), video.recebidoEm().minus(2, ChronoUnit.MINUTES), null, null, null, null, null));
+                video.estado(), video.recebidoEm().minus(2, ChronoUnit.MINUTES), null, null, null, null, null, null));
     }
 
     private static EnviarVideoUseCase.Command comando(String nome, String contentType) {

@@ -46,9 +46,10 @@ public interface VideoGateway {
      * RECEBIDO — reentrega fora de ordem devolve {@code false} e o consumidor da ack do
      * mesmo jeito (ADR 0002). Os predecessores aceitos no {@code WHERE} vem de
      * {@link EstadoVideo#predecessores()}, nao de literais aqui: o grafo continua declarado
-     * uma vez so.
+     * uma vez so. O {@code iniciadaEm} so e gravado junto da transicao, entao a reentrega nao
+     * reescreve o da primeira tentativa (ticket 106).
      */
-    CompletableFuture<Boolean> marcarIniciada(UUID id);
+    CompletableFuture<Boolean> marcarIniciada(UUID id, Instant iniciadaEm);
 
     /**
      * Mesma guarda de {@link #marcarIniciada}, agora para CONCLUIDO — e saindo de RECEBIDO
@@ -85,4 +86,14 @@ public interface VideoGateway {
      * {@code finalizadoEm}, lote limitado.
      */
     CompletableFuture<List<Video>> buscarFalhasPendentes(Instant falhadosAntesDe, int tamanhoDoLote);
+
+    /** Videos PROCESSANDO cuja Extracao comecou antes de {@code iniciadosAntesDe} (ticket 106). */
+    CompletableFuture<Long> contarProcessandoIniciadosAntesDe(Instant iniciadosAntesDe);
+
+    /**
+     * Videos RECEBIDO cujo {@code ExtrairVideo} foi marcado como publicado antes de
+     * {@code publicadosAntesDe} (ticket 106). Os sem marca ficam de fora: sao os de
+     * {@link #buscarComandosPendentes}.
+     */
+    CompletableFuture<Long> contarRecebidosComComandoPublicadoAntesDe(Instant publicadosAntesDe);
 }

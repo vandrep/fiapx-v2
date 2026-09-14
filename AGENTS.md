@@ -281,13 +281,15 @@ origens, e duas regras** — não misture:
   contrato com a ferramenta. Traduzir para o vocabulário do projeto quebra consulta e receita
   de ecossistema, e não compra nada em troca. Vale inclusive quando o nome soa feio ao lado
   do resto do código.
-- **O que é nosso usa o vocabulário do [`CONTEXT.md`](CONTEXT.md).** A métrica própria é
+- **O que é nosso usa o vocabulário do [`CONTEXT.md`](CONTEXT.md).** As métricas próprias são
   `fiapx.extracao.duracao`, com o atributo `resultado` em `concluida`/`falhou` — as palavras
-  do glossário, não `success`/`error`. A mesma regra vale para atributo próprio de span e
+  do glossário, não `success`/`error` —, e `fiapx.videos.presos`, com `estado` nos nomes do
+  estado do Vídeo. A mesma regra vale para atributo próprio de span e
   campo estruturado de log: `idVideo` é `idVideo`, como no contrato de mensagens.
 
-Métrica nova precisa de justificativa igual à da primeira: existe uma só, e ela existe porque
-mede um intervalo que roda fora do JVM e que nenhuma auto-instrumentação enxerga. O que já é
+Métrica nova precisa de justificativa igual à das duas que existem: cada uma responde algo que
+nem a auto-instrumentação nem um endpoint alcançam — um intervalo que roda fora do JVM, e Vídeos
+presos de todos os Donos, que a listagem por Dono não enxerga (ticket 106). O que já é
 respondível pela auto-instrumentação ou por um endpoint não vira métrica.
 
 Instrumentação vive **só em `framework`**, e quem cobra isso é o `ArchitectureConstraintsTest`

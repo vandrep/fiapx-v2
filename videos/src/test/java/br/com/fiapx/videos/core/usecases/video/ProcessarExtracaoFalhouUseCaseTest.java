@@ -40,7 +40,7 @@ class ProcessarExtracaoFalhouUseCaseTest {
         useCase = new ProcessarExtracaoFalhouUseCase(videos, arquivos, new PublicarVideoFalhou(notificacao, videos));
 
         video = Video.novo("ferias.mp4", 1_024L, DONO).armazenadoEm("id/original.mp4");
-        video.marcaComoIniciada();
+        video.marcaComoIniciada(Instant.now());
         videos.armazenados.put(video.id(), video);
     }
 

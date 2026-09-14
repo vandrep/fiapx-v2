@@ -541,6 +541,8 @@ verificadas por teste, não são sugestão). Projeto original em
   perda silenciosa que motivava a precaução e tornou a falha residual visível no Estacionamento,
   mas não trouxe medição que justifique reabrir o esquema, e sem esse número persistir o instante
   criaria estado e recuperação especulativos.
+  *Revertido pelo [ticket 106](tickets/106-deteccao-de-video-preso-pelo-estado.md): o instante
+  voltou como coluna, agora com a medição dos tetos do `extracao` que faltou aqui.*
 
 - [A Extração em voo é drenada antes do `SIGTERM`](tickets/035-drenar-extracao-antes-do-sigterm.md)
   — nasceu do 030, na mesma sessão que o fechou: a leitura do código-fonte do conector e do
@@ -1472,6 +1474,17 @@ verificadas por teste, não são sugestão). Projeto original em
   depois de commitar, e aí apagar seria perder o Vídeo. O seed trocou `mc ilm rule add`, que
   acumulava uma regra por execução, por `mc ilm import`. Objetos de antes do deploy ficam sem tag
   e sem backfill. Registrado no [ADR 0005](../adr/0005-retencao-do-original.md).
+
+- [Detecção de Vídeo preso pelo estado, não pelas
+  filas](tickets/106-deteccao-de-video-preso-pelo-estado.md) — reverte o 033: `iniciada_em` volta
+  como coluna, gravado com o instante da primeira tentativa. O `videos` exporta
+  `fiapx.videos.presos`, que conta o Postgres a cada minuto: `PROCESSANDO` há mais de 30 min desde o
+  início, e `RECEBIDO` há mais de 30 min desde a marca do comando. Dois alertas novos leem a métrica,
+  e o de `RECEBIDO` só dispara com `extracao.extrair` sem mensagem pronta. Os 30 min derivam dos
+  tetos do `extracao` (3 × 420 s + aviso), com a derivação ao lado do número. Sem resgate
+  automático. A métrica passa pela recusa de *Vídeos por estado* do ADR 0004: a listagem é por
+  Dono, e quem consulta em regime é um alerta. Falso positivo aceito e escrito: entrega devolvida
+  por crash espera atrás do backlog.
 
 ## Ainda não especificado
 

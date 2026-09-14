@@ -47,7 +47,7 @@ public class ExtracaoEventosConsumer {
         var evento = mensagem.getPayload();
         return comAckManual(mensagem, rastro.naMensagem("videos.extracao-iniciada", evento.idVideo(), mensagem,
                 () -> Uni.createFrom().completionStage(
-                        extracaoEventosController.processarIniciada(evento.idVideo()))));
+                        extracaoEventosController.processarIniciada(evento.idVideo(), evento.iniciadaEm()))));
     }
 
     @Incoming("extracao-concluida")

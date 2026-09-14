@@ -66,7 +66,7 @@ class BaixarPacoteUseCaseTest {
     @Test
     void videoFalhouTambemEIndisponivelENaoExpirado() {
         var video = Video.reconstituir(UUID.randomUUID(), "ferias.mp4", 10L, DONO, "k",
-                EstadoVideo.FALHOU, Instant.EPOCH, Instant.EPOCH, null, null, null,
+                EstadoVideo.FALHOU, Instant.EPOCH, null, Instant.EPOCH, null, null, null,
                 MotivoFalha.TENTATIVAS_ESGOTADAS);
         videos.armazenados.put(video.id(), video);
 
@@ -109,7 +109,7 @@ class BaixarPacoteUseCaseTest {
 
     private Video concluido() {
         var video = Video.novo("ferias.mp4", 10L, DONO).armazenadoEm("k");
-        video.marcaComoIniciada();
+        video.marcaComoIniciada(Instant.now());
         video.marcaComoConcluida(new ResultadoExtracao(
                 Instant.parse("2026-08-21T14:05:47Z"), video.id() + ".zip", 1200, 900L));
         videos.armazenados.put(video.id(), video);

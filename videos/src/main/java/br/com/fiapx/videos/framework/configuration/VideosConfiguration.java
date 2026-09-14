@@ -7,6 +7,7 @@ import br.com.fiapx.videos.core.interfaces.presenter.VideosPaginadosPresenter;
 import br.com.fiapx.videos.core.interfaces.sender.ExtracaoSender;
 import br.com.fiapx.videos.core.interfaces.sender.NotificacaoSender;
 import br.com.fiapx.videos.core.usecases.video.BaixarPacoteUseCase;
+import br.com.fiapx.videos.core.usecases.video.ContarVideosPresosUseCase;
 import br.com.fiapx.videos.core.usecases.video.ConsultarVideoUseCase;
 import br.com.fiapx.videos.core.usecases.video.EnviarVideoUseCase;
 import br.com.fiapx.videos.core.usecases.video.ListarVideosDoDonoUseCase;
@@ -19,6 +20,7 @@ import br.com.fiapx.videos.core.usecases.video.ReconciliarPublicacoesPendentesUs
 import br.com.fiapx.videos.interfaces.controllers.ExtracaoEventosController;
 import br.com.fiapx.videos.interfaces.controllers.ReconciliacaoController;
 import br.com.fiapx.videos.interfaces.controllers.VideosController;
+import br.com.fiapx.videos.interfaces.controllers.VideosPresosController;
 import br.com.fiapx.videos.interfaces.presenters.VideoPresenterAdapter;
 import br.com.fiapx.videos.interfaces.presenters.VideosPaginadosPresenterAdapter;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -43,6 +45,14 @@ public class VideosConfiguration {
      */
     @ConfigProperty(name = "fiapx.mensageria.teto-do-publish-no-envio", defaultValue = "2s")
     Duration tetoDoPublishNoEnvio;
+
+    /**
+     * Sem default no codigo, ao contrario do teto acima: o numero e derivado dos tetos do
+     * {@code extracao}, e a derivacao esta escrita ao lado dele no {@code application.properties}
+     * (ticket 106). Um default aqui seria um segundo lugar para o mesmo numero envelhecer.
+     */
+    @ConfigProperty(name = "fiapx.deteccao.limiar-de-video-preso")
+    Duration limiarDeVideoPreso;
 
     @Produces
     @ApplicationScoped
@@ -88,6 +98,11 @@ public class VideosConfiguration {
                                                     PublicarVideoFalhou publicarVideoFalhou) {
         return new ReconciliacaoController(
                 new ReconciliarPublicacoesPendentesUseCase(videoGateway, publicarExtrairVideo, publicarVideoFalhou));
+    }
+
+    @Produces
+    VideosPresosController videosPresosController(VideoGateway videoGateway) {
+        return new VideosPresosController(new ContarVideosPresosUseCase(videoGateway, limiarDeVideoPreso));
     }
 
     /** Request-scoped: o presenter guarda o resultado de <b>uma</b> requisicao. */

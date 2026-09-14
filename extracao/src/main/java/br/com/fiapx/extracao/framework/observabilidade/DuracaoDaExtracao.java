@@ -10,8 +10,8 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * A <b>unica</b> metrica propria de dominio do sistema (ticket 059): quanto tempo a Extracao
- * de um Video leva.
+ * A primeira metrica propria de dominio do sistema (ticket 059): quanto tempo a Extracao
+ * de um Video leva. A outra, desde o ticket 106, e {@code fiapx.videos.presos}, no {@code videos}.
  *
  * <h2>Por que esta, e por que so esta</h2>
  *
@@ -21,7 +21,8 @@ import java.util.List;
  * publicacao, consumo, S3, Postgres) ja e coberta pelo que a extensao emite sozinha, e
  * duplicar isso com metrica propria so criaria uma segunda verdade para conferir.
  *
- * <p>O que <b>nao</b> entrou, e de proposito: Videos por estado. O endpoint de listagem ja
+ * <p>O que <b>nao</b> entrou, e de proposito: Videos por estado (a contagem de Videos presos do
+ * ticket 106 e outra pergunta, e o ADR 0004 diz por que ela passou). O endpoint de listagem ja
  * responde essa pergunta com a autoridade do banco, e um gauge exigiria varredura periodica no
  * Postgres so para alimentar um numero que ninguem consulta em regime.
  *

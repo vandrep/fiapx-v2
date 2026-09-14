@@ -167,6 +167,10 @@ Existe porque `CONTEXT.md` define que "aguardando na fila" é `RECEBIDO`, não
 o worker de fato pegou o trabalho. Numa reentrega o evento chega de novo e a transição
 `PROCESSANDO → PROCESSANDO` não faz nada.
 
+O `videos` grava `iniciadaEm` na coluna `iniciada_em` junto da transição, então fica o instante
+da primeira tentativa; é dele que conta o alerta de Vídeo preso em `PROCESSANDO` (ticket 106).
+Evento sem o campo não é recusado: o `videos` usa o instante do consumo.
+
 ### `ExtracaoConcluida` — evento, `extracao` → `videos`
 
 | Campo | Tipo | Nota |

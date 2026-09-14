@@ -104,9 +104,10 @@ Quanto isso rende foi medido até 6 réplicas (eficiência de escala 0,88; 15,6 
 | MailHog | http://localhost:8025 | — |
 | Grafana (observabilidade) | http://localhost:3000 | — (acesso anônimo) |
 
-O Grafana traz log, métrica e trace dos três serviços, correlacionados pelo `idVideo`, e três
+O Grafana traz log, métrica e trace dos três serviços, correlacionados pelo `idVideo`, três
 alertas sobre as filas — Estacionamento não-vazio, DLQ do `extracao` com mensagem, e fila com
-mensagem e zero consumidores. Abrir http://localhost:3000 cai direto em **FIAP X — a
+mensagem e zero consumidores — e dois sobre o estado: Vídeo preso em `PROCESSANDO`, e em
+`RECEBIDO` com a fila do comando vazia, ambos há mais de 30 min. Abrir http://localhost:3000 cai direto em **FIAP X — a
 infraestrutura está saudável?**, o único painel montado: fila, Estacionamento, DLQ,
 consumidores e a duração da Extração, mais o log e a busca de trace por `idVideo`. HTTP e JVM
 não estão nele de propósito — são dos dois dashboards que a própria imagem mantém, linkados no
@@ -139,6 +140,26 @@ A instalação antiga também não migra automaticamente os dados efêmeros do K
 preserve ou exporte seu realm com as identidades antes de recriá-lo se precisar manter
 acesso aos Vídeos existentes. A garantia de recriação vale para dados gravados já nos
 volumes nomeados.
+
+Para atualizar um banco criado antes do ticket 106, aplique a coluna nova **com o `videos`
+parado**: o `videos` novo não sobe sem ela (`validate`), e o antigo violaria o `CHECK` novo ao
+marcar `PROCESSANDO`. O `docker/postgres/init.sql` só roda em volume vazio.
+
+```bash
+docker compose stop videos
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U fiapx -d fiapx_videos <<'SQL'
+BEGIN;
+ALTER TABLE video ADD COLUMN iniciada_em TIMESTAMPTZ;
+-- Sem o instante real, o recebimento: detecta cedo, nunca tarde.
+UPDATE video SET iniciada_em = recebido_em WHERE estado = 'PROCESSANDO';
+ALTER TABLE video ADD CONSTRAINT ck_video_processando_iniciada
+    CHECK (estado <> 'PROCESSANDO' OR iniciada_em IS NOT NULL);
+CREATE INDEX ix_video_processando ON video (iniciada_em) WHERE estado = 'PROCESSANDO';
+CREATE INDEX ix_video_recebido_publicado ON video (comando_publicado_em) WHERE estado = 'RECEBIDO';
+COMMIT;
+SQL
+docker compose up -d videos
+```
 
 O ensaio `./scripts/persistencia-rabbitmq.sh` publica três Vídeos, verifica comandos
 pendentes e marcas no Postgres, executa `down`/`up` sem excluir volumes, compara a

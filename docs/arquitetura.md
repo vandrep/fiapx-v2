@@ -137,7 +137,7 @@ proibidos em `core` e `interfaces`, e onde cada tecnologia pode aparecer — `@I
 fase `validate` do agregador reprova o build se as cópias divergirem.
 
 O ganho prático aparece nos testes: o `core` inteiro roda com dublês em memória, sem Docker.
-Dos 130 testes do projeto, 96 não sobem container nenhum.
+Dos 512 testes do projeto, 418 não sobem container nenhum.
 
 ## O caminho feliz
 
@@ -154,9 +154,20 @@ sequenceDiagram
     U->>V: POST /videos (multipart)
     V->>M: grava o vídeo (stream)
     V->>P: INSERT video, estado=RECEBIDO
-    V-->>U: 202 Accepted + Location
+    Note over V,P: o commit da linha é o aceite
     V->>R: ExtrairVideo
-    V->>P: marca comando_publicado_em
+    alt confirm e marca dentro do teto de 2 s
+        R-->>V: confirm
+        V->>P: marca comando_publicado_em
+        V-->>U: 202 Accepted + Location
+    else teto estourado, ou o publish ou a marca falhou
+        V-->>U: 202 Accepted + Location
+        opt confirm tardio
+            R-->>V: confirm
+            V->>P: marca comando_publicado_em
+        end
+        Note over V,P: sem marca, a varredura do ADR 0003 publica depois
+    end
 
     R->>E: ExtrairVideo
     E->>R: ExtracaoIniciada
@@ -169,6 +180,7 @@ sequenceDiagram
     E->>R: ExtracaoConcluida
     R->>V: ExtracaoConcluida
     V->>P: PROCESSANDO → CONCLUIDO
+    V->>M: tag desfecho=sim no original
 
     U->>V: GET /videos/{id}
     V-->>U: CONCLUIDO
@@ -177,9 +189,11 @@ sequenceDiagram
     V-->>U: 200 application/zip
 ```
 
-O `202` sai no passo 4, antes de qualquer trabalho de vídeo existir. Do passo 5 em diante o
-usuário já foi embora — é por isso que a listagem de status é um requisito e não um luxo: ela
-é o único canal pelo qual ele descobre o desfecho.
+O `202` sai antes de qualquer trabalho de vídeo existir, mas depois de tentar o publish: o aceite
+é o commit da linha, e o que o `202` promete sobre o comando está em
+[`contratos/http-videos.md` § O que o `202` promete](contratos/http-videos.md#o-que-o-202-promete).
+Da resposta em diante o usuário já foi embora — é por isso que a listagem de status é um
+requisito e não um luxo: ela é o único canal pelo qual ele descobre o desfecho.
 
 O download é **stream de ponta a ponta**, não presigned URL, e nunca carrega o arquivo em
 memória: `fromFile` na entrada, `toPublisher` na saída.
@@ -193,11 +207,12 @@ sequenceDiagram
     participant E as extracao
     participant V as videos
     participant P as Postgres
+    participant M as MinIO
     participant N as notificacao
     participant S as SMTP
 
     R->>E: ExtrairVideo (entrega 1)
-    Note over E: ffmpeg sai com erro
+    Note over E: falha transitória<br/>(falha permanente, como ARQUIVO_INVALIDO,<br/>publica ExtracaoFalhou já aqui, com ack)
     E--xR: nack → requeue
     R->>E: ExtrairVideo (entrega 2)
     E--xR: nack → requeue
@@ -207,16 +222,18 @@ sequenceDiagram
     Note over R: x-delivery-limit=3 esgotado<br/>a fila é quorum: conta entregas,<br/>inclusive as perdidas por crash
     R->>R: dead-letter → extracao.extrair.dlq
     R->>E: consome a própria DLQ
-    E->>R: ExtracaoFalhou (motivo: ARQUIVO_INVALIDO)
+    E->>R: ExtracaoFalhou (motivo: TENTATIVAS_ESGOTADAS)
 
     R->>V: ExtracaoFalhou
-    V->>P: UPDATE ... WHERE id = ? AND estado = 'PROCESSANDO'
+    Note over V: se a linha já é terminal, a entidade recusa<br/>e dá ack sem UPDATE
+    V->>P: UPDATE ... WHERE id = ? AND estado IN ('RECEBIDO', 'PROCESSANDO')
     alt a linha mudou
         V->>R: VideoFalhou
         V->>P: marca falha_publicada_em
     else nenhuma linha mudou
-        Note over V: entrega repetida — ack sem republicar
+        Note over V: corrida entre entregas — ack sem republicar
     end
+    V->>M: tag desfecho=sim no original
 
     R->>N: VideoFalhou
     N->>N: traduz o código em frase
@@ -227,12 +244,14 @@ Duas coisas merecem atenção aqui.
 
 **A garantia de e-mail único não está no `notificacao`.** Ele é *pelo menos uma vez* por
 desenho e não guarda nada. Quem não deixa a notificação se multiplicar é o `UPDATE`
-condicional no `videos`: ele exige no `WHERE` o **estado predecessor** — `FALHOU` só é
-alcançável a partir de `PROCESSANDO` —, então só a primeira entrega muda a linha, e só a
+condicional no `videos`: ele exige no `WHERE` um **estado predecessor** — `FALHOU` é
+alcançável a partir de `RECEBIDO` ou de `PROCESSANDO`, porque o contrato não garante que
+`ExtracaoIniciada` chegue antes do terminal —, então só a primeira entrega muda a linha, e só a
 transição que mudou a linha publica `VideoFalhou`. A segunda e a terceira entrega da mesma
-mensagem não casam o predicado, não mudam nada e dão ack em silêncio. O grafo de transições é
-declarado uma vez só, em `EstadoVideo.predecessor()`. Isso é o que dispensa
-banco no `notificacao` e torna todo consumo de evento idempotente
+mensagem encontram a linha já em `FALHOU`: a entidade recusa a transição antes do `UPDATE`, e
+duas entregas que correm juntas não casam o predicado. Nenhuma muda nada, e as duas dão ack em
+silêncio. O grafo de transições é declarado uma vez só, em `EstadoVideo.predecessores()`. Isso
+é o que dispensa banco no `notificacao` e torna todo consumo de evento idempotente
 ([ADR 0001](adr/0001-politica-de-falhas.md), [ADR 0002](adr/0002-maquina-de-estados-em-duas-camadas.md)).
 
 **Uma tentativa é uma entrega, não um erro.** Se o worker morre no meio da extração, aquela
@@ -479,7 +498,7 @@ Fica registrado como candidato não implementado, não como conserto pendente.
 | Persistir os dados | Postgres para o estado, MinIO para os arquivos | [`docker/postgres/init.sql`](../docker/postgres/init.sql) |
 | Arquitetura que permita escalar | serviços sem estado atrás de fila; o único com estado delega ao Postgres | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
 | Versionado no GitHub | `vandrep/fiapx-v2`, `main` protegida por ruleset, PR obrigatório | [`AGENTS.md`](../AGENTS.md) |
-| Testes que garantam a qualidade | 144 testes (103 sem Docker): unitários do `core` com dublês, Cucumber pela borda, teste arquitetural, `ffmpeg` real no `extracao`, e o smoke ponta-a-ponta | [`scripts/smoke.sh`](../scripts/smoke.sh) |
+| Testes que garantam a qualidade | 512 testes (418 sem Docker): unitários do `core` com dublês, Cucumber pela borda, teste arquitetural, `ffmpeg` real no `extracao`, e o smoke ponta-a-ponta | [`scripts/smoke.sh`](../scripts/smoke.sh) |
 | CI/CD | GitHub Actions: `verify` e publicação das três imagens multi-arquitetura no GHCR | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) |
 
 Da stack *recomendada*, monitoramento entrou — depois, e não junto. A recusa original valia

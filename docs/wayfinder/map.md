@@ -56,7 +56,7 @@ test-first por construção); `writing-for-agents` ao editar `AGENTS.md`.
 | CI/CD | GitHub Actions: `verify` + build das imagens + push para o GHCR, tag do commit **e `latest`**, `amd64`+`arm64` (ticket 013). `main` protegida por ruleset: PR obrigatório, zero aprovações |
 | Escalabilidade | Medida ([026](tickets/026-linearidade-horizontal.md)): `extracao` linear até **6 réplicas** nesta máquina (eficiência 0,88, critério 0,80), 15,6 Vídeo/min; `ffmpeg` é 98,2% do tempo de serviço, e desde o [027](tickets/027-melhorias-medidas.md) roda com `-threads` derivado da cota do cgroup (−31,6%). Borda medida com réplicas atrás de proxy ([028](tickets/028-escala-da-borda.md), máquina diferente — 6 vCPU): mediana do `202` cai 5,5× (N=1→N=3); matar uma réplica de N=3 custa 39/400 recusados (9,75%) contra 361/400 (90,25%) com réplica única — não zero, por design do nginx contra `POST` não-idempotente |
 | Conservação | Medida e reprovada no [025](tickets/025-carga-conservacao.md), corrigida e remedida no [027](tickets/027-melhorias-medidas.md): **0 presos** em 400 sob pico e em 133 com a borda derrubada. Terminal aceita `RECEBIDO` ou `PROCESSANDO` ([ADR 0002](../adr/0002-maquina-de-estados-em-duas-camadas.md)); `publish-confirms=true` faz a marca do [ADR 0003](../adr/0003-reconciliacao-por-varredura.md) parar de mentir |
-| Testes | **144 (103 sem Docker)**. Por serviço e isolado (unitário do `core`, Cucumber pela borda HTTP, `ArchitectureConstraintsTest`); fluxo ponta-a-ponta por script de smoke versionado, não automatizado no CI |
+| Testes | **512 (418 sem Docker)**, contados no [111](tickets/111-diagramas-e-narracao-coerentes-com-o-codigo.md). Por serviço e isolado (unitário do `core`, Cucumber pela borda HTTP, `ArchitectureConstraintsTest`); fluxo ponta-a-ponta por script de smoke versionado, não automatizado no CI |
 
 **Base de código**: template em `/home/vandrep/projetos/oficina-soat/quarkus-clean-architecture-template`
 (leia o `AGENTS.md` dele antes de escrever qualquer classe — as regras de camada são
@@ -1517,6 +1517,15 @@ verificadas por teste, não são sugestão). Projeto original em
   do glossário e a citar 103–108. Em todo o documento, os 39 `502` do 028 deixaram de ser
   chamados de perda ou de recusa, e viraram envios sem `202`; a tabela de § *O que impede a perda* deixou de chamar a fila
   de replicada.
+
+- [Diagramas e narração coerentes com o
+  código](tickets/111-diagramas-e-narracao-coerentes-com-o-codigo.md) — o caminho feliz mostra o
+  `202` depois do publish tentado, com o teto de 2 s, a marca tardia e a varredura. O caminho de
+  falha mostra os dois predecessores e `EstadoVideo.predecessores()`, e troca o motivo da DLQ para
+  `TENTATIVAS_ESGOTADAS`. Os dois ganharam a tag de desfecho do 105. Nenhum texto cita mais número
+  de passo. As contagens vêm de uma execução nova: 512 testes, 418 sem container. O roteiro
+  mantém 393/605/336 palavras. Ficou aberta a tomada dos passos 6 a 8, que ainda diz "três
+  entregas depois" para uma falha permanente.
 
 ## Ainda não especificado
 

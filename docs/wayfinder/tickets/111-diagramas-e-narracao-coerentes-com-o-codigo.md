@@ -2,8 +2,8 @@
 
 - id: 111
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: claude (sessão de 2026-09-14, SHA inicial b4c98bd)
 - bloqueado-por: 105, 106, 107, 108
 - prioridade: P3
 
@@ -70,3 +70,61 @@ decisão ao mantenedor, em vez de cortar outra tomada por conta própria.
 - [ ] A contagem de palavras de cada bloco alterado do roteiro continua dentro do teto do bloco, e
       os números do cabeçalho do bloco são atualizados.
 - [ ] Linha em "Decisões até aqui" no mapa.
+
+## Resolução
+
+Escrito em 2026-09-14 sobre `develop @ b4c98bd`. Só documentação. Nenhum dos 105–108 tinha
+corrigido algum dos quatro itens: nenhum deles tocou os diagramas nem o roteiro.
+
+**Caminho feliz.** O diagrama mostra `INSERT` → nota do aceite → publish do `ExtrairVideo` e um
+`alt`. Num ramo, o confirm e a marca chegam dentro do teto de 2 s, e só então sai o `202`. No
+outro, o teto estourou ou o publish ou a marca falhou: o `202` sai com a marca nula, um `opt`
+mostra o confirm tardio que ainda grava a marca, e uma nota diz que a varredura do ADR 0003
+publica depois. O parágrafo de baixo deixou de citar número de passo: diz que o `202` sai depois
+de tentar o publish e aponta para `docs/contratos/http-videos.md` § *O que o `202` promete*, que é
+onde a regra mora, em vez de repeti-la. O `autonumber` ficou, e nenhum texto depende dele.
+
+**Caminho de falha.** O `WHERE` virou `estado IN ('RECEBIDO', 'PROCESSANDO')`, o texto diz por que
+são dois predecessores e nomeia `EstadoVideo.predecessores()`. O texto e uma nota do diagrama
+separam os dois jeitos de a reentrega não mudar nada: a entidade recusa a transição antes do
+`UPDATE` quando a linha já é terminal, e o predicado só decide quando duas entregas correm juntas.
+
+**Além da letra, porque o diagrama tinha de bater com o código:**
+
+- o motivo do `ExtracaoFalhou` que sai da DLQ era `ARQUIVO_INVALIDO` e virou
+  `TENTATIVAS_ESGOTADAS`, que é o único que `ProcessarTentativasEsgotadasUseCase` publica.
+  `ARQUIVO_INVALIDO` é falha permanente, publicada na primeira entrega e com ack. Uma nota no
+  diagrama diz isso;
+- os dois diagramas ganharam a tag `desfecho=sim` no original depois do `UPDATE` terminal, do
+  ticket 105 (`TransicaoDeVideo.marcarDesfechoDoOriginal`);
+- a linha "Testes que garantam a qualidade" da tabela de requisitos do `arquitetura.md` dizia
+  144 (103) e foi atualizada junto, para o arquivo não ficar com duas contagens.
+
+**Contagens.** `./mvnw test` na raiz em **2026-09-14, das 13:44 às 13:48**, `BUILD SUCCESS`:
+**512 testes** (`videos` 193, `extracao` 290, `notificacao` 29). "Sem container" contou por
+classe, pelos relatórios do surefire: são 94 testes em classes `@QuarkusTest` ou no runner do
+Cucumber e **418** nas demais (`videos` 133, `extracao` 263, `notificacao` 22). Os 418 incluem os
+testes do `extracao` que chamam o `ffmpeg` real, que não sobe container. Atualizados: o
+`arquitetura.md` (a seção *Por dentro de um serviço* e a tabela de requisitos), as duas tomadas
+do roteiro e a tabela de estado do mapa. A linha do 027 em "Decisões até aqui", que diz 144 (103),
+é registro da época e ficou.
+
+**Roteiro.** O passo 3 diz que o arquivo e o registro já estão duráveis e que o vídeo não se perde,
+e não mais que o comando está na fila. A tomada do caminho feliz perdeu "passo quatro" e "passo
+cinco": diz que o `videos` publica e responde quando o broker confirma, ou em dois segundos, e que
+a varredura cobre o resto. As palavras foram contadas somando as palavras das linhas `>` de cada
+bloco, o que reproduz os cabeçalhos. Os blocos alterados continuam com **393, 605 e 336**, iguais ao
+que já estava escrito, então nenhum tempo do cabeçalho mudou.
+
+**Revisão.** O `/code-review` contra `b4c98bd` trouxe três mudanças: o parágrafo do caminho
+feliz passou a apontar para o contrato, o passo 3 fala do vídeo e não do comando, e ficaram
+separados a recusa pela entidade e o predicado. Também trouxe o ramo da marca que falha dentro do
+teto e a nota "publica depois", no lugar de "republica".
+
+**Fora, para o mantenedor decidir:**
+
+- a tomada dos passos 6 a 8 do roteiro diz que o ffmpeg prova que o arquivo não é vídeo "três
+  entregas depois" e que o motivo é `ARQUIVO_INVALIDO`. Pelo código, a falha é permanente e sai na
+  primeira entrega. Agora ela contradiz o diagrama, e isso precisa ser corrigido antes de gravar o
+  vídeo;
+- a tomada do caminho de falha ainda diz "o estado predecessor", no singular.

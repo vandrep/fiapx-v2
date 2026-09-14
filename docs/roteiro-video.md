@@ -96,9 +96,9 @@ não depende dela é uma garantia que se afirma em uma frase e custaria meio min
 
 ### Tomada — passo 3, envio do vídeo
 
-> O envio responde **202 Accepted**, com o `Location` do recurso. Repare que ele responde
-> antes de qualquer trabalho de vídeo existir: o arquivo já está durável e o comando já está
-> na fila, mas nenhum frame foi extraído. Esse 202 é a peça central do desenho.
+> O envio responde **202 Accepted**, com o `Location` do recurso. Ele responde antes de
+> qualquer trabalho de vídeo existir: o arquivo e o registro já estão duráveis, e o vídeo não
+> se perde, mas nenhum frame foi extraído. Esse 202 é a peça central do desenho.
 
 ### Tomada — passo 4, processamento assíncrono *(acelerar 4×)*
 
@@ -169,18 +169,18 @@ Encaixar aqui, por ~10s, a árvore de pacotes versionada do módulo `videos`.
 > E isso não é aspiração documentada. O `ArchitectureConstraintsTest` verifica o layout dos
 > pacotes, os imports proibidos e onde cada anotação pode aparecer; ele roda no `verify` e
 > reprova o build. O ganho é medível nos testes: o `core` inteiro roda com dublês em memória.
-> Dos cento e trinta testes do projeto, noventa e seis não sobem container nenhum.
+> Dos quinhentos e doze testes do projeto, quatrocentos e dezoito não sobem container nenhum.
 
 ### Tomada — sequência do caminho feliz (50s)
 
-> O caminho feliz, em ordem. O `videos` grava o arquivo no MinIO, insere a linha no Postgres
-> em RECEBIDO, e só então responde 202 — passo quatro. Do passo cinco em diante o usuário já
-> não está mais lá. O comando `ExtrairVideo` vai para a fila; o `extracao` pega, anuncia que
-> começou, baixa o vídeo, valida a duração com `ffprobe`, extrai um frame por segundo com
-> ffmpeg, empacota e grava o pacote de volta. Cada anúncio dele volta ao `videos`, que é quem
-> move o estado — os workers relatam, o dono do estado decide. O download, no fim, é stream de
-> ponta a ponta. Presigned URL foi recusada: é um bearer token na query string, e o host entra
-> na assinatura.
+> O caminho feliz, em ordem. O `videos` grava o arquivo no MinIO, insere a linha no Postgres em
+> RECEBIDO, publica o `ExtrairVideo` e responde 202 quando o broker confirma, ou em dois
+> segundos — a varredura cobre o resto. Dali em diante o usuário foi embora; o `extracao` pega,
+> anuncia que começou, baixa o vídeo, valida a duração com `ffprobe`, extrai um frame por
+> segundo com ffmpeg, empacota e grava o pacote de volta. Cada anúncio dele volta ao `videos`,
+> que é quem move o estado — os workers relatam, o dono do estado decide. O download, no fim, é
+> stream de ponta a ponta. Presigned URL foi recusada: é um bearer token na query string, e o
+> host entra na assinatura.
 
 ### Tomada — sequência do caminho de falha (73s)
 
@@ -220,7 +220,7 @@ Encaixar aqui, por ~10s, a árvore de pacotes versionada do módulo `videos`.
 ### Tomada — run verde do GitHub Actions (25s)
 
 > Qualidade e CI/CD na mesma tela. Cada push roda `verify` na raiz, e a `main` é protegida:
-> só entra por pull request. São cento e trinta testes — unitários do `core` com dublês,
+> só entra por pull request. São quinhentos e doze testes — unitários do `core` com dublês,
 > Cucumber pela borda HTTP, o teste arquitetural, e ffmpeg de verdade contra um vídeo real no
 > `extracao`. Passando, o mesmo pipeline publica as três imagens multi-arquitetura no GHCR.
 

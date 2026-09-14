@@ -42,7 +42,8 @@ groups:
           summary: >-
             Ha mensagem no Estacionamento (`extracao.extrair.estacionamento`). E fila terminal:
             nada a tira dai sozinho. Provavelmente ha Video preso em PROCESSANDO do outro lado.
-            Ver CONTEXT.md § Estacionamento e ADR 0001.
+            Ver CONTEXT.md § Estacionamento e ADR 0001; resgate em
+            docs/operacao/resgate-de-video-preso.md.
         labels:
           severidade: humano-necessario
         data:
@@ -132,7 +133,9 @@ groups:
           summary: >-
             A fila {{ $labels.queue }} tem mensagem pronta e nenhum consumidor. Foi este o
             incidente de 06/09/2026: as duas replicas do extracao morreram em laco de
-            PRECONDITION_FAILED e todo Video enviado ficou em RECEBIDO por 14 minutos.
+            PRECONDITION_FAILED e todo Video enviado ficou em RECEBIDO por 14 minutos. Se a fila
+            for de fim de linha (`videos.dlq`, `notificacao.dlq`), ver
+            docs/operacao/resgate-de-video-preso.md.
         labels:
           severidade: humano-necessario
         data:
@@ -169,7 +172,8 @@ groups:
   # `for: 1m` so para nao disparar numa amostra isolada; o tempo que importa ja esta na metrica.
   #
   # Sem resgate automatico, de proposito: republicar o comando durante um pico e a armadilha que
-  # o ADR 0003 recusou. O desfecho continua sendo de um humano (CONTEXT.md § Video perdido).
+  # o ADR 0003 recusou. O desfecho continua sendo de um humano (CONTEXT.md § Video perdido), pelo
+  # resgate manual do ticket 107 (docs/operacao/resgate-de-video-preso.md).
   - orgId: 1
     name: videos-presos
     folder: FIAP X
@@ -193,8 +197,8 @@ groups:
             Ha {{ $values.A.Value }} Video(s) em PROCESSANDO ha mais que o limiar
             (`fiapx.deteccao.limiar-de-video-preso`, no videos) desde o inicio da Extracao, alem
             do pior caso de tres tentativas seguidas. Procure no Postgres por
-            `estado = 'PROCESSANDO'` ordenado por `iniciada_em`, e o trace pelo idVideo. Ver
-            CONTEXT.md § Video perdido.
+            `estado = 'PROCESSANDO'` ordenado por `iniciada_em`, e o trace pelo idVideo. Resgate
+            em docs/operacao/resgate-de-video-preso.md; ver CONTEXT.md § Video perdido.
         labels:
           severidade: humano-necessario
         data:
@@ -244,7 +248,8 @@ groups:
             Ha {{ $values.A.Value }} Video(s) em RECEBIDO com o ExtrairVideo publicado ha mais que o
             limiar (`fiapx.deteccao.limiar-de-video-preso`, no videos), e `extracao.extrair` nao tem mensagem pronta: o comando nao esta esperando na
             fila. Procure no Postgres por `estado = 'RECEBIDO'` ordenado por
-            `comando_publicado_em`. Ver CONTEXT.md § Video perdido.
+            `comando_publicado_em`. Resgate em docs/operacao/resgate-de-video-preso.md; ver
+            CONTEXT.md § Video perdido.
         labels:
           severidade: humano-necessario
         data:

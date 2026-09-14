@@ -382,6 +382,14 @@ defeitos de correção que ele reprovava de propósito (terminal fora de ordem, 
 foram corrigidos no ticket 027; remedido contra o código atual no ticket 073, ele passa: 400/400
 em `limpo`, 41/41 em `mata-videos` com o `videos` derrubado no meio da rajada.
 
+`scripts/resgate-ponta-a-ponta.sh` prova o resgate do ticket 107 contra o Compose: força um Vídeo
+preso em `RECEBIDO` e outro em `PROCESSANDO`, confere que a varredura não os toca sem resgate e
+que `scripts/resgata-video.sh` os leva a `CONCLUIDO`. Rode-o quando mexer na varredura do
+[ADR 0003](docs/adr/0003-reconciliacao-por-varredura.md), nas marcas de publicação ou no script
+de resgate. Ele para o `extracao` e purga `extracao.extrair`, então não rode com trabalho na fila.
+O procedimento humano está em
+[`docs/operacao/resgate-de-video-preso.md`](docs/operacao/resgate-de-video-preso.md).
+
 `scripts/trafego.sh` é o único script deste repositório que **não reprova nada**, e isso é o
 desenho dele: ele gera tráfego sintético contra o Compose principal — blocos de 5 min alternando
 chegada sustentada e rajada, mais um ciclo de listagem/consulta/download e erros de borda

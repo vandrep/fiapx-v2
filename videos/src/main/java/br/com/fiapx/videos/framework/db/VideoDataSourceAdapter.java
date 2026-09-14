@@ -18,6 +18,7 @@ import jakarta.inject.Inject;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -149,12 +150,18 @@ public class VideoDataSourceAdapter implements VideoGateway {
                 .subscribeAsCompletionStage();
     }
 
+    /**
+     * {@code PROCESSANDO} entra desde o ticket 107: o caminho normal grava a marca logo depois do
+     * publish, entao um {@code PROCESSANDO} sem marca passada a folga e, em regra, um Video
+     * resgatado. A excecao e o publish que chegou ao broker sem a marca ser gravada, que repete a Extracao
+     * (ADR 0003).
+     */
     @Override
     public CompletableFuture<List<Video>> buscarComandosPendentes(Instant recebidosAntesDe, int tamanhoDoLote) {
         return repeticaoNoPostgres.executar(() -> Panache.withSession(() -> VideoEntity.<VideoEntity>find(
-                        "estado = ?1 and comandoPublicadoEm is null and recebidoEm < ?2",
+                        "estado in ?1 and comandoPublicadoEm is null and recebidoEm < ?2",
                         Sort.by("recebidoEm"),
-                        EstadoVideo.RECEBIDO, recebidosAntesDe)
+                        Set.of(EstadoVideo.RECEBIDO, EstadoVideo.PROCESSANDO), recebidosAntesDe)
                         .range(0, tamanhoDoLote - 1)
                         .list()
                         .map(entidades -> entidades.stream().map(VideoDataSourceAdapter::paraDominio).toList())))

@@ -165,7 +165,8 @@ final class GatewaysEmMemoria {
         public CompletableFuture<List<Video>> buscarComandosPendentes(Instant recebidosAntesDe, int tamanhoDoLote) {
             cortesDeComandos.add(recebidosAntesDe);
             var pendentes = armazenados.values().stream()
-                    .filter(video -> video.estado() == EstadoVideo.RECEBIDO)
+                    .filter(video -> video.estado() == EstadoVideo.RECEBIDO
+                            || video.estado() == EstadoVideo.PROCESSANDO)
                     .filter(video -> !comandoPublicadoEm.containsKey(video.id()))
                     .filter(video -> video.recebidoEm().isBefore(recebidosAntesDe))
                     .sorted(Comparator.comparing(Video::recebidoEm))

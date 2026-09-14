@@ -14,7 +14,10 @@ Decidido no [ticket 018](../wayfinder/tickets/018-outbox-transacional.md) e corr
 [ticket 027](../wayfinder/tickets/027-melhorias-medidas.md), que descobriu que a marca podia
 mentir — ver a primeira consequência abaixo. Emendado no
 [ticket 104](../wayfinder/tickets/104-aceite-do-video-no-commit-da-linha.md), que tirou o publish do
-caminho do aceite — ver a consequência sobre o aceite.
+caminho do aceite — ver a consequência sobre o aceite. Emendado de novo no
+[ticket 107](../wayfinder/tickets/107-resgate-de-video-preso-pela-marca.md), que fez da marca o
+ponto de resgate humano e pôs `PROCESSANDO` no predicado do comando — ver a consequência sobre o
+resgate.
 
 ## Considered Options
 
@@ -112,6 +115,26 @@ dizer se o evento saiu.
   também pode falhar e deixaria o mesmo Vídeo meio aceito; e manter a resposta ambígua. A varredura
   continua em um minuto de folga, então um Vídeo aceito sem comando espera no máximo esse minuto
   mais uma passada.
+- **Resgate é apagar a marca, e a varredura aceita `RECEBIDO` ou `PROCESSANDO`** (emenda do
+  [ticket 107](../wayfinder/tickets/107-resgate-de-video-preso-pela-marca.md)). O Vídeo preso sai
+  do fim da linha por `scripts/resgata-video.sh`, que zera `comando_publicado_em` de um Vídeo
+  não-terminal e recusa um Vídeo com desfecho. A varredura republica o `ExtrairVideo` pelo mesmo
+  caminho do envio, e o procedimento está em
+  [`docs/operacao/resgate-de-video-preso.md`](../operacao/resgate-de-video-preso.md). O predicado
+  do comando passou de `estado = 'RECEBIDO'` a `estado IN ('RECEBIDO', 'PROCESSANDO')`, porque um
+  Vídeo que perdeu a Extração no meio está em `PROCESSANDO` e só voltaria ao caminho com ele. O
+  `FALHOU` sem `falha_publicada_em` já era pendente e não muda. Recusados: mover mensagens entre
+  filas por shovel ou UI, que não resgata o que foi descartado, e endpoint administrativo, que
+  exigiria papel de administrador no Keycloak por pouca coisa.
+  A leitura do ticket dizia que todo `PROCESSANDO` tem marca. **Não é exato.** Um crash entre o
+  publish e a marca, ou um confirm que falha depois de o broker já ter aceitado a mensagem, seguido
+  da Extração começar, deixa um `PROCESSANDO` sem marca. Antes do 107
+  ele ficava de fora; agora a varredura o republica depois da folga, e a Extração roda duas vezes.
+  É a mesma duplicata da consequência sobre a marca gravada depois do publish, e as transições a
+  engolem. O comando republicado é mensagem nova, com nova série de tentativas: aceito, por ser
+  ação humana. A mensagem que ficou na DLQ ou no Estacionamento vira duplicata inofensiva e é
+  purgada depois do resgate. O índice `ix_video_comando_pendente` não tem estado no predicado, e
+  por isso já serve à consulta nova.
 - **Duas réplicas de `videos` varrem ao mesmo tempo, e tudo bem.** Ambas publicam, o consumo
   é idempotente e o `UPDATE ... WHERE marca IS NULL` serializa a marca. `SKIP LOCKED` ou
   eleição de líder pagariam complexidade para evitar uma duplicata que o sistema inteiro foi

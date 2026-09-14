@@ -269,6 +269,40 @@ class VideoDataSourceAdapterTest {
                         "passada a folga, a falha perdida tem de voltar a ser alcancada"));
     }
 
+    /**
+     * O predicado do resgate (ticket 107): {@code PROCESSANDO} sem marca volta a ser pendente,
+     * e so o resgate apaga a marca de um {@code PROCESSANDO}. Com marca ele fica de fora, e o
+     * terminal sem marca tambem, porque terminal e terminal.
+     */
+    @Test
+    @RunOnVertxContext
+    void processandoSemMarcaEPendenteEComMarcaNao(UniAsserter asserter) {
+        var semMarca = new UUID[1];
+        var comMarca = new UUID[1];
+        var concluidoSemMarca = new UUID[1];
+        gravarRecebido(asserter, semMarca);
+        gravarRecebido(asserter, comMarca);
+        gravarRecebido(asserter, concluidoSemMarca);
+        asserter.execute(() -> iniciar(semMarca[0]));
+        asserter.execute(() -> iniciar(comMarca[0]));
+        asserter.execute(() -> Uni.createFrom().completionStage(
+                () -> adapter.marcarComandoPublicado(comMarca[0], Instant.now())));
+        asserter.execute(() -> concluir(concluidoSemMarca[0]));
+
+        var corte = Instant.now().plus(Duration.ofDays(1));
+        asserter.assertThat(() -> comandosPendentesAntesDe(corte), pendentes -> {
+            assertTrue(contem(pendentes, semMarca[0]), "PROCESSANDO sem marca tem de ser republicado");
+            assertFalse(contem(pendentes, comMarca[0]), "PROCESSANDO com marca ja tem comando");
+            assertFalse(contem(pendentes, concluidoSemMarca[0]), "terminal nao recebe comando");
+        });
+    }
+
+    /** Lote largo de proposito: a tabela do teste acumula linhas de outros cenarios. */
+    private Uni<List<Video>> comandosPendentesAntesDe(Instant recebidosAntesDe) {
+        return Uni.createFrom().completionStage(
+                () -> adapter.buscarComandosPendentes(recebidosAntesDe, 1_000));
+    }
+
     /** Lote largo de proposito: a tabela do teste acumula linhas de outros cenarios. */
     private Uni<List<Video>> falhasPendentesAntesDe(Instant falhadosAntesDe) {
         return Uni.createFrom().completionStage(

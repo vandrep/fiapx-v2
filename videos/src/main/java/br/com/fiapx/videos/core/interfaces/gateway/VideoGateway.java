@@ -71,9 +71,10 @@ public interface VideoGateway {
     CompletableFuture<Void> marcarFalhaPublicada(UUID id, Instant publicadoEm);
 
     /**
-     * Vídeos RECEBIDO cujo {@code ExtrairVideo} nunca foi publicado, com folga contra o
+     * Vídeos RECEBIDO ou PROCESSANDO sem a marca do {@code ExtrairVideo}, com folga contra o
      * crash entre o INSERT e o publish: so entram aqui os recebidos antes de
-     * {@code recebidosAntesDe} (ADR 0003). Ordenado por {@code recebidoEm}, lote limitado.
+     * {@code recebidosAntesDe} (ADR 0003). PROCESSANDO entra pelo resgate, que apaga a marca
+     * (ticket 107). Ordenado por {@code recebidoEm}, lote limitado.
      */
     CompletableFuture<List<Video>> buscarComandosPendentes(Instant recebidosAntesDe, int tamanhoDoLote);
 

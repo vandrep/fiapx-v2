@@ -1486,6 +1486,15 @@ verificadas por teste, não são sugestão). Projeto original em
   Dono, e quem consulta em regime é um alerta. Falso positivo aceito e escrito: entrega devolvida
   por crash espera atrás do backlog.
 
+- [Resgate de Vídeo preso pela marca de
+  publicação](tickets/107-resgate-de-video-preso-pela-marca.md) — resgate é apagar a marca.
+  `scripts/resgata-video.sh` zera `comando_publicado_em` de um Vídeo `RECEBIDO` ou `PROCESSANDO`,
+  e a varredura do ADR 0003 republica o `ExtrairVideo` pelo caminho do envio. Vídeo com desfecho é
+  recusado. O predicado da varredura passou a aceitar `PROCESSANDO`. `FALHOU` sem aviso já era
+  pendente, e o script só o reporta. O runbook `docs/operacao/resgate-de-video-preso.md` é para onde
+  os alertas apontam, e inclui a purga da mensagem residual. Recusados: mover mensagens por shovel
+  ou UI e endpoint administrativo. Provado no Compose por `scripts/resgate-ponta-a-ponta.sh`.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

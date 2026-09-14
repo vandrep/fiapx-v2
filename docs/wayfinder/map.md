@@ -1495,6 +1495,17 @@ verificadas por teste, não são sugestão). Projeto original em
   os alertas apontam, e inclui a purga da mensagem residual. Recusados: mover mensagens por shovel
   ou UI e endpoint administrativo. Provado no Compose por `scripts/resgate-ponta-a-ponta.sh`.
 
+- [Recusa por capacidade antes de receber o
+  corpo](tickets/108-recusa-por-capacidade-antes-do-corpo.md) — o `POST /videos` sai `503` com
+  `Retry-After` e em problem+json **antes de o corpo ser lido**, por uma rota Vert.x ordenada à
+  frente de quem lê o multipart. A recusa é pelo recurso local da borda, e não pelo backlog da
+  fila, que é o amortecedor de pico. São duas perguntas: se a réplica já tem o teto de envios em
+  andamento, e se o `Content-Length` cabe no espaço livre do volume de uploads descontado o que os
+  envios em andamento ainda vão gravar. O teto é derivado, tamanho do volume / 200 MB, e pode ser
+  configurado. `Content-Length` acima de 200 MB continua `413`. A falha do MinIO na primeira
+  escrita do envio também vira `503`; a do `INSERT` continua `500`. A recusa vem antes da
+  autenticação, e recusa não é Vídeo perdido. Cota por Dono e fila justa ficam para o 109.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

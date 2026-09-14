@@ -98,6 +98,9 @@ services:
   videos:
     environment:
       QUARKUS_OTEL_SDK_DISABLED: "true"
+      # Ticket 108: vazio, o teto de envios simultaneos e o derivado do volume de uploads. A
+      # calibracao o baixa para ver a recusa acontecer sob rajada sem precisar encher disco.
+      FIAPX_BORDA_TETO_DE_ENVIOS_SIMULTANEOS: ${FIAPX_BORDA_TETO_DE_ENVIOS_SIMULTANEOS:-}
     ports: !override []
     deploy:
       replicas: ${FIAPX_VIDEOS_REPLICAS:-1}

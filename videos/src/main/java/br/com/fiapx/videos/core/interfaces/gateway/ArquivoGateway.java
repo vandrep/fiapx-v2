@@ -20,7 +20,8 @@ public interface ArquivoGateway {
 
     /**
      * Grava o Video enviado e <b>devolve a chave que gravou</b>, para o Video recebe-la
-     * pronta.
+     * pronta. A falha, ja depois das repeticoes, chega como
+     * {@link br.com.fiapx.videos.core.exceptions.ArmazenamentoIndisponivelException} (ticket 108).
      */
     CompletableFuture<String> gravarVideo(UUID idVideo, String nome, Path arquivo);
 

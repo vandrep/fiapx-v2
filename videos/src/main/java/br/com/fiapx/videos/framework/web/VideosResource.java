@@ -95,6 +95,8 @@ public class VideosResource {
     @APIResponse(responseCode = "413", description = "Corpo acima de 200 MB (resposta do servidor HTTP, não problem+json)")
     @APIResponse(responseCode = "415", description = "Content-type ou extensão fora da lista aceita")
     @APIResponse(responseCode = "500", description = "Erro interno: não foi possível concluir a requisição")
+    @APIResponse(responseCode = "503", description = "Sem capacidade para receber o Vídeo agora, ou armazenamento"
+            + " indisponível; nada foi aceito. Tente de novo depois do Retry-After")
     public Uni<Response> enviar(@RestForm("arquivo") FileUpload arquivo) {
         if (arquivo == null || arquivo.size() <= 0) {
             throw new ArquivoAusenteException("O campo 'arquivo' é obrigatório e não pode estar vazio");

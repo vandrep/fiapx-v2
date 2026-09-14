@@ -1,6 +1,7 @@
 package br.com.fiapx.videos.framework.service;
 
 import br.com.fiapx.videos.core.entities.FormatoDoArquivo;
+import br.com.fiapx.videos.core.exceptions.ArmazenamentoIndisponivelException;
 import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.framework.observabilidade.Rastro;
 import br.com.fiapx.videos.framework.vertx.ContextoDeChamada;
@@ -63,6 +64,8 @@ public class ArquivoMinioAdapter implements ArquivoGateway {
         var chave = chaveDoVideo(idVideo, nome);
         return rastro.emTorno("videos.gravar-video", () -> noContextoDeChamada(Uni.createFrom()
                 .completionStage(() -> minioClient.gravar(bucketVideos, chave, arquivo))
+                .onFailure().transform(falha -> new ArmazenamentoIndisponivelException(
+                        "Nao foi possivel gravar o Video no armazenamento: chaveVideo=" + chave, falha))
                 .replaceWith(chave)));
     }
 

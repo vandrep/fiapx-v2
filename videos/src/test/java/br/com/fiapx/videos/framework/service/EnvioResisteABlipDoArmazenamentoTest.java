@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 
 /**
@@ -86,14 +87,21 @@ class EnvioResisteABlipDoArmazenamentoTest {
         enviarVideo().then().statusCode(202);
     }
 
+    /**
+     * No envio, a gravacao no MinIO e a primeira escrita: quando ela falha nada mais foi gravado,
+     * e o sistema nao assumiu o Video. Por isso {@code 503} com {@code Retry-After}, e nao o
+     * {@code 500} ambiguo (ticket 108). O download continua {@code 500}, no cenario abaixo.
+     */
     @Test
-    void armazenamentoPersistentementeForaContinuaChegandoComoErroInterno() {
+    void armazenamentoPersistentementeForaNoEnvioChegaComoIndisponivel() {
         QuarkusMock.installMockForType(new S3QueFalhaAsPrimeiras(SEMPRE), S3AsyncClient.class);
 
         enviarVideo().then()
-                .statusCode(500)
+                .statusCode(503)
+                .header("Retry-After", notNullValue())
                 .contentType("application/problem+json")
-                .body("title", is("Erro interno"));
+                .body("title", is("Armazenamento indisponivel"))
+                .body("status", is(503));
     }
 
     @Test

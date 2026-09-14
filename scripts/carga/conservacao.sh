@@ -13,7 +13,9 @@
 #                   isso que este modo sozinho prova pouco. Ele e a linha de base.
 #   mata-extracao   `docker kill` numa replica do extracao durante a drenagem. Exercita ack
 #                   manual, requeue e x-delivery-limit: "o worker morre no meio", que a doc
-#                   afirma e nada verificava.
+#                   afirma e nada verificava. Mede tambem, sem julgar, para onde a entrega
+#                   interrompida volta na fila e quanto o Video dela leva ate o desfecho
+#                   (ticket 113, o falso positivo do alerta de Video preso em PROCESSANDO).
 #   mata-videos     `docker kill videos` durante a rajada. E o unico modo que exercita a
 #                   varredura de reconciliacao e as colunas marcadoras do ADR 0003 — aquele
 #                   ADR existe inteiro para fechar a janela entre gravar e publicar, e essa
@@ -119,6 +121,21 @@ reentregas_extrair() {
         | jq -r '.message_stats.redeliver // 0'
 }
 
+# So mata-extracao: o scratch do volume compartilhado, uma entrada `{idVideo}-{sufixo}` por
+# tentativa (EspacoDeTrabalhoAdapter). A tentativa que termina limpa o seu; a morta pelo SIGKILL
+# deixa o orfao, e a varredura do boot so apaga orfao com mais de 60 min. Listado antes da rajada
+# e depois da drenagem, a diferenca e exatamente o conjunto de tentativas interrompidas, sem
+# corrida com o kill (ticket 113).
+scratch_extracao() {
+    "${compose[@]}" exec -T extracao ls -1 /var/fiapx/extracao | sort
+}
+
+fila_extrair() {
+    curl -sS -u "$rabbitmq_usuario:$rabbitmq_senha" \
+        "$rabbitmq_url/api/queues/%2F/extracao.extrair" \
+        | jq -r '"\(.messages_ready // 0) \(.messages_unacknowledged // 0)"'
+}
+
 profundidade_estacionamento() {
     curl -sS -u "$rabbitmq_usuario:$rabbitmq_senha" \
         "$rabbitmq_url/api/queues/%2F/extracao.extrair.estacionamento" \
@@ -189,6 +206,11 @@ if [[ "$modo" == redeploy-extracao ]]; then
     ok "reentregas de extracao.extrair antes do envio: $reentregas_base"
 fi
 
+if [[ "$modo" == mata-extracao ]]; then
+    scratch_extracao > "$saida/scratch-antes.txt"
+    ok "scratch do extracao antes do envio: $(wc -l < "$saida/scratch-antes.txt") entrada(s) ja presentes"
+fi
+
 # ---------------------------------------------------------------------------------------
 passo "2. Criterio, fixado antes de rodar"
 
@@ -255,6 +277,14 @@ if [[ "$modo" == redeploy-extracao ]]; then
     echo "       e o custo de janela por deploy que o ticket 028 precisa conhecer, medido e nao"
     echo "       julgado. O teto teorico e o stop_grace_period de 480s; o esperado e o que"
     echo "       sobra da Extracao em voo."
+fi
+if [[ "$modo" == mata-extracao ]]; then
+    echo "    0. Ao menos uma tentativa interrompida pelo kill (orfao novo no scratch). Sem ela a"
+    echo "       replica morreu ociosa e nada voltou a fila. Portao de validade da rodada."
+    echo "    6. Medido e nao julgado aqui (ticket 113), para cada tentativa interrompida:"
+    echo "       a posicao em que a entrega voltou a fila, contra as mensagens prontas no kill;"
+    echo "       o intervalo iniciada_em -> desfecho; e o maior valor, durante a drenagem, da"
+    echo "       contagem do gauge fiapx_videos_presos{estado=\"PROCESSANDO\"} feita no Postgres."
 fi
 fi
 
@@ -370,8 +400,11 @@ if [[ "$modo" == mata-publicacao ]]; then
 elif [[ "$modo" == mata-extracao ]]; then
     sleep 5
     alvo="$("${compose[@]}" ps -q extracao | head -1)"
+    read -r prontas_no_kill sem_ack_no_kill <<< "$(fila_extrair)"
+    instante_kill="$(date --iso-8601=ns)"
     docker kill "$alvo" >/dev/null
     aviso "uma replica do extracao morta no meio da drenagem (container ${alvo:0:12})"
+    aviso "extracao.extrair no kill: $prontas_no_kill pronta(s), $sem_ack_no_kill sem ack, em $instante_kill"
     "${compose[@]}" up -d extracao > /dev/null 2>&1
     aviso "replica de volta"
 elif [[ "$modo" == redeploy-extracao ]]; then
@@ -414,11 +447,20 @@ fi
 
 if [[ "$modo" != mata-publicacao ]]; then
 inicio_drenagem=$SECONDS
+presos_max=0; idade_max=0
 while :; do
     censo="$(scripts/carga/oraculo.sh censo "$aceitos_arquivo")"
     terminais="$(awk '$1=="CONCLUIDO"||$1=="FALHOU"{s+=$2} END{print s+0}' <<< "$censo")"
     decorrido=$(( SECONDS - inicio_drenagem ))
-    printf '    %4ds  %s\n' "$decorrido" "$(tr '\n' ' ' <<< "$censo")"
+    if [[ "$modo" == mata-extracao ]]; then
+        read -r presos_agora idade_agora <<< "$(scripts/carga/oraculo.sh presos)"
+        (( presos_agora > presos_max )) && presos_max=$presos_agora
+        (( idade_agora > idade_max )) && idade_max=$idade_agora
+        printf '    %4ds  %s presos=%s idade_max=%ss\n' "$decorrido" "$(tr '\n' ' ' <<< "$censo")" \
+            "$presos_agora" "$idade_agora" | tee -a "$saida/drenagem.txt"
+    else
+        printf '    %4ds  %s\n' "$decorrido" "$(tr '\n' ' ' <<< "$censo")"
+    fi
     (( terminais == aceitos )) && break
     (( decorrido > limite_drenagem )) && { aviso "limite de ${limite_drenagem}s estourado"; break; }
     sleep 5
@@ -428,6 +470,19 @@ fi
 
 if [[ "$modo" == redeploy-extracao ]]; then
     reentregas_novas=$(( $(reentregas_extrair) - reentregas_base ))
+fi
+
+if [[ "$modo" == mata-extracao ]]; then
+    scratch_extracao > "$saida/scratch-depois.txt"
+    comm -13 "$saida/scratch-antes.txt" "$saida/scratch-depois.txt" | cut -c1-36 | sort -u \
+        > "$saida/interrompidos.txt"
+    interrompidos="$(wc -l < "$saida/interrompidos.txt")"
+    if (( interrompidos > 0 )); then
+        scripts/carga/oraculo.sh interrompidas "$aceitos_arquivo" "$saida/interrompidos.txt" "$instante_kill" \
+            > "$saida/interrompidas.txt"
+    else
+        : > "$saida/interrompidas.txt"
+    fi
 fi
 
 # ---------------------------------------------------------------------------------------
@@ -521,6 +576,22 @@ if [[ "$modo" == redeploy-extracao ]]; then
     julga "6b. O dreno realmente rodou" "$([[ $linhas_dreno -gt 0 ]] && echo true || echo false)" \
           "$linhas_dreno replica(s) logaram o dreno segurando o desligamento; sem essa linha, um criterio 6 verde nao prova o mecanismo, so que ninguem estava trabalhando"
     ok "7. Janela de deploy — ${segundos_redeploy}s no 'up -d --force-recreate' (teto: stop_grace_period 480s), medido e nao julgado"
+fi
+if [[ "$modo" == mata-extracao ]]; then
+    if (( interrompidos == 0 )); then
+        echo "    ${vermelho}INVALIDA${normal}  0. Nenhuma tentativa interrompida: a replica morreu ociosa, e o"
+        echo "              criterio 6 nao teria o que medir."
+        echo
+        echo "${negrito}${vermelho}Rodada invalida${normal}: repita, com mais envios se a fila drenou antes do kill."
+        echo "    Saida completa: scripts/carga/saida/$rotulo/"
+        exit 2
+    fi
+    ok "0. Rodada valida — $interrompidos tentativa(s) interrompida(s) pelo kill"
+    ok "6. Reentrega (ticket 113), medido e nao julgado — $prontas_no_kill pronta(s) e $sem_ack_no_kill sem ack no kill:"
+    while read -r id estado segundos posicao; do
+        echo "         $id  $estado  iniciada_em->desfecho ${segundos:-?}s  posicao $posicao"
+    done < "$saida/interrompidas.txt"
+    ok "6. Maior contagem de presos em PROCESSANDO na drenagem: $presos_max (PROCESSANDO mais velho: ${idade_max}s)"
 fi
 
 echo

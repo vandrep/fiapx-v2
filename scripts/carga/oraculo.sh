@@ -14,9 +14,14 @@
 # O censo e sempre um LEFT JOIN a partir da lista de envios: o estado `AUSENTE` — aceito com
 # 202 e sem linha no banco — e a perda que um `SELECT count(*) FROM video` jamais mostraria.
 #
+# Mais duas consultas ao Postgres, so do modo mata-extracao, para o ticket 113: `presos`, a
+# contagem do gauge de Video preso, e `interrompidas`, o destino das tentativas mortas pelo kill.
+#
 # Uso:
 #   scripts/carga/oraculo.sh censo   <arquivo-de-ids>
 #   scripts/carga/oraculo.sh amostra <arquivo-de-ids> [quantidade]
+#   scripts/carga/oraculo.sh presos  [limiar]
+#   scripts/carga/oraculo.sh interrompidas <aceitos> <interrompidos> <instante-do-kill>
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -79,8 +84,55 @@ amostra() {
     return $(( divergencias > 0 ? 1 : 0 ))
 }
 
+psql_videos() {
+    docker compose exec -T postgres psql -U fiapx -d fiapx_videos -q -t -A -F' ' -v ON_ERROR_STOP=1
+}
+
+# A contagem do gauge fiapx.videos.presos{estado="PROCESSANDO"} (ticket 106), feita direto no
+# Postgres porque o overlay de carga desliga a observabilidade (ticket 113). E o mesmo predicado
+# do ContarVideosPresosUseCase, sobre TODOS os Videos e nao so os da rodada, como o gauge. A
+# segunda coluna e a idade do PROCESSANDO mais velho, em segundos: e ela que mostra quanto falta
+# para o limiar numa corrida curta, em que a contagem fica em zero.
+presos() {
+    local limiar="${1:-30 minutes}"
+    psql_videos <<SQL
+SELECT count(*) FILTER (WHERE iniciada_em < now() - interval '$limiar'),
+       coalesce(round(extract(epoch FROM now() - min(iniciada_em))), 0)
+  FROM video WHERE estado = 'PROCESSANDO';
+SQL
+}
+
+# Uma linha por Video cuja tentativa foi interrompida (ticket 113): estado, iniciada_em ->
+# desfecho em segundos, e a posicao em que a entrega voltou a fila. A posicao e contada pelos
+# Videos da rodada cuja PRIMEIRA tentativa comecou depois do kill e antes do desfecho do
+# interrompido: entrega recolocada no comeco fica perto de zero (so os que as outras replicas ja
+# tinham pego), no fim fica perto das mensagens prontas no instante do kill.
+interrompidas() {
+    local aceitos="$1" interrompidos="$2" instante_kill="$3"
+    {
+        echo "CREATE TEMP TABLE enviados (id uuid PRIMARY KEY);"
+        echo "COPY enviados FROM STDIN;"
+        cat "$aceitos"
+        echo '\.'
+        echo "CREATE TEMP TABLE interrompidos (id uuid PRIMARY KEY);"
+        echo "COPY interrompidos FROM STDIN;"
+        cat "$interrompidos"
+        echo '\.'
+        echo "SELECT i.id, coalesce(v.estado, 'AUSENTE'),
+                     round(extract(epoch FROM v.finalizado_em - v.iniciada_em)),
+                     (SELECT count(*) FROM enviados e JOIN video o ON o.id = e.id
+                       WHERE o.id <> i.id
+                         AND o.iniciada_em > '$instante_kill'::timestamptz
+                         AND o.iniciada_em < v.finalizado_em)
+                FROM interrompidos i LEFT JOIN video v ON v.id = i.id
+               ORDER BY 1;"
+    } | psql_videos
+}
+
 case "${1:-}" in
-    censo)   censo "$2" ;;
-    amostra) amostra "$2" "${3:-10}" ;;
-    *)       echo "uso: $0 censo|amostra <arquivo-de-ids> [quantidade]" >&2; exit 2 ;;
+    censo)         censo "$2" ;;
+    amostra)       amostra "$2" "${3:-10}" ;;
+    presos)        presos "${2:-30 minutes}" ;;
+    interrompidas) interrompidas "$2" "$3" "$4" ;;
+    *)             echo "uso: $0 censo|amostra <arquivo-de-ids> [quantidade] | presos [limiar] | interrompidas <aceitos> <interrompidos> <instante-do-kill>" >&2; exit 2 ;;
 esac

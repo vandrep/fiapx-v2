@@ -2,7 +2,7 @@
 
 - id: 116
 - label: ready-for-human
-- status: aberto
+- status: fechado
 - assignee: Codex (sessão de 2026-09-15, SHA inicial 8b0e0ed)
 - bloqueado-por:
 - prioridade: P3
@@ -45,8 +45,38 @@ nunca vai valer como limite e que muda de máquina para máquina. Quem protege o
 
 ## Critérios de aceite
 
-- [ ] Decisão sobre (a), com o motivo, registrada no contrato HTTP.
-- [ ] Decisão sobre (b), com o número, se houver, e o motivo.
-- [ ] O que mudar no código vira ticket `ready-for-agent`, ou se resolve aqui se for só
+- [x] Decisão sobre (a), com o motivo, registrada no contrato HTTP.
+- [x] Decisão sobre (b), com o número, se houver, e o motivo.
+- [x] O que mudar no código vira ticket `ready-for-agent`, ou se resolve aqui se for só
       configuração.
-- [ ] Linha em "Decisões até aqui" no mapa.
+- [x] Linha em "Decisões até aqui" no mapa.
+
+## Resolução
+
+Decidido em 2026-09-15, mantendo as duas escolhas do ticket 108 e sem mudança de código ou
+configuração.
+
+### (a) A recusa continua antes da autenticação
+
+O contrato HTTP agora registra explicitamente que a ordem é deliberada. A rota precisa decidir
+só com os cabeçalhos, antes de o multipart ser lido e ocupar o volume de uploads. Autenticar
+antes poderia fazer o corpo de um envio sem token ser gravado antes da decisão e reduzir a
+proteção que motivou a recusa. O preço aceito é um `POST` sem token receber `503` quando a
+réplica não tem vaga, em vez de `401`; isso é consequência do recurso protegido e da ordem da
+rota, não uma nova regra de autorização.
+
+### (b) O default continua derivado, sem orçamento fixo de disco
+
+O teto sem configuração continua sendo o tamanho do volume dividido pelo limite de 200 MB. O
+valor **2354**, observado no host de 460 GB durante os tickets 108 e 115, é um dado daquela
+máquina e não vira limite prometido pelo contrato. No Compose, o volume nomeado não tem cota
+própria; declarar um orçamento sem impô-lo no volume daria uma precisão falsa, e impor uma cota
+mudaria a implantação e exigiria uma decisão operacional separada.
+
+A proteção efetiva continua sendo a conta do espaço livre, descontando as reservas dos envios em
+andamento. Quando uma implantação precisar de um teto previsível, a propriedade
+`fiapx.borda.teto-de-envios-simultaneos` já permite configurá-lo; não há alteração necessária
+agora e nenhum novo ticket de código foi aberto.
+
+O mapa registra as duas decisões em [Decisões até aqui](../map.md#decisões-até-aqui), e o contrato
+HTTP registra a ordem da recusa e o caráter não normativo do valor observado.

@@ -254,11 +254,20 @@ armazenamento, que passa pelo `ExceptionMapper`. O `Retry-After` dos dois é **5
 não medida: a ordem de grandeza de um envio terminar, ou das repetições do MinIO do
 [ADR 0001](../adr/0001-politica-de-falhas.md) se esgotarem.
 
-Três consequências, assumidas:
+Estas duas primeiras consequências foram mantidas deliberadamente pelo [ticket
+116](../wayfinder/tickets/116-decisoes-deixadas-pela-recusa-por-capacidade.md):
 
 - **A recusa vem antes da autenticação.** Um envio sem token, numa réplica sem vaga, recebe
   `503`, e não `401`. O que se protege é o volume, e a vaga é decidida antes de qualquer leitura
-  do corpo, inclusive a de quem autentica.
+  do corpo, inclusive a de quem autentica. Mover a autenticação para antes da decisão poderia
+  deixar o corpo de um envio não autenticado ocupar o volume antes de a proteção agir; esse
+  preço foi recusado.
+- **O teto derivado continua sendo o default, sem orçamento fixo para o volume.** No Compose o
+  volume nomeado não tem cota própria, então o teto segue sendo o tamanho do volume dividido por
+  200 MB. O valor **2354**, observado num host de 460 GB durante a calibração, é um número daquela
+  máquina, não um limite do contrato. Quem protege o disco na prática é a conta do espaço livre,
+  descontadas as reservas dos envios em andamento. Implantações que precisarem de um teto
+  previsível podem usar `fiapx.borda.teto-de-envios-simultaneos`.
 - **A conta é por réplica.** Réplicas sobre o mesmo volume, como no overlay de carga, não
   enxergam a reserva umas das outras, e cada uma deriva o teto do volume inteiro. No Compose o
   volume nomeado não tem tamanho próprio: é o disco do host, e o teto derivado depende da máquina.

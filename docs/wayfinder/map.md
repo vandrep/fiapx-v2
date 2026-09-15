@@ -1564,6 +1564,14 @@ verificadas por teste, não são sugestão). Projeto original em
   na arquitetura. Método e limites em
   [`capacidade-borda-replicas.md`](../pesquisa/capacidade-borda-replicas.md).
 
+- [Decisões deixadas pela recusa por capacidade](tickets/116-decisoes-deixadas-pela-recusa-por-capacidade.md)
+  — a recusa continua antes da autenticação para decidir pelos cabeçalhos antes de o corpo ocupar
+  o volume; o custo aceito é `503` para um envio sem token quando não há vaga. O teto derivado
+  continua o default: **2354** foi só o valor observado no host de 460 GB, não um limite do
+  contrato, porque o volume nomeado não tem cota própria. A conta de espaço livre com reserva é
+  a proteção efetiva, e um teto previsível continua disponível por configuração. Nenhum código
+  mudou.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

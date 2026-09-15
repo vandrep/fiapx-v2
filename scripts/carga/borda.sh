@@ -46,7 +46,6 @@ frames_esperados="${FIAPX_FRAMES_ESPERADOS:-3}"   # controle-3s.mp4 a 1 fps
 atraso_kill="${FIAPX_ATRASO_KILL:-2}"
 aquecimento="${FIAPX_AQUECER:-0}"
 pausa_aquecimento="${FIAPX_PAUSA_AQUECIMENTO:-10}"
-confirmar_down="${FIAPX_CONFIRMAR_DOWN_V:-0}"
 usuario="${FIAPX_USUARIO:-demo}"
 senha="${FIAPX_SENHA:-demo}"
 segundos_por_video=1
@@ -55,7 +54,6 @@ case "$modo" in escala|mata-replica) ;; *) echo "modo desconhecido: $modo" >&2; 
 [[ "$n_videos" =~ ^[0-9]+$ && "$n_videos" -ge 1 ]] || { echo "N invalido: $n_videos" >&2; exit 2; }
 [[ "$aquecimento" =~ ^[0-9]+$ ]] || { echo "FIAPX_AQUECER invalido: $aquecimento" >&2; exit 2; }
 [[ "$pausa_aquecimento" =~ ^[0-9]+$ ]] || { echo "FIAPX_PAUSA_AQUECIMENTO invalido: $pausa_aquecimento" >&2; exit 2; }
-[[ "$confirmar_down" == 0 || "$confirmar_down" == 1 ]] || { echo "FIAPX_CONFIRMAR_DOWN_V invalido: use 0 ou 1" >&2; exit 2; }
 if [[ "$modo" == mata-replica && "$n_videos" -lt 2 ]]; then
     echo "mata-replica exige N >= 2 — matar a unica replica nao testaria sobrevivencia, testaria o 025 de novo" >&2
     exit 2
@@ -166,14 +164,17 @@ rm -rf "$saida"; mkdir -p "$saida"
 # down -v entre corridas, na mesma razao do 026 (item 4 do metodo la): comparar N=1 com N=3
 # sobre banco e bucket sujos da corrida anterior compararia duas maquinas diferentes, nao dois
 # N diferentes. Quando o namespace foi escolhido explicitamente, nao derrube recursos ja
-# existentes sem uma confirmacao igualmente explicita — ele pode ser outra corrida experimental.
-if [[ -n "${FIAPX_PROJETO_COMPOSE:-}" && "$confirmar_down" == 0 ]]; then
+# existentes — ele pode ser outra corrida experimental; use um sufixo novo para cada execucao.
+if [[ -n "${FIAPX_PROJETO_COMPOSE:-}" ]]; then
     recursos_existentes="$("${compose[@]}" ps -aq)"
     if [[ -z "$recursos_existentes" ]]; then
         recursos_existentes="$(docker volume ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME")"
     fi
+    if [[ -z "$recursos_existentes" ]]; then
+        recursos_existentes="$(docker network ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME")"
+    fi
     if [[ -n "$recursos_existentes" ]]; then
-        echo "FIAPX_PROJETO_COMPOSE=$COMPOSE_PROJECT_NAME ja possui recursos; use FIAPX_CONFIRMAR_DOWN_V=1 para autorizar down -v" >&2
+        echo "FIAPX_PROJETO_COMPOSE=$COMPOSE_PROJECT_NAME ja possui recursos; use um sufixo novo para esta corrida" >&2
         exit 2
     fi
 fi

@@ -1546,6 +1546,14 @@ verificadas por teste, não são sugestão). Projeto original em
   ao lado do limiar, no runbook e numa `## Correção (113)` do 106. Ficam de pé os 420 s sem teto
   duro e o `nack` com requeue, que não foi medido.
 
+- [O proxy de carga aguenta a rajada
+  padrão](tickets/114-proxy-de-carga-aguenta-a-rajada-padrao.md) — o `nginx.conf` gerado declara
+  `worker_connections 1024`, com a conta ao lado: 400 envios × 2 conexões, mais folga. Com o
+  default de 400 conexões, `borda.sh escala 1` deu 400/400 `202`, zero falhas de conexão, os seis
+  critérios verdes e nenhuma linha `worker_connections are not enough` no proxy. A mediana do
+  `202` foi para 14,0 s, sem causa investigada; o indício é partida a frio, com event loops do
+  `videos` bloqueados por até 4,3 s no começo da rajada.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

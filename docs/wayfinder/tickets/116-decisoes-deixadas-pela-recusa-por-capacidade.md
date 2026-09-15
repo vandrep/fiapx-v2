@@ -3,7 +3,7 @@
 - id: 116
 - label: ready-for-human
 - status: aberto
-- assignee:
+- assignee: Codex (sessão de 2026-09-15, SHA inicial 8b0e0ed)
 - bloqueado-por:
 - prioridade: P3
 

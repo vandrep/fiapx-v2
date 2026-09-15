@@ -22,10 +22,10 @@ locução em português, ~145 palavras por minuto.
 | Bloco | Entra em | Duração | Palavras |
 |---|---|---|---|
 | 1. Abertura | 0:00 | 0:29 | 70 |
-| 2. Funcionando | 0:29 | 2:43 | 393 |
+| 2. Funcionando | 0:29 | 2:43 | 392 |
 | 3. Arquitetura | 3:12 | 4:10 | 605 |
 | 4. Fechamento | 7:22 | 2:19 | 336 |
-| **Total** | | **9:41** | **1.404** |
+| **Total** | | **9:41** | **1.403** |
 
 Os números acima são medidos, não estimados: são as palavras que estão de fato escritas
 abaixo. Se você editar a narração, remeça — o teto de dez minutos não perdoa.
@@ -74,7 +74,7 @@ projeto original antes dele — como *antes*, não como leitura de código.
 
 ---
 
-## Bloco 2 — O projeto funcionando (0:29–3:12, 393 palavras)
+## Bloco 2 — O projeto funcionando (0:29–3:12, 392 palavras)
 
 Um único take do `scripts/smoke.sh`, do passo 2 ao 10. Os passos 0 e 1 (dependências e
 Compose) não entram, e o 11 também não: derrubar a observabilidade para provar que o Vídeo
@@ -115,10 +115,10 @@ não depende dela é uma garantia que se afirma em uma frase e custaria meio min
 
 > Agora o caminho de falha, que é o que o enunciado pede ao falar em notificar o usuário. O
 > script envia um arquivo que não é vídeo, com extensão mentirosa. A borda aceita — ela valida
-> extensão e content-type, não conteúdo —, e quem prova que aquilo não é vídeo é o ffmpeg,
-> três entregas depois. O vídeo termina em FALHOU com o motivo `ARQUIVO_INVALIDO`, o pedido do
-> pacote responde 409, e o e-mail chega ao MailHog. O script não conta e-mails: ele procura o
-> identificador deste vídeo dentro do corpo, porque a caixa de entrada sobrevive entre
+> extensão e content-type, não conteúdo —, e a prova é do `extracao`: o `ffprobe` recusa na
+> primeira entrega. O vídeo termina em FALHOU com o motivo `ARQUIVO_INVALIDO`, sem gastar
+> tentativas; o pacote responde 409, e o e-mail chega ao MailHog. O script não conta e-mails:
+> ele procura o identificador deste vídeo dentro do corpo, porque a caixa de entrada sobrevive entre
 > execuções e contar daria falso verde.
 
 ### Tomada — passos 9 e 10, propriedade do vídeo e o rastro *(a espera do 10, acelerada 4×)*

@@ -1572,6 +1572,12 @@ verificadas por teste, não são sugestão). Projeto original em
   a proteção efetiva, e um teto previsível continua disponível por configuração. Nenhum código
   mudou.
 
+- [A tomada do caminho de falha sem três entregas](tickets/117-tomada-do-caminho-de-falha-sem-tres-entregas.md)
+  — a falha do arquivo inválido é permanente: o `ffprobe` a recusa na primeira entrega, sem
+  gastar tentativas, e o motivo é `ARQUIVO_INVALIDO`. O Bloco 2 do roteiro foi atualizado para
+  **392 palavras** (o total, **1.403**); as três entregas continuam apenas no caminho transitório
+  descrito no Bloco 3.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

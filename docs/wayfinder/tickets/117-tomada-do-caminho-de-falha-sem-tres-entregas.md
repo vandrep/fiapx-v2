@@ -2,8 +2,8 @@
 
 - id: 117
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: Codex (sessão de 2026-09-15, SHA inicial 7661389)
 - bloqueado-por:
 - prioridade: P2
 
@@ -59,7 +59,21 @@ cabeçalho. Se não couber, pare e peça decisão ao mantenedor, em vez de corta
 
 ## Critérios de aceite
 
-- [ ] A tomada dos passos 6 a 8 não diz que a falha do arquivo inválido leva três entregas.
-- [ ] O que a tomada afirma sobre a falha bate com o código e com o diagrama do caminho de falha.
-- [ ] A contagem do Bloco 2 continua dentro do teto, e os números do cabeçalho são atualizados.
-- [ ] Linha em "Decisões até aqui" no mapa.
+- [x] A tomada dos passos 6 a 8 não diz que a falha do arquivo inválido leva três entregas.
+- [x] O que a tomada afirma sobre a falha bate com o código e com o diagrama do caminho de falha.
+- [x] A contagem do Bloco 2 continua dentro do teto, e os números do cabeçalho são atualizados.
+- [x] Linha em "Decisões até aqui" no mapa.
+
+## Resolução
+
+Implementado em 2026-09-15 sobre `develop @ 7661389`.
+
+A tomada dos passos 6 a 8 agora preserva a distinção da borda: ela aceita o arquivo pela extensão
+e pelo content-type, mas a prova é do `extracao`, que recusa o conteúdo com `ffprobe` na primeira
+entrega. A falha termina em `FALHOU` com `ARQUIVO_INVALIDO` e não gasta tentativas. O trecho do
+Bloco 3, que descreve as três entregas do caminho transitório e `TENTATIVAS_ESGOTADAS`, ficou
+intocado.
+
+A contagem foi refeita somando as palavras das linhas `>`: o Bloco 2 ficou com **392 palavras**;
+o total do roteiro passou a **1.403**, mantendo a duração arredondada de 9:41. A decisão foi
+registrada no mapa.

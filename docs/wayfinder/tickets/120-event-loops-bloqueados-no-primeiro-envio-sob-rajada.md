@@ -99,17 +99,18 @@ Implementado em 2026-09-15 sobre `develop @ 14b1f0d`, sem alteração do caminho
 O `scripts/carga/borda.sh` ganhou opções de experimento: `FIAPX_PROJETO_COMPOSE` para isolar o
 projeto Docker da corrida, e `FIAPX_AQUECER`/`FIAPX_PAUSA_AQUECIMENTO` para fazer
 envios sequenciais e uma pausa antes da rajada. A sintaxe do shell e o diff passaram antes da
-rodada. As saídas completas ficam nos diretórios ignorados
-`scripts/carga/saida/ticket120-fria/` e `scripts/carga/saida/ticket120-aquecida/`.
+rodada; o harness também captura automaticamente o `videos.log` e as durações dos avisos. As
+saídas completas ficam nos diretórios ignorados
+`scripts/carga/saida/ticket120-fria-v2/` e `scripts/carga/saida/ticket120-aquecida-v2/`.
 
 ### Comandos e imagem
 
 ```text
-FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-fria \
+FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-fria-v2 \
 FIAPX_EXTRACAO_REPLICAS=2 FIAPX_EXTRACAO_CPUS=1 \
 scripts/carga/borda.sh escala 1 400
 
-FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-aquecida \
+FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-aquecida-v2 \
 FIAPX_AQUECER=5 FIAPX_PAUSA_AQUECIMENTO=10 \
 FIAPX_EXTRACAO_REPLICAS=2 FIAPX_EXTRACAO_CPUS=1 \
 scripts/carga/borda.sh escala 1 400
@@ -126,16 +127,16 @@ Os horários abaixo são do log do container, no fuso local da sessão (`America
 
 | Rodada | Preparo | `BlockedThreadChecker` | `202` mediana | `202` p95 | Resultado funcional |
 |---|---|---:|---:|---:|---|
-| Fria | boot saudável às 11:41:53, rajada sem aquecimento | **6**: 2.825, 4.869, 6.889, 3.368, 8.890 e 5.369 ms; janela 11:42:21.925–11:42:27.800 | **31.346 ms** | **35.594 ms** | 400/400 terminais, 0 recusas, 0 presos, 0 `FALHOU`, frames corretos |
-| Aquecida | 5 envios sequenciais, pausa de 10 s; boot saudável às 11:48:06 | **0** | **2.153 ms** | **4.953 ms** | 400/400 terminais, 0 recusas, 0 presos, 0 `FALHOU`, frames corretos |
+| Fria | boot saudável às 12:23:04, rajada sem aquecimento | **4**: 2.323, 2.023, 3.531 e 4.351 ms; janela 12:23:28.821–12:23:30.807 | **25.310 ms** | **28.735 ms** | 400/400 terminais, 0 recusas, 0 presos, 0 `FALHOU`, frames corretos |
+| Aquecida | 5 envios sequenciais, pausa de 10 s; boot saudável às 12:27:00 | **0** | **1.101 ms** | **3.020 ms** | 400/400 terminais, 0 recusas, 0 presos, 0 `FALHOU`, frames corretos |
 
-O `max` do `202` foi 36.813 ms na fria e 5.830 ms na aquecida. O aquecimento produziu cinco
+O `max` do `202` foi 29.843 ms na fria e 4.273 ms na aquecida. O aquecimento produziu cinco
 Vídeos adicionais, por isso a listagem final informou 405, mas os 400 ids da rajada medida foram
 os únicos usados nos portões. A rodada fria e a aquecida passaram nos seis critérios do
 `borda.sh`.
 
-O primeiro aviso frio ocorreu cerca de 28 s depois do `started` do Quarkus e os avisos cessaram
-após a inicialização. Os seis stacks atravessam o synthetic bean do `S3AsyncClient`, o builder
+O primeiro aviso frio ocorreu cerca de 24 s depois do `started` do Quarkus e os avisos cessaram
+após a inicialização. Os quatro stacks atravessam o synthetic bean do `S3AsyncClient`, o builder
 do SDK e `putObject`; dois incluem `MetadataLoader`/`RunnerClassLoader`, e dois ficam em
 `ReentrantLock`/`ApplicationScoped_ContextInstances.computeIfAbsent`. A rodada aquecida não
 contém esses stacks nem qualquer aviso do `BlockedThreadChecker`.

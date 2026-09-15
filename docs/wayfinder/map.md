@@ -1593,9 +1593,9 @@ verificadas por teste, não são sugestão). Projeto original em
   pasta compartilhada por todas as regras.
 
 - [Event loops do `videos` bloqueados no começo de uma rajada](tickets/120-event-loops-bloqueados-no-primeiro-envio-sob-rajada.md)
-  — a comparação controlada confirmou partida a frio do `S3AsyncClient`: 6 avisos do
-  `BlockedThreadChecker` na rajada sem aquecimento, com `202` mediana de 31,346 s, contra zero
-  avisos e 2,153 s depois de cinco envios sequenciais e 10 s de pausa. Os stacks frios ficam na
+  — a comparação controlada confirmou partida a frio do `S3AsyncClient`: 4 avisos do
+  `BlockedThreadChecker` na rajada sem aquecimento, com `202` mediana de 25,310 ms, contra zero
+  avisos e 1,101 ms depois de cinco envios sequenciais e 10 s de pausa. Os stacks frios ficam na
   criação lazy do bean e na carga de classes do SDK; não há evidência de handshake de rede. A
   única mudança foi o harness de medição, e a antecipação da inicialização de produção ficou
   para decisão do mantenedor.

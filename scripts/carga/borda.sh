@@ -80,6 +80,24 @@ saida="$raiz/scripts/carga/saida/$rotulo"
 rede="${COMPOSE_PROJECT_NAME}_default"
 psql_() { "${compose[@]}" exec -T postgres psql -U fiapx -d fiapx_videos -q -t -A -F' ' -v ON_ERROR_STOP=1; }
 
+executar_k6() {
+    local subdiretorio="$1" quantidade_vus="$2" quantidade_envios="$3"
+    local saida_host="$saida${subdiretorio:+/$subdiretorio}"
+    local saida_docker="$raiz_docker/scripts/carga/saida/$rotulo${subdiretorio:+/$subdiretorio}"
+    mkdir -p "$saida_host"
+    docker run --rm --network "$rede" --user "$(id -u):$(id -g)" \
+        -v "$raiz_docker/scripts/carga/injetor.js:/injetor.js:ro" \
+        -v "$raiz_docker/scripts/carga/fixtures:/fixtures:ro" \
+        -v "$saida_docker:/saida" \
+        -e VIDEOS_URL=http://videos-proxy:8080 \
+        -e KEYCLOAK_URL=http://keycloak:8080 \
+        -e USUARIO="$usuario" -e SENHA="$senha" \
+        -e ARQUIVO="/fixtures/$fixture" \
+        -e VUS="$quantidade_vus" -e ENVIOS="$quantidade_envios" \
+        grafana/k6:latest run --quiet --console-output=/saida/injetor.log /injetor.js \
+        > "$saida_host/k6.out" 2> "$saida_host/k6.err"
+}
+
 # `oraculo.sh amostra` fala com `localhost:8080`/`8081` — certo quando quem roda o harness e o
 # mesmo host do dockerd. Nesta sessao nao e: e Docker-outside-of-Docker (mesmo motivo do
 # raiz_docker acima), e o container onde este script roda nao tem rota nenhuma ate a porta
@@ -132,7 +150,7 @@ falha()  { echo "    ${vermelho}FALHOU${normal}  $*" >&2; exit 1; }
 # ---------------------------------------------------------------------------------------
 passo "0. Dependencias, fixtures e stack limpa"
 
-for ferramenta in docker curl jq shuf; do
+for ferramenta in docker curl jq shuf paste; do
     command -v "$ferramenta" >/dev/null || falha "$ferramenta nao esta no PATH"
 done
 scripts/carga/gera-fixtures.sh
@@ -166,17 +184,7 @@ ok "$esperados containers saudaveis ($n_videos de videos atras do proxy, $extrac
 # ---------------------------------------------------------------------------------------
 if (( aquecimento > 0 )); then
     passo "1b. Aquecimento com $aquecimento envio(s) sequencial(is) e pausa de ${pausa_aquecimento}s"
-    mkdir -p "$saida/aquecimento"
-    docker run --rm --network "$rede" --user "$(id -u):$(id -g)" \
-        -v "$raiz_docker/scripts/carga/injetor.js:/injetor.js:ro" \
-        -v "$raiz_docker/scripts/carga/fixtures:/fixtures:ro" \
-        -v "$raiz_docker/scripts/carga/saida/$rotulo/aquecimento:/saida" \
-        -e VIDEOS_URL=http://videos-proxy:8080 \
-        -e KEYCLOAK_URL=http://keycloak:8080 \
-        -e USUARIO="$usuario" -e SENHA="$senha" \
-        -e ARQUIVO="/fixtures/$fixture" -e VUS=1 -e ENVIOS="$aquecimento" \
-        grafana/k6:latest run --quiet --console-output=/saida/injetor.log /injetor.js \
-        > "$saida/aquecimento/k6.out" 2> "$saida/aquecimento/k6.err" \
+    executar_k6 aquecimento 1 "$aquecimento" \
         || { cat "$saida/aquecimento/k6.out" "$saida/aquecimento/k6.err" >&2; falha "aquecimento falhou"; }
     cat "$saida/aquecimento/k6.out"
     sleep "$pausa_aquecimento"
@@ -214,17 +222,7 @@ echo "       terminal 'certo' nao basta, tem que ser terminal com o conteudo cer
 # ---------------------------------------------------------------------------------------
 passo "3. Rajada, contra o proxy (nao contra o videos direto)"
 
-docker run --rm --network "$rede" --user "$(id -u):$(id -g)" \
-    -v "$raiz_docker/scripts/carga/injetor.js:/injetor.js:ro" \
-    -v "$raiz_docker/scripts/carga/fixtures:/fixtures:ro" \
-    -v "$raiz_docker/scripts/carga/saida/$rotulo:/saida" \
-    -e VIDEOS_URL=http://videos-proxy:8080 \
-    -e KEYCLOAK_URL=http://keycloak:8080 \
-    -e USUARIO="$usuario" -e SENHA="$senha" \
-    -e ARQUIVO="/fixtures/$fixture" \
-    -e VUS="$vus" -e ENVIOS="$envios" \
-    grafana/k6:latest run --quiet --console-output=/saida/injetor.log /injetor.js \
-    > "$saida/k6.out" 2> "$saida/k6.err" &
+executar_k6 "" "$vus" "$envios" &
 k6_pid=$!
 
 if [[ "$modo" == mata-replica ]]; then
@@ -339,7 +337,24 @@ fi
 echo "    Saida completa: scripts/carga/saida/$rotulo/"
 
 # ---------------------------------------------------------------------------------------
-passo "7. Latencia do 202 e drenagem (para a tabela)"
+passo "7. Bloqueios do event loop (para a tabela)"
+"${compose[@]}" logs --no-color videos > "$saida/videos.log" 2>&1 \
+    || falha "nao foi possivel capturar o log do videos"
+avisos_bloqueio="$(grep -c 'BlockedThreadChecker' "$saida/videos.log" || true)"
+echo "    avisos BlockedThreadChecker: $avisos_bloqueio"
+if (( avisos_bloqueio > 0 )); then
+    duracoes_bloqueio="$(sed -n -E 's/.*has been blocked for ([0-9]+) ms.*/\1/p' "$saida/videos.log" \
+        | paste -sd, -)"
+    menor_bloqueio="$(sed -n -E 's/.*has been blocked for ([0-9]+) ms.*/\1/p' "$saida/videos.log" \
+        | sort -n | head -1)"
+    maior_bloqueio="$(sed -n -E 's/.*has been blocked for ([0-9]+) ms.*/\1/p' "$saida/videos.log" \
+        | sort -n | tail -1)"
+    echo "    duracoes dos avisos (ms): $duracoes_bloqueio"
+    echo "    menor/maior aviso ......: ${menor_bloqueio}ms/${maior_bloqueio}ms"
+fi
+
+# ---------------------------------------------------------------------------------------
+passo "8. Latencia do 202 e drenagem (para a tabela)"
 grep -B1 -A4 'latencia do 202' "$saida/k6.out" || true
 awk -v c="$concluidos" -v d="$drenagem" 'BEGIN{ if (d>0) printf "    vazao aproximada : %.4f Video/s (%d concluidos em %ds)\n", c/d, c, d }'
 

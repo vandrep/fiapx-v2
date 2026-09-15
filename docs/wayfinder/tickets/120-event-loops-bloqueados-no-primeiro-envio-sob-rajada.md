@@ -173,12 +173,12 @@ SDK e vários event loops; a regressão deve continuar sendo julgada pelo harnes
 Em 2026-09-15, a sessão reexecutou a comparação com o harness aprimorado. A resolução acima foi
 preservada; esta seção registra somente a evidência complementar e os ajustes do instrumento.
 
-O `scripts/carga/borda.sh` passou a capturar automaticamente o `videos.log` a partir do instante
-da rajada, contando os avisos do `BlockedThreadChecker` e extraindo suas durações. O aquecimento
+O `scripts/carga/borda.sh` passou a capturar automaticamente o `videos.log` entre o início e o
+fim da rajada, contando os avisos do `BlockedThreadChecker` e extraindo suas durações. O aquecimento
 também exige exatamente o número configurado de linhas `ACEITO` e zero `RECUSADO`; um k6 bem
 sucedido por si só não caracteriza aquecimento. O namespace opcional do Compose aceita somente
-nomes no formato `fiapx-ticketNN[-sufixo]`, evitando que o `down -v` experimental aponte para a
-stack nominal.
+nomes no formato `fiapx-ticketNN[-sufixo]`, e exige confirmação explícita para derrubar recursos
+já existentes, evitando que o `down -v` experimental aponte para outra stack.
 
 ### Comparação reexecutada
 
@@ -186,12 +186,12 @@ Os comandos abaixo fixam explicitamente o fixture e os 400 VUs, além das condi�
 na resolução original:
 
 ```text
-FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-fria-v2 \
+FIAPX_CONFIRMAR_DOWN_V=1 FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-fria-v2 \
 FIAPX_VUS=400 FIAPX_FIXTURE=controle-3s.mp4 \
 FIAPX_EXTRACAO_REPLICAS=2 FIAPX_EXTRACAO_CPUS=1 \
 scripts/carga/borda.sh escala 1 400
 
-FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-aquecida-v2 \
+FIAPX_CONFIRMAR_DOWN_V=1 FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-aquecida-v2 \
 FIAPX_VUS=400 FIAPX_FIXTURE=controle-3s.mp4 \
 FIAPX_AQUECER=5 FIAPX_PAUSA_AQUECIMENTO=10 \
 FIAPX_EXTRACAO_REPLICAS=2 FIAPX_EXTRACAO_CPUS=1 \

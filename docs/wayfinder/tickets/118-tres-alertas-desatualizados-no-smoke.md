@@ -2,8 +2,8 @@
 
 - id: 118
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: Codex (sessão de 2026-09-15, SHA inicial 92d7d761)
 - bloqueado-por:
 - prioridade: P3
 
@@ -62,9 +62,20 @@ amplie o escopo:
 
 ## Critérios de aceite
 
-- [ ] Nenhum comentário do `scripts/smoke.sh` diz quantas regras de alerta existem.
-- [ ] O comentário do `dashboards.yaml` não chama as três regras de fila de "as regras daquele
+- [x] Nenhum comentário do `scripts/smoke.sh` diz quantas regras de alerta existem.
+- [x] O comentário do `dashboards.yaml` não chama as três regras de fila de "as regras daquele
       arquivo".
-- [ ] Nada fora de comentário mudou no `scripts/smoke.sh` e no `dashboards.yaml` (`git diff` só em
+- [x] Nada fora de comentário mudou no `scripts/smoke.sh` e no `dashboards.yaml` (`git diff` só em
       linhas `#`).
-- [ ] Linha em "Decisões até aqui" no mapa.
+- [x] Linha em "Decisões até aqui" no mapa.
+
+## Resolução
+
+Implementado em 2026-09-15 sobre `develop @ 92d7d761`.
+
+Os três comentários do `scripts/smoke.sh` agora usam **os alertas** e **as regras
+provisionadas**, sem contar regras. O comentário do `dashboards.yaml` foi específico sobre **as
+três regras de fila daquele arquivo**, porque o painel deriva suas expressões de fila delas,
+enquanto a pasta continua sendo compartilhada por todas as regras provisionadas.
+
+Nenhum comando, passo ou numeração foi alterado; a decisão foi registrada no mapa.

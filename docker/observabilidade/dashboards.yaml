@@ -25,7 +25,7 @@ providers:
     type: file
     # `FIAP X` e a MESMA pasta que o `alertas.yaml` declara (ticket 099): no Grafana, pasta de
     # alerta e pasta de dashboard sao a mesma entidade, casada por titulo. O painel entra nela
-    # porque dela derivam as expressoes de fila — as tres regras daquele arquivo —, e porque uma
+    # porque dela derivam as expressoes de fila — as tres regras de fila daquele arquivo —, e porque uma
     # pasta que so tem alerta aparece VAZIA na lista de Dashboards, que foi como o defeito
     # aparente chegou.
     #

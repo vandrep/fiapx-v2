@@ -1578,6 +1578,12 @@ verificadas por teste, não são sugestão). Projeto original em
   **392 palavras** (o total, **1.403**); as três entregas continuam apenas no caminho transitório
   descrito no Bloco 3.
 
+- [Os alertas do smoke e do painel sem contagem frágil](tickets/118-tres-alertas-desatualizados-no-smoke.md)
+  — os comentários do `smoke.sh` falam em **os alertas** e **as regras provisionadas**, sem
+  repetir o total de regras. O `dashboards.yaml` especifica **as três regras de fila daquele
+  arquivo**, que são as expressões derivadas pelo painel, sem confundir essa quantidade com a
+  pasta compartilhada por todas as regras.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

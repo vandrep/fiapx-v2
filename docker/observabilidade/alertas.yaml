@@ -189,9 +189,13 @@ groups:
       #    Crash de replica nao as separa, e isso foi medido (ticket 113): a entrega devolvida
       #    pelo SIGKILL volta ao COMECO de extracao.extrair e e pega na hora, mesmo com 352
       #    mensagens prontas atras dela. O falso positivo que sobra: os 420 s por tentativa nao
-      #    sao teto duro, porque o I/O nao tem timeout, e a posicao do nack com requeue (falha
-      #    transitoria) nao foi medida. Aceito porque o custo e um humano olhar a fila e ver o
-      #    Video andando; o inverso, calar, e o Video perdido.
+      #    sao teto duro, porque o I/O nao tem timeout. A posicao do nack com requeue (falha
+      #    transitoria) tambem foi medida (ticket 119): com 400 Videos validos e 397 mensagens
+      #    prontas no snapshot do nack, a entrega voltou ao comeco (posicao 0), terminou 15 s
+      #    depois de iniciada_em e a contagem de presos ficou em zero. O ensaio usou uma replica
+      #    para identificar a unica tentativa em voo; a fila quorum nao apresentou a espera atras
+      #    do backlog. O alerta continua errando para o lado de chamar um humano, porque o inverso,
+      #    calar, e o Video perdido.
       - uid: fiapx-video-preso-processando
         title: Video preso em PROCESSANDO
         condition: B

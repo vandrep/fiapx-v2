@@ -200,3 +200,18 @@ não entra na leitura fixada.
   derrubada duas vezes não foi exercitada; pelo mecanismo medido, cada devolução volta ao começo.
 - Sem a stack de observabilidade, a contagem de presos foi a do predicado do gauge feita no
   Postgres, e não a série exportada.
+
+## Correção (119)
+
+O caminho que faltava foi medido pelo [ticket 119](119-posicao-do-nack-com-requeue-sob-pico.md).
+Numa rajada de 400 Vídeos válidos, com uma réplica do `extracao`, a falha transitória injetada no
+MinIO produziu `redeliver` `0 -> 1` (delta 1). O snapshot do primeiro `nack` tinha 397 mensagens
+prontas e a candidata identificada voltou ao começo: posição 0 pelo mesmo oráculo do ticket 113.
+Ela terminou 15 s depois de `iniciada_em`, sem nenhum preso em `PROCESSANDO`; os 400 Vídeos
+chegaram a `CONCLUIDO`, sem `FALHOU`, e as filas `extracao.extrair.dlq` e
+`extracao.extrair.estacionamento` ficaram vazias.
+
+O item deixa de ser um limite não medido para o regime ensaiado. Continua sem teto duro o relógio
+de 420 s, porque download e upload não têm timeout próprio, e o ensaio identificou uma única
+tentativa em voo por vez; não se extrapola a posição medida para múltiplas réplicas ou para
+repetidas falhas na mesma entrega.

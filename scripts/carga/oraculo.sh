@@ -14,14 +14,20 @@
 # O censo e sempre um LEFT JOIN a partir da lista de envios: o estado `AUSENTE` — aceito com
 # 202 e sem linha no banco — e a perda que um `SELECT count(*) FROM video` jamais mostraria.
 #
-# Mais duas consultas ao Postgres, so do modo mata-extracao, para o ticket 113: `presos`, a
-# contagem do gauge de Video preso, e `interrompidas`, o destino das tentativas mortas pelo kill.
+# Mais consultas ao Postgres, so dos modos que medem falha de worker, para os tickets 113 e 119:
+# `presos`, a contagem de Video preso; `processando`, o total bruto nesse estado;
+# `interrompidas`, o destino das tentativas mortas pelo kill;
+# `em-voo`, a unica tentativa identificavel no modo blip-minio; e `nackadas`, a posicao e o
+# intervalo de uma entrega devolvida por nack com requeue.
 #
 # Uso:
 #   scripts/carga/oraculo.sh censo   <arquivo-de-ids>
 #   scripts/carga/oraculo.sh amostra <arquivo-de-ids> [quantidade]
 #   scripts/carga/oraculo.sh presos
+#   scripts/carga/oraculo.sh processando
 #   scripts/carga/oraculo.sh interrompidas <aceitos> <interrompidos> <instante-do-kill>
+#   scripts/carga/oraculo.sh em-voo <arquivo-de-ids>
+#   scripts/carga/oraculo.sh nackadas <aceitos> <em-voo> <instante-da-injecao> <instante-do-nack>
 set -euo pipefail
 
 psql_videos() {
@@ -107,6 +113,15 @@ SELECT count(*) FILTER (WHERE iniciada_em < now() - interval '30 minutes'),
 SQL
 }
 
+# A pre-condicao do modo blip-minio e mais forte que o gauge: qualquer Video em PROCESSANDO
+# contamina a identificacao da unica tentativa da rodada, mesmo que ainda nao tenha cruzado os
+# 30 min do predicado de Video preso.
+processando() {
+    psql_videos <<SQL
+SELECT count(*) FROM video WHERE estado = 'PROCESSANDO';
+SQL
+}
+
 # Uma linha por Video cuja tentativa foi interrompida (ticket 113): estado, iniciada_em ->
 # desfecho em segundos, e a posicao em que a entrega voltou a fila. A posicao e contada pelos
 # Videos da rodada cuja PRIMEIRA tentativa comecou depois do kill e antes do desfecho do
@@ -129,10 +144,47 @@ interrompidas() {
     } | psql_videos
 }
 
+# No modo blip-minio ha uma replica e prefetch 1. A lista resultante tem no maximo um id e o
+# snapshot da fila e tomado no mesmo ciclo que a injecao; isto substitui o scratch para identificar
+# a tentativa que terminou em nack, porque a falha transitoria limpa o proprio parcial.
+em_voo() {
+    local aceitos="$1"
+    {
+        tabela_de_ids enviados "$aceitos"
+        echo "SELECT v.id
+                FROM enviados e JOIN video v ON v.id = e.id
+               WHERE v.estado = 'PROCESSANDO' AND v.iniciada_em IS NOT NULL
+               ORDER BY v.iniciada_em;"
+    } | psql_videos
+}
+
+# Uma linha por candidata identificada no momento do nack: estado, intervalo iniciado_em ->
+# desfecho e a posicao aproximada pela quantidade de Videos que comecaram depois da injecao e
+# antes do instante em que o primeiro redeliver foi observado. Com uma replica e uma candidata,
+# o id nao e uma inferencia entre varias mensagens em voo.
+nackadas() {
+    local aceitos="$1" em_voo="$2" instante_injecao="$3" instante_nack="$4"
+    {
+        tabela_de_ids enviados "$aceitos"
+        tabela_de_ids em_voo "$em_voo"
+        echo "SELECT i.id, coalesce(v.estado, 'AUSENTE'),
+                     round(extract(epoch FROM v.finalizado_em - v.iniciada_em)),
+                     (SELECT count(*) FROM enviados e JOIN video o ON o.id = e.id
+                       WHERE o.id <> i.id
+                         AND o.iniciada_em > '$instante_injecao'::timestamptz
+                         AND o.iniciada_em < '$instante_nack'::timestamptz)
+                FROM em_voo i LEFT JOIN video v ON v.id = i.id
+               ORDER BY 1;"
+    } | psql_videos
+}
+
 case "${1:-}" in
     censo)         censo "$2" ;;
     amostra)       amostra "$2" "${3:-10}" ;;
     presos)        presos ;;
+    processando)   processando ;;
     interrompidas) interrompidas "$2" "$3" "$4" ;;
-    *)             echo "uso: $0 censo|amostra <arquivo-de-ids> [quantidade] | presos | interrompidas <aceitos> <interrompidos> <instante-do-kill>" >&2; exit 2 ;;
+    em-voo)        em_voo "$2" ;;
+    nackadas)      nackadas "$2" "$3" "$4" "$5" ;;
+    *)             echo "uso: $0 censo|amostra <arquivo-de-ids> [quantidade] | presos | interrompidas <aceitos> <interrompidos> <instante-do-kill> | em-voo <aceitos> | nackadas <aceitos> <em-voo> <instante-da-injecao> <instante-do-nack>" >&2; exit 2 ;;
 esac

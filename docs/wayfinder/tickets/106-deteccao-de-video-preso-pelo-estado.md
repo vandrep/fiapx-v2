@@ -133,3 +133,10 @@ realiza. Sob `mata-extracao`, a entrega devolvida pelo crash da réplica volta a
 `iniciada_em`, num pico de 400 Vídeos de 2 min que levou 24 min para drenar. A contagem de presos
 ficou em zero. Continuam de pé os 420 s que não são teto duro, e um caminho que o 113 não mediu: o
 `nack` com requeue da falha transitória.
+
+## Correção (119)
+
+O caminho que faltava foi medido pelo [ticket 119](119-posicao-do-nack-com-requeue-sob-pico.md):
+com 400 Vídeos válidos e uma réplica, a entrega voltou ao começo com 397 mensagens prontas no
+snapshot do `nack`, terminou 15 s depois de `iniciada_em` e deixou zero presos em `PROCESSANDO`.
+Os 400 chegaram a `CONCLUIDO`, sem `FALHOU`, e as filas de DLQ e estacionamento ficaram vazias.

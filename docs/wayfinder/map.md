@@ -1544,7 +1544,15 @@ verificadas por teste, não são sugestão). Projeto original em
   identificadas pelo órfão no scratch. Critérios fixados antes de rodar, e o modo `mata-extracao`
   do `conservacao.sh` passou a medir isso. Os textos do limite foram corrigidos no `alertas.yaml`,
   ao lado do limiar, no runbook e numa `## Correção (113)` do 106. Ficam de pé os 420 s sem teto
-  duro e o `nack` com requeue, que não foi medido.
+  duro; a posição do `nack` com requeue ficou para o ticket 119.
+
+- [A posição do `nack` com requeue sob
+  pico](tickets/119-posicao-do-nack-com-requeue-sob-pico.md) — medida com 400 Vídeos válidos:
+  `redeliver` 0→1 (delta 1), 397 mensagens prontas no snapshot do nack, posição 0 no começo da
+  fila, intervalo `iniciada_em`→desfecho de 15 s e zero presos em `PROCESSANDO`. A única tentativa
+  em voo foi identificada com uma réplica; todos os 400 chegaram a `CONCLUIDO`, sem `FALHOU`, e a
+  injeção não alcançou a terceira entrega. O limite não se realiza nesse regime; ficam escritos o
+  teto não duro de 420 s e a ressalva de não extrapolar para múltiplas falhas em voo.
 
 - [O proxy de carga aguenta a rajada
   padrão](tickets/114-proxy-de-carga-aguenta-a-rajada-padrao.md) — o `nginx.conf` gerado declara

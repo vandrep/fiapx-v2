@@ -6,7 +6,7 @@
 # um teste de carga so serve para *falsea-lo*. Por isso aqui nao se otimiza nada: mede-se se
 # algum envio ficou sem desfecho.
 #
-# Quatro modos, cada um com o seu criterio impresso ANTES de rodar. Sem limiar declarado
+# Seis modos, cada um com o seu criterio impresso ANTES de rodar. Sem limiar declarado
 # antes, todo resultado vira narrativa pos-fato:
 #
 #   limpo           rajada sem falha injetada. A fila absorve — todo mundo sabe —, e e por
@@ -16,6 +16,9 @@
 #                   afirma e nada verificava. Mede tambem, sem julgar, para onde a entrega
 #                   interrompida volta na fila e quanto o Video dela leva ate o desfecho
 #                   (ticket 113, o falso positivo do alerta de Video preso em PROCESSANDO).
+#   blip-minio      para o MinIO enquanto ha uma Extracao em voo e o backlog esta pronto. Espera
+#                   o primeiro redeliver, mede o snapshot da fila e retoma o armazenamento na
+#                   hora, exercitando o nack com requeue sem gastar as tres entregas (ticket 119).
 #   mata-videos     `docker kill videos` durante a rajada. E o unico modo que exercita a
 #                   varredura de reconciliacao e as colunas marcadoras do ADR 0003 — aquele
 #                   ADR existe inteiro para fechar a janela entre gravar e publicar, e essa
@@ -35,10 +38,11 @@
 #                   fica preso em PROCESSANDO de proposito, e e essa a garantia sob teste.
 #
 # Uso:
-#   scripts/carga/conservacao.sh [limpo|mata-extracao|redeploy-extracao|mata-videos|mata-publicacao] [envios]
+#   scripts/carga/conservacao.sh [limpo|mata-extracao|blip-minio|redeploy-extracao|mata-videos|mata-publicacao] [envios]
 #
 # Variaveis: FIAPX_VUS (default = envios, rajada instantanea), FIAPX_EXTRACAO_REPLICAS,
-#            FIAPX_FIXTURE, FIAPX_AMOSTRA, FIAPX_LIMITE_ESTACIONAMENTO (so mata-publicacao).
+#            FIAPX_FIXTURE, FIAPX_AMOSTRA, FIAPX_BLIP_MINIO_MAX_SEGUNDOS (so blip-minio),
+#            FIAPX_LIMITE_ESTACIONAMENTO (so mata-publicacao).
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -66,6 +70,9 @@ amostra="${FIAPX_AMOSTRA:-10}"
 # da DLQ, cada uma esgotando retry-on-fail-attempts=6/retry-on-fail-interval=5s do publisher
 # (~25s de backoff por tentativa) antes de desistir: ~100s no pior caso. O dobro e a folga.
 limite_estacionamento="${FIAPX_LIMITE_ESTACIONAMENTO:-240}"
+# O blip termina assim que o primeiro nack com requeue aparecer. Este e apenas o teto para uma
+# rodada sem redelivery; se ele vencer, a rodada e invalida e o MinIO volta antes de sair.
+blip_minio_max_segundos="${FIAPX_BLIP_MINIO_MAX_SEGUNDOS:-30}"
 rabbitmq_url="${FIAPX_RABBITMQ_URL:-http://localhost:15672}"
 rabbitmq_usuario="${FIAPX_RABBITMQ_USUARIO:-fiapx}"
 rabbitmq_senha="${FIAPX_RABBITMQ_SENHA:-fiapx}"
@@ -106,6 +113,16 @@ passo()  { echo; echo "${negrito}==> $*${normal}"; }
 ok()     { echo "    ${verde}OK${normal}  $*"; }
 aviso()  { echo "    ${amarelo}!${normal}   $*"; }
 falha()  { echo "    ${vermelho}FALHOU${normal}  $*" >&2; exit 1; }
+minio_parado=false
+rodada_invalida=false
+# shellcheck disable=SC2317
+restaura_minio() {
+    if [[ "$minio_parado" == true ]]; then
+        docker start "$minio_container" >/dev/null 2>&1 || true
+        minio_parado=false
+    fi
+}
+trap restaura_minio EXIT
 # So mata-publicacao: le direto do management API, nao do censo (que e por id no Postgres e
 # nao enxerga fila nenhuma). Usado duas vezes — antes de enviar (linha de base) e depois
 # (medida) — porque a fila e persistente entre corridas e nada aqui faz `down -v`: sem a
@@ -130,19 +147,43 @@ scratch_extracao() {
     "${compose[@]}" exec -T extracao ls -1 /var/fiapx/extracao | sort
 }
 
-fila_extrair() {
+fila_extrair_json() {
     curl -sS -u "$rabbitmq_usuario:$rabbitmq_senha" \
-        "$rabbitmq_url/api/queues/%2F/extracao.extrair" \
-        | jq -r '"\(.messages_ready // 0) \(.messages_unacknowledged // 0)"'
+        "$rabbitmq_url/api/queues/%2F/extracao.extrair"
 }
 
-profundidade_estacionamento() {
+fila_extrair() {
+    fila_extrair_json | jq -r '"\(.messages_ready // 0) \(.messages_unacknowledged // 0)"'
+}
+
+fila_extrair_com_reentrega() {
+    fila_extrair_json | jq -r '"\(.messages_ready // 0) \(.messages_unacknowledged // 0) \(.message_stats.redeliver // 0)"'
+}
+
+esperar_minio() {
+    local inicio="$SECONDS" saude
+    while :; do
+        saude="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$minio_container")"
+        [[ "$saude" == healthy ]] && return
+        (( SECONDS - inicio >= 90 )) && falha "minio nao ficou saudavel: $saude"
+        sleep 1
+    done
+}
+
+profundidade_fila() {
+    local fila="$1"
     curl -sS -u "$rabbitmq_usuario:$rabbitmq_senha" \
-        "$rabbitmq_url/api/queues/%2F/extracao.extrair.estacionamento" \
+        "$rabbitmq_url/api/queues/%2F/$fila" \
         | jq -r '.messages // 0'
 }
 
-case "$modo" in limpo|mata-extracao|redeploy-extracao|mata-videos|mata-publicacao) ;; *) falha "modo desconhecido: $modo" ;; esac
+profundidade_dlq() { profundidade_fila extracao.extrair.dlq; }
+profundidade_estacionamento() { profundidade_fila extracao.extrair.estacionamento; }
+
+case "$modo" in limpo|mata-extracao|blip-minio|redeploy-extracao|mata-videos|mata-publicacao) ;; *) falha "modo desconhecido: $modo" ;; esac
+if [[ "$modo" == blip-minio && "$replicas" != 1 ]]; then
+    falha "blip-minio exige FIAPX_EXTRACAO_REPLICAS=1 para identificar uma unica entrega em voo"
+fi
 
 # ---------------------------------------------------------------------------------------
 passo "0. Dependencias e fixtures"
@@ -209,6 +250,35 @@ fi
 if [[ "$modo" == mata-extracao ]]; then
     scratch_extracao > "$saida/scratch-antes.txt"
     ok "scratch do extracao antes do envio: $(wc -l < "$saida/scratch-antes.txt") entrada(s) ja presentes"
+fi
+
+if [[ "$modo" == blip-minio ]]; then
+    minio_container="$("${compose[@]}" ps -q minio | head -1)"
+    [[ -n "$minio_container" ]] || falha "container do minio nao encontrado"
+    redeliver_base="$(reentregas_extrair)"
+    echo "$redeliver_base" > "$saida/redeliver-antes.txt"
+    ok "redeliver de extracao.extrair antes do envio: $redeliver_base"
+
+    read -r prontas_base sem_ack_base <<< "$(fila_extrair)"
+    dlq_base="$(profundidade_dlq)"
+    estacionamento_base="$(profundidade_estacionamento)"
+    processando_base="$(scripts/carga/oraculo.sh processando)"
+    read -r presos_base idade_base <<< "$(scripts/carga/oraculo.sh presos)"
+    scratch_base="$(scratch_extracao)"
+    if [[ -n "$scratch_base" ]]; then
+        scratch_base_count="$(wc -l <<< "$scratch_base")"
+    else
+        scratch_base_count=0
+    fi
+    printf '%s %s %s %s %s %s %s %s\n' \
+        "$prontas_base" "$sem_ack_base" "$dlq_base" "$estacionamento_base" \
+        "$processando_base" "$presos_base" "$idade_base" "$scratch_base_count" > "$saida/precondicoes-iniciais.txt"
+    if (( prontas_base != 0 || sem_ack_base != 0 || dlq_base != 0 || estacionamento_base != 0 || processando_base != 0 || scratch_base_count != 0 )); then
+        rodada_invalida=true
+        aviso "rodada invalida: a stack nao comecou vazia (fila=$prontas_base/$sem_ack_base, dlq=$dlq_base, estacionamento=$estacionamento_base, processando=$processando_base, scratch=$scratch_base_count)"
+    else
+        ok "pre-condicoes: filas, PROCESSANDO e scratch vazios"
+    fi
 fi
 
 # ---------------------------------------------------------------------------------------
@@ -286,6 +356,24 @@ if [[ "$modo" == mata-extracao ]]; then
     echo "       o intervalo iniciada_em -> desfecho; e o maior valor, durante a drenagem, da"
     echo "       contagem do gauge fiapx_videos_presos{estado=\"PROCESSANDO\"} feita no Postgres."
 fi
+if [[ "$modo" == blip-minio ]]; then
+    echo "    0. Uma mensagem pronta e exatamente uma Extracao da rodada em voo antes da falha."
+    echo "       Sem isso a subida de redeliver nao identifica uma tentativa desta rodada."
+    echo "    6. O MinIO fica fora ate o primeiro redeliver, no maximo ${blip_minio_max_segundos}s;"
+    echo "       o snapshot da fila nesse instante registra prontas, sem ack e redeliver."
+    echo "    7. Apos o primeiro redeliver, o MinIO volta imediatamente: delta menor que dois"
+    echo "       (no maximo uma reentrega) e zero FALHOU preservam a injecao como falha transitoria isolada."
+    echo "    8. Medido para o Video identificado: posicao da reentrega, intervalo iniciada_em ->"
+    echo "       desfecho e maior contagem de presos em PROCESSANDO durante a drenagem."
+ fi
+fi
+
+if [[ "$modo" == blip-minio && "$rodada_invalida" == true ]]; then
+    echo "    ${vermelho}INVALIDA${normal}  A stack nao satisfez as pre-condicoes; nenhum envio foi feito."
+    echo
+    echo "${negrito}${vermelho}Rodada invalida${normal}: esvazie filas, PROCESSANDO e scratch, e repita."
+    echo "    Saida completa: scripts/carga/saida/$rotulo/"
+    exit 2
 fi
 
 # ---------------------------------------------------------------------------------------
@@ -410,6 +498,62 @@ elif [[ "$modo" == mata-extracao ]]; then
     echo "$instante_kill $prontas_no_kill $sem_ack_no_kill" > "$saida/fila-no-kill.txt"
     "${compose[@]}" up -d extracao > /dev/null 2>&1
     aviso "replica de volta"
+elif [[ "$modo" == blip-minio ]]; then
+    # Uma replica deixa a identificacao da entrega inequívoca: o unico Video em PROCESSANDO e a
+    # unica mensagem sem ack sao a mesma tentativa. O backlog precisa existir antes da falha,
+    # senao a posicao de uma reentrega nao responde a pergunta deste ticket.
+    ids_em_voo_count=0
+    inicio_espera_blip=$SECONDS
+    while (( SECONDS - inicio_espera_blip < 60 )); do
+        read -r prontas_no_blip sem_ack_no_blip redeliver_no_blip <<< "$(fila_extrair_com_reentrega)"
+        if (( prontas_no_blip > 0 && sem_ack_no_blip == 1 )); then
+            scripts/carga/oraculo.sh em-voo "$aceitos_arquivo" > "$saida/ids-em-voo.txt"
+            ids_em_voo_count="$(wc -l < "$saida/ids-em-voo.txt")"
+            (( ids_em_voo_count == 1 )) && break
+        fi
+        sleep 1
+    done
+
+    if (( ids_em_voo_count != 1 )); then
+        rodada_invalida=true
+        aviso "rodada invalida: nao houve backlog e exatamente um Video em voo em 60s"
+    else
+        instante_injecao="$(date +%Y-%m-%dT%H:%M:%S.%N%:z)"
+        echo "$instante_injecao $prontas_no_blip $sem_ack_no_blip $redeliver_no_blip" \
+            > "$saida/fila-antes-do-blip.txt"
+        aviso "blip do minio iniciado: $prontas_no_blip pronta(s), $sem_ack_no_blip sem ack, em $instante_injecao"
+
+        # Parar o container fecha os sockets do SDK. `docker pause` deixaria o processo S3 suspenso,
+        # mas o cliente deste servico nao tem timeout de I/O: a chamada poderia ficar sem completar
+        # e nunca produzir o nack que este ticket mede. A indisponibilidade termina no primeiro
+        # redeliver, portanto a segunda entrega encontra o MinIO de volta e a terceira nao e gasta.
+        minio_parado=true
+        docker stop --time 0 "$minio_container" >/dev/null
+        instante_nack=""
+        inicio_espera_nack=$SECONDS
+        while (( SECONDS - inicio_espera_nack < blip_minio_max_segundos )); do
+            snapshot="$(fila_extrair_com_reentrega)"
+            read -r prontas_no_nack sem_ack_no_nack redeliver_no_nack <<< "$snapshot"
+            if (( redeliver_no_nack > redeliver_no_blip )); then
+                instante_nack="$(date +%Y-%m-%dT%H:%M:%S.%N%:z)"
+                echo "$instante_nack $prontas_no_nack $sem_ack_no_nack $redeliver_no_nack" \
+                    > "$saida/fila-no-nack.txt"
+                break
+            fi
+            sleep 0.2
+        done
+        if [[ -z "$instante_nack" ]]; then
+            rodada_invalida=true
+            aviso "rodada invalida: nenhum redeliver em ${blip_minio_max_segundos}s; MinIO sera retomado"
+        else
+            segundos_blip=$(( SECONDS - inicio_espera_nack ))
+            aviso "primeiro redeliver observado apos ${segundos_blip}s; fila no nack: $prontas_no_nack pronta(s), $sem_ack_no_nack sem ack"
+        fi
+        docker start "$minio_container" >/dev/null
+        minio_parado=false
+        esperar_minio
+        aviso "minio de volta e saudavel"
+    fi
 elif [[ "$modo" == redeploy-extracao ]]; then
     # Nao um `sleep` fixo: o redeploy tem que cair com Extracao EM VOO, e "5 segundos depois
     # da rajada" nao garante isso — na primeira rodada deste modo a fila ja tinha drenado
@@ -456,7 +600,7 @@ while :; do
     terminais="$(awk '$1=="CONCLUIDO"||$1=="FALHOU"{s+=$2} END{print s+0}' <<< "$censo")"
     decorrido=$(( SECONDS - inicio_drenagem ))
     linha="$(printf '    %4ds  %s' "$decorrido" "$(tr '\n' ' ' <<< "$censo")")"
-    if [[ "$modo" == mata-extracao ]]; then
+    if [[ "$modo" == mata-extracao || "$modo" == blip-minio ]]; then
         read -r presos_agora idade_agora <<< "$(scripts/carga/oraculo.sh presos)"
         (( presos_agora > presos_max )) && presos_max=$presos_agora
         (( idade_agora > idade_max )) && idade_max=$idade_agora
@@ -486,6 +630,23 @@ if [[ "$modo" == mata-extracao ]]; then
             > "$saida/desfecho-das-interrompidas.txt"
     else
         : > "$saida/desfecho-das-interrompidas.txt"
+    fi
+fi
+
+if [[ "$modo" == blip-minio ]]; then
+    redeliver_fim="$(reentregas_extrair)"
+    redeliver_delta=$(( redeliver_fim - redeliver_no_blip ))
+    echo "$redeliver_fim" > "$saida/redeliver-depois.txt"
+    echo "$redeliver_no_blip $redeliver_fim $redeliver_delta" > "$saida/redeliver-resumo.txt"
+    dlq_fim="$(profundidade_dlq)"
+    estacionamento_fim="$(profundidade_estacionamento)"
+    printf 'extracao.extrair.dlq %s\nextracao.extrair.estacionamento %s\n' \
+        "$dlq_fim" "$estacionamento_fim" > "$saida/filas-finais.txt"
+    if [[ -n "${instante_nack:-}" ]]; then
+        scripts/carga/oraculo.sh nackadas "$aceitos_arquivo" "$saida/ids-em-voo.txt" \
+            "$instante_injecao" "$instante_nack" > "$saida/desfecho-do-nack.txt"
+    else
+        : > "$saida/desfecho-do-nack.txt"
     fi
 fi
 
@@ -596,6 +757,30 @@ if [[ "$modo" == mata-extracao ]]; then
         echo "         $id  $estado  iniciada_em->desfecho ${segundos:-?}s  posicao $posicao"
     done < "$saida/desfecho-das-interrompidas.txt"
     ok "6. Maior contagem de presos em PROCESSANDO na drenagem: $presos_max (PROCESSANDO mais velho: ${idade_max}s)"
+fi
+if [[ "$modo" == blip-minio ]]; then
+    if [[ "$rodada_invalida" == true ]]; then
+        echo "    ${vermelho}INVALIDA${normal}  Falta de condição de medição: nenhuma posição de nack será interpretada."
+        echo
+        echo "${negrito}${vermelho}Rodada invalida${normal}: repita com backlog e uma única Extração em voo."
+        echo "    Saida completa: scripts/carga/saida/$rotulo/"
+        exit 2
+    fi
+    if (( redeliver_delta >= 2 )); then
+        echo "    ${vermelho}INVALIDA${normal}  A injeção alcançou $redeliver_delta reentregas; a terceira entrega não podia ser gasta."
+        echo
+        echo "${negrito}${vermelho}Rodada invalida${normal}: reduza o tempo de indisponibilidade efetiva."
+        echo "    Saida completa: scripts/carga/saida/$rotulo/"
+        exit 2
+    fi
+    ok "0. Rodada valida — uma mensagem em voo e $prontas_no_blip pronta(s) antes do blip"
+    ok "6. Nack com requeue observado — redeliver $redeliver_no_blip -> $redeliver_fim (delta $redeliver_delta); fila no nack: $prontas_no_nack pronta(s), $sem_ack_no_nack sem ack"
+    while read -r id estado segundos posicao; do
+        echo "         $id  $estado  iniciada_em->desfecho ${segundos:-?}s  posicao $posicao"
+    done < "$saida/desfecho-do-nack.txt"
+    ok "8. Maior contagem de presos em PROCESSANDO na drenagem: $presos_max (PROCESSANDO mais velho: ${idade_max}s)"
+    julga "9. Zero DLQ e estacionamento" "$([[ $dlq_fim == 0 && $estacionamento_fim == 0 ]] && echo true || echo false)" \
+          "$dlq_fim em extracao.extrair.dlq, $estacionamento_fim em extracao.extrair.estacionamento"
 fi
 
 echo

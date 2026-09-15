@@ -574,6 +574,15 @@ O que eu não defendo — apenas aceitei.
   ver os próprios Vídeos. O que cobriria: cluster de broker com três nós, réplica do Postgres,
   MinIO distribuído, Keycloak com banco externo replicado ou, no mínimo, backup dos quatro volumes
   (ticket 109).
+- **A reserva de uploads é por réplica, mesmo quando o volume é compartilhado.** Cada réplica
+  do `videos` deriva seu teto do volume inteiro e desconta somente as próprias reservas. No
+  overlay de carga, todas montam `fiapx-uploads`: duas podem aceitar simultaneamente corpos
+  que cabem isoladamente no espaço livre, mas não juntos. A recusa por capacidade não garante
+  uma reserva global de disco com N réplicas. O que cobriria: volumes com capacidade isolada por
+  réplica ou coordenação das reservas entre elas; nenhum dos dois está implementado. No Compose,
+  o volume nomeado usa o disco do host, sem cota própria. Ver o
+  [contrato HTTP](contratos/http-videos.md#recusa-por-capacidade) e o
+  [ticket 115](wayfinder/tickets/115-recusa-por-capacidade-com-varias-replicas-da-borda.md).
 - **Não há cota por Dono.** A fila de `extracao.extrair` é FIFO para todos: um único Dono que
   envie centenas de Vídeos ocupa as réplicas e faz os outros esperarem atrás dele. É problema de
   equidade, não de conservação — ninguém perde Vídeo, só espera. A recusa por capacidade do

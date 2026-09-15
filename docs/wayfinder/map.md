@@ -1554,6 +1554,16 @@ verificadas por teste, não são sugestão). Projeto original em
   `202` foi para 14,0 s, sem causa investigada; o indício é partida a frio, com event loops do
   `videos` bloqueados por até 4,3 s no começo da rajada.
 
+- [Recusa por capacidade com várias réplicas da
+  borda](tickets/115-recusa-por-capacidade-com-varias-replicas-da-borda.md) — com N=3 e teto 1,
+  86/400 envios receberam `202` e 314 receberam `503` (70/75/169 por réplica), sem o proxy
+  desabilitar réplicas pela recusa. Com teto derivado de 2354 por réplica, 400/400 `202` e
+  nenhuma recusa. Mantido `http_503`: no caminho de resposta HTTP do `POST` já enviado,
+  a ausência de `non_idempotent` impede também a contabilização da falha. A reserva de
+  uploads continua local a cada réplica sobre volume compartilhado; essa limitação entrou
+  na arquitetura. Método e limites em
+  [`capacidade-borda-replicas.md`](../pesquisa/capacidade-borda-replicas.md).
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A

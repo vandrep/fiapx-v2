@@ -2,8 +2,8 @@
 
 - id: 115
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: Codex (sessão de 2026-09-15, SHA inicial 72dc146)
 - bloqueado-por: 114
 - prioridade: P3
 
@@ -41,12 +41,45 @@ Rodar `borda.sh mata-replica 3` antes e depois.
 
 ## Critérios de aceite
 
-- [ ] Rodadas com N=3, teto baixo e teto derivado: comando, configuração e resultado registrados,
+- [x] Rodadas com N=3, teto baixo e teto derivado: comando, configuração e resultado registrados,
       com as recusas por réplica.
-- [ ] Resposta escrita: o `503` de capacidade tira a réplica de circulação no proxy de carga?
-- [ ] Recomendação sobre `http_503` no `proxy_next_upstream`. Se mudar, `mata-replica 3` antes e
+- [x] Resposta escrita: o `503` de capacidade tira a réplica de circulação no proxy de carga?
+- [x] Recomendação sobre `http_503` no `proxy_next_upstream`. Se mudar, `mata-replica 3` antes e
       depois, sem regressão no custo de matar réplica.
-- [ ] O limite da reserva por réplica levado à seção de limitações do `docs/arquitetura.md`,
+- [x] O limite da reserva por réplica levado à seção de limitações do `docs/arquitetura.md`,
       coordenado com o [ticket 109](109-limitacoes-da-conservacao-no-documento-de-arquitetura.md),
       que edita a mesma seção.
-- [ ] Linha em "Decisões até aqui" no mapa.
+- [x] Linha em "Decisões até aqui" no mapa.
+
+## Resolução
+
+Medido em 2026-09-15 sobre `develop @ 72dc146`. Método, imagens, comandos, contagens e
+limites em [`capacidade-borda-replicas.md`](../../pesquisa/capacidade-borda-replicas.md).
+
+Com N=3 e teto 1: 86 `202`, 314 `503`, recusas por réplica 70/75/169. Todos os 86 aceitos
+chegaram a `CONCLUIDO`, sem frames errados. Com teto derivado de 2354 em cada réplica:
+400/400 `202`, zero recusas por réplica, 400 `CONCLUIDO` e os seis critérios verdes.
+
+**O `503` de capacidade não desabilitou a réplica nesta configuração.** Nos dois logs do
+proxy, as únicas desabilitações foram por conexão recusada no healthcheck durante o boot,
+antes da rajada. O caminho de resposta HTTP do nginx 1.27.5 exige `non_idempotent` para
+acionar a troca de upstream de um `POST` já enviado; sem ele, também não conta essa falha.
+
+**Mantido `http_503`.** Não houve defeito observado que justificasse removê-lo. Como o proxy
+não mudou, não se aplica a remedição antes/depois de `mata-replica 3`; este ticket não
+renova a medição do custo de matar réplica do 028.
+
+A reserva local sobre volume compartilhado entrou em *Limitações conhecidas* da arquitetura,
+junto dos itens já entregues pelo 109, sem reescrevê-los. A linha no mapa registra a decisão.
+Nenhuma mudança de código Java ou configuração; não houve novo teste unitário a escrever
+com TDD. A fronteira exercitada foi o HTTP através do proxy, pelo harness pedido no ticket.
+
+### Validação e revisão
+
+`./mvnw test` na raiz: **BUILD SUCCESS**, 512 testes (193 no `videos`, 290 no `extracao`,
+29 no `notificacao`), zero falhas, erros ou ignorados. A primeira execução parou porque
+o Keycloak do Compose ocupava a porta 8081 dos testes; ele foi parado temporariamente,
+a suíte completa foi repetida e o container foi reiniciado ao final.
+
+`/code-review` contra `72dc146`, em dois agentes independentes: Standards, zero achados;
+Spec, zero achados. A revisão conferiu também as contagens e os logs locais das rodadas.

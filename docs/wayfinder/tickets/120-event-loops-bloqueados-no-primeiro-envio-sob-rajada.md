@@ -99,18 +99,17 @@ Implementado em 2026-09-15 sobre `develop @ 14b1f0d`, sem alteração do caminho
 O `scripts/carga/borda.sh` ganhou opções de experimento: `FIAPX_PROJETO_COMPOSE` para isolar o
 projeto Docker da corrida, e `FIAPX_AQUECER`/`FIAPX_PAUSA_AQUECIMENTO` para fazer
 envios sequenciais e uma pausa antes da rajada. A sintaxe do shell e o diff passaram antes da
-rodada; o harness também captura automaticamente o `videos.log` e as durações dos avisos. As
-saídas completas ficam nos diretórios ignorados
-`scripts/carga/saida/ticket120-fria-v2/` e `scripts/carga/saida/ticket120-aquecida-v2/`.
+rodada. As saídas completas ficam nos diretórios ignorados
+`scripts/carga/saida/ticket120-fria/` e `scripts/carga/saida/ticket120-aquecida/`.
 
 ### Comandos e imagem
 
 ```text
-FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-fria-v2 \
+FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-fria \
 FIAPX_EXTRACAO_REPLICAS=2 FIAPX_EXTRACAO_CPUS=1 \
 scripts/carga/borda.sh escala 1 400
 
-FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-aquecida-v2 \
+FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-aquecida \
 FIAPX_AQUECER=5 FIAPX_PAUSA_AQUECIMENTO=10 \
 FIAPX_EXTRACAO_REPLICAS=2 FIAPX_EXTRACAO_CPUS=1 \
 scripts/carga/borda.sh escala 1 400
@@ -127,16 +126,16 @@ Os horários abaixo são do log do container, no fuso local da sessão (`America
 
 | Rodada | Preparo | `BlockedThreadChecker` | `202` mediana | `202` p95 | Resultado funcional |
 |---|---|---:|---:|---:|---|
-| Fria | boot saudável às 12:23:04, rajada sem aquecimento | **4**: 2.323, 2.023, 3.531 e 4.351 ms; janela 12:23:28.821–12:23:30.807 | **25.310 ms** | **28.735 ms** | 400/400 terminais, 0 recusas, 0 presos, 0 `FALHOU`, frames corretos |
-| Aquecida | 5 envios sequenciais, pausa de 10 s; boot saudável às 12:27:00 | **0** | **1.101 ms** | **3.020 ms** | 400/400 terminais, 0 recusas, 0 presos, 0 `FALHOU`, frames corretos |
+| Fria | boot saudável às 11:41:53, rajada sem aquecimento | **6**: 2.825, 4.869, 6.889, 3.368, 8.890 e 5.369 ms; janela 11:42:21.925–11:42:27.800 | **31.346 ms** | **35.594 ms** | 400/400 terminais, 0 recusas, 0 presos, 0 `FALHOU`, frames corretos |
+| Aquecida | 5 envios sequenciais, pausa de 10 s; boot saudável às 11:48:06 | **0** | **2.153 ms** | **4.953 ms** | 400/400 terminais, 0 recusas, 0 presos, 0 `FALHOU`, frames corretos |
 
-O `max` do `202` foi 29.843 ms na fria e 4.273 ms na aquecida. O aquecimento produziu cinco
+O `max` do `202` foi 36.813 ms na fria e 5.830 ms na aquecida. O aquecimento produziu cinco
 Vídeos adicionais, por isso a listagem final informou 405, mas os 400 ids da rajada medida foram
 os únicos usados nos portões. A rodada fria e a aquecida passaram nos seis critérios do
 `borda.sh`.
 
-O primeiro aviso frio ocorreu cerca de 24 s depois do `started` do Quarkus e os avisos cessaram
-após a inicialização. Os quatro stacks atravessam o synthetic bean do `S3AsyncClient`, o builder
+O primeiro aviso frio ocorreu cerca de 28 s depois do `started` do Quarkus e os avisos cessaram
+após a inicialização. Os seis stacks atravessam o synthetic bean do `S3AsyncClient`, o builder
 do SDK e `putObject`; dois incluem `MetadataLoader`/`RunnerClassLoader`, e dois ficam em
 `ReentrantLock`/`ApplicationScoped_ContextInstances.computeIfAbsent`. A rodada aquecida não
 contém esses stacks nem qualquer aviso do `BlockedThreadChecker`.
@@ -168,3 +167,50 @@ da opção 2. Não mover a assinatura para outra thread nem mudar a cadeia do
 `ArquivoMinioAdapter` sem essa decisão: a repetição do ADR 0001 e a ponte de contexto do upload
 continuam intactas. Não existe teste unitário que reproduza a corrida entre CDI lazy, carga do
 SDK e vários event loops; a regressão deve continuar sendo julgada pelo harness real.
+
+## Correção (120)
+
+Em 2026-09-15, a sessão reexecutou a comparação com o harness aprimorado. A resolução acima foi
+preservada; esta seção registra somente a evidência complementar e os ajustes do instrumento.
+
+O `scripts/carga/borda.sh` passou a capturar automaticamente o `videos.log` a partir do instante
+da rajada, contando os avisos do `BlockedThreadChecker` e extraindo suas durações. O aquecimento
+também exige exatamente o número configurado de linhas `ACEITO` e zero `RECUSADO`; um k6 bem
+sucedido por si só não caracteriza aquecimento. O namespace opcional do Compose aceita somente
+nomes no formato `fiapx-ticketNN[-sufixo]`, evitando que o `down -v` experimental aponte para a
+stack nominal.
+
+### Comparação reexecutada
+
+Os comandos abaixo fixam explicitamente o fixture e os 400 VUs, além das condições já descritas
+na resolução original:
+
+```text
+FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-fria-v2 \
+FIAPX_VUS=400 FIAPX_FIXTURE=controle-3s.mp4 \
+FIAPX_EXTRACAO_REPLICAS=2 FIAPX_EXTRACAO_CPUS=1 \
+scripts/carga/borda.sh escala 1 400
+
+FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-aquecida-v2 \
+FIAPX_VUS=400 FIAPX_FIXTURE=controle-3s.mp4 \
+FIAPX_AQUECER=5 FIAPX_PAUSA_AQUECIMENTO=10 \
+FIAPX_EXTRACAO_REPLICAS=2 FIAPX_EXTRACAO_CPUS=1 \
+scripts/carga/borda.sh escala 1 400
+```
+
+As duas imagens foram as mesmas da resolução original, com os digests locais já registrados
+acima. A rodada fria teve 4 avisos, de 2.023 a 4.351 ms, mediana de 25.310 ms e p95 de
+28.735 ms no `202`; a aquecida teve zero avisos, mediana de 1.101 ms e p95 de 3.020 ms. Ambas
+aceitaram 400/400, chegaram a 400 terminais, não deixaram presos nem `FALHOU` e conferiram os
+frames corretos. O aquecimento gerou cinco Vídeos fora do denominador.
+
+O log frio mostra um stack em `PutObjectRequest.<clinit>`, dois em `ReentrantLock` dentro de
+`ApplicationScoped_ContextInstances.computeIfAbsent` e um no builder do SDK durante a criação do
+synthetic bean. Não há `MetadataLoader`/`RunnerClassLoader` nessa rodada v2. O contraste continua
+apoiando partida a frio do `S3AsyncClient`/SDK, sem evidência de handshake de rede; a CPU da
+assinatura já aquecida não foi quantificada. Nenhuma correção de produção foi aplicada.
+
+Após o ajuste do portão do aquecimento, uma verificação isolada `ticket120-aquecida-v3` repetiu
+os 5 envios preliminares com 5 `ACEITO` e 0 `RECUSADO`; os 400 envios medidos também foram
+400/400, com zero aviso e todos os seis critérios funcionais verdes. Essa rodada confirma o
+instrumento, mas não substitui a comparação v2 documentada acima.

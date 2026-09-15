@@ -69,6 +69,10 @@ raiz_docker="${LOCAL_WORKSPACE_FOLDER:-$raiz}"
 
 export COMPOSE_PROJECT_NAME="$(basename "$raiz")"
 if [[ -n "${FIAPX_PROJETO_COMPOSE:-}" ]]; then
+    [[ "$FIAPX_PROJETO_COMPOSE" =~ ^fiapx-ticket[0-9]+(-[a-z0-9][a-z0-9-]*)?$ ]] || {
+        echo "FIAPX_PROJETO_COMPOSE invalido: use fiapx-ticketNN[-sufixo] para isolar a corrida" >&2
+        exit 2
+    }
     export COMPOSE_PROJECT_NAME="$FIAPX_PROJETO_COMPOSE"
 fi
 export FIAPX_EXTRACAO_REPLICAS="$extracao_replicas"
@@ -187,6 +191,12 @@ if (( aquecimento > 0 )); then
     executar_k6 aquecimento 1 "$aquecimento" \
         || { cat "$saida/aquecimento/k6.out" "$saida/aquecimento/k6.err" >&2; falha "aquecimento falhou"; }
     cat "$saida/aquecimento/k6.out"
+    aquecidos_aceitos="$(grep -c 'ACEITO ' "$saida/aquecimento/injetor.log" || true)"
+    aquecidos_recusados="$(grep -c 'RECUSADO ' "$saida/aquecimento/injetor.log" || true)"
+    if (( aquecidos_aceitos != aquecimento || aquecidos_recusados != 0 )); then
+        cat "$saida/aquecimento/injetor.log" >&2
+        falha "aquecimento invalido: esperados $aquecimento ACEITO e zero RECUSADO; obtidos $aquecidos_aceitos ACEITO e $aquecidos_recusados RECUSADO"
+    fi
     sleep "$pausa_aquecimento"
     ok "aquecimento concluido; a rajada medida comeca apos a pausa"
 fi
@@ -222,6 +232,7 @@ echo "       terminal 'certo' nao basta, tem que ser terminal com o conteudo cer
 # ---------------------------------------------------------------------------------------
 passo "3. Rajada, contra o proxy (nao contra o videos direto)"
 
+inicio_rajada="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
 executar_k6 "" "$vus" "$envios" &
 k6_pid=$!
 
@@ -338,7 +349,7 @@ echo "    Saida completa: scripts/carga/saida/$rotulo/"
 
 # ---------------------------------------------------------------------------------------
 passo "7. Bloqueios do event loop (para a tabela)"
-"${compose[@]}" logs --no-color videos > "$saida/videos.log" 2>&1 \
+"${compose[@]}" logs --since "$inicio_rajada" --no-color videos > "$saida/videos.log" 2>&1 \
     || falha "nao foi possivel capturar o log do videos"
 avisos_bloqueio="$(grep -c 'BlockedThreadChecker' "$saida/videos.log" || true)"
 echo "    avisos BlockedThreadChecker: $avisos_bloqueio"

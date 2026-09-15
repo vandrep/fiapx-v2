@@ -2,8 +2,8 @@
 
 - id: 120
 - label: ready-for-agent
-- status: aberto
-- assignee:
+- status: fechado
+- assignee: Codex (sessão de 2026-09-15, SHA inicial 14b1f0d)
 - bloqueado-por:
 - prioridade: P3
 
@@ -68,10 +68,102 @@ Se a corrida passar de 10 min, rode sob `systemd-inhibit`.
 
 ## Critérios de aceite
 
-- [ ] Critérios fixados por escrito antes das corridas.
-- [ ] As duas corridas (a frio e aquecida) registradas com comando, imagem, contagem e duração dos
+- [x] Critérios fixados por escrito antes das corridas.
+- [x] As duas corridas (a frio e aquecida) registradas com comando, imagem, contagem e duração dos
       avisos do `BlockedThreadChecker`, e mediana e p95 do `202`.
-- [ ] Qual das hipóteses a medição sustenta, ou que nenhuma das duas sustenta.
-- [ ] Se houver mudança de código: aprovada pelo mantenedor antes, e remedida com zero avisos do
-      `BlockedThreadChecker` na rajada a frio e os seis critérios do `borda.sh` verdes.
-- [ ] Linha em "Decisões até aqui" no mapa.
+- [x] Qual das hipóteses a medição sustenta, ou que nenhuma das duas sustenta.
+- [x] Não houve mudança de código de produção: a única mudança foi no harness, para tornar o
+      aquecimento e o namespace Docker reproduzíveis; portanto não foi aplicada correção sem
+      aprovação do mantenedor nem há uma re-medida de correção a declarar.
+- [x] Linha em "Decisões até aqui" no mapa.
+
+## Critérios, fixados antes de rodar
+
+Escritos em 2026-09-15, antes das duas corridas, sobre `develop @ 14b1f0d`. O instrumento foi
+`scripts/carga/borda.sh escala 1 400`, com o fixture padrão `controle-3s.mp4`, 400 VUs, duas
+réplicas de `extracao` e uma réplica de `videos` atrás do proxy. A stack seria derrubada com
+`down -v` antes de cada corrida; para não tocar numa stack padrão possivelmente existente, o
+projeto Compose foi isolado pelo namespace opt-in `FIAPX_PROJETO_COMPOSE=fiapx-ticket120`.
+
+Na rodada fria não haveria envio antes da rajada. Na rodada aquecida, o mesmo harness faria cinco
+envios sequenciais (`FIAPX_AQUECER=5`, `VUS=1`), esperaria 10 s
+(`FIAPX_PAUSA_AQUECIMENTO=10`) e só então iniciaria a mesma rajada medida. O aquecimento ficaria
+fora do denominador dos 400 ids. Em cada rodada seriam registrados: todos os avisos do
+`BlockedThreadChecker` e suas durações, a mediana e o p95 do `202`, o digest das imagens e os
+seis critérios funcionais do `borda.sh`.
+
+## Resolução
+
+Implementado em 2026-09-15 sobre `develop @ 14b1f0d`, sem alteração do caminho de produção.
+
+O `scripts/carga/borda.sh` ganhou opções de experimento: `FIAPX_PROJETO_COMPOSE` para isolar o
+projeto Docker da corrida, e `FIAPX_AQUECER`/`FIAPX_PAUSA_AQUECIMENTO` para fazer
+envios sequenciais e uma pausa antes da rajada. A sintaxe do shell e o diff passaram antes da
+rodada. As saídas completas ficam nos diretórios ignorados
+`scripts/carga/saida/ticket120-fria/` e `scripts/carga/saida/ticket120-aquecida/`.
+
+### Comandos e imagem
+
+```text
+FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-fria \
+FIAPX_EXTRACAO_REPLICAS=2 FIAPX_EXTRACAO_CPUS=1 \
+scripts/carga/borda.sh escala 1 400
+
+FIAPX_PROJETO_COMPOSE=fiapx-ticket120 FIAPX_ROTULO=ticket120-aquecida \
+FIAPX_AQUECER=5 FIAPX_PAUSA_AQUECIMENTO=10 \
+FIAPX_EXTRACAO_REPLICAS=2 FIAPX_EXTRACAO_CPUS=1 \
+scripts/carga/borda.sh escala 1 400
+```
+
+As duas rodadas usaram `ghcr.io/vandrep/fiapx-videos:latest`, digest local
+`sha256:534c1295d0b72a6ac0d44ea944dc9d0e787f067dc590cd135dce982efc57478f`, e
+`ghcr.io/vandrep/fiapx-extracao:latest`, digest local
+`sha256:f487b93f859e911814a5d99647ab25887f1dd042e785bc6fdd5e1b6770493f9f`.
+
+### Medição
+
+Os horários abaixo são do log do container, no fuso local da sessão (`America/Sao_Paulo`).
+
+| Rodada | Preparo | `BlockedThreadChecker` | `202` mediana | `202` p95 | Resultado funcional |
+|---|---|---:|---:|---:|---|
+| Fria | boot saudável às 11:41:53, rajada sem aquecimento | **6**: 2.825, 4.869, 6.889, 3.368, 8.890 e 5.369 ms; janela 11:42:21.925–11:42:27.800 | **31.346 ms** | **35.594 ms** | 400/400 terminais, 0 recusas, 0 presos, 0 `FALHOU`, frames corretos |
+| Aquecida | 5 envios sequenciais, pausa de 10 s; boot saudável às 11:48:06 | **0** | **2.153 ms** | **4.953 ms** | 400/400 terminais, 0 recusas, 0 presos, 0 `FALHOU`, frames corretos |
+
+O `max` do `202` foi 36.813 ms na fria e 5.830 ms na aquecida. O aquecimento produziu cinco
+Vídeos adicionais, por isso a listagem final informou 405, mas os 400 ids da rajada medida foram
+os únicos usados nos portões. A rodada fria e a aquecida passaram nos seis critérios do
+`borda.sh`.
+
+O primeiro aviso frio ocorreu cerca de 28 s depois do `started` do Quarkus e os avisos cessaram
+após a inicialização. Os seis stacks atravessam o synthetic bean do `S3AsyncClient`, o builder
+do SDK e `putObject`; dois incluem `MetadataLoader`/`RunnerClassLoader`, e dois ficam em
+`ReentrantLock`/`ApplicationScoped_ContextInstances.computeIfAbsent`. A rodada aquecida não
+contém esses stacks nem qualquer aviso do `BlockedThreadChecker`.
+
+### Leitura e proposta ao mantenedor
+
+A medição sustenta **partida a frio do cliente S3/SDK** como causa dos bloqueios observados. A
+hipótese de CPU disputada não é a explicação dominante neste ensaio: host, imagem, cota, número
+de réplicas e rajada foram mantidos, e só a inicialização prévia mudou; ainda assim, esta sessão
+não quantifica o custo de CPU da assinatura depois de aquecida. Também não há suporte para
+handshake de rede como causa primária, porque os stacks observados são de criação do bean e
+carga de classes, não de conexão Netty.
+
+Há duas opções para decisão antes de qualquer correção de produção:
+
+1. **Forçar a criação do `S3AsyncClient` num `StartupEvent`, antes do readiness.** Uma chamada
+   local ao bean cobre o lock de `ApplicationScoped_ContextInstances` e o builder/carga de
+   classes mostrados nos stacks frios. Sozinha, ela não garante que as classes específicas do
+   `putObject` — assinatura em corpo particionado, checksum e JIT — tenham sido executadas.
+2. **Fazer uma chamada barata ao MinIO no boot, antes do readiness.** Um `headBucket` ou
+   `headObject` cobre a criação do bean, a conexão e a assinatura de uma requisição real; não
+   necessariamente cobre `AwsChunkedV4PayloadSigner` e checksum do upload. Um `putObject`
+   mínimo num objeto sentinela cobriria o caminho exato, mas acrescentaria ciclo de vida e
+   limpeza de objeto ao boot.
+
+Recomendação para a decisão: começar pela opção 1 e reexecutar a rodada fria; se ainda houver
+classes do caminho de upload nos stacks, escolher entre uma preflight S3 explícita ou o sentinela
+da opção 2. Não mover a assinatura para outra thread nem mudar a cadeia do
+`ArquivoMinioAdapter` sem essa decisão: a repetição do ADR 0001 e a ponte de contexto do upload
+continuam intactas. Não existe teste unitário que reproduza a corrida entre CDI lazy, carga do
+SDK e vários event loops; a regressão deve continuar sendo julgada pelo harness real.

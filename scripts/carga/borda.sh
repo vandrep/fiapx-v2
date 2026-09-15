@@ -25,7 +25,9 @@
 # Variaveis: FIAPX_VUS, FIAPX_EXTRACAO_REPLICAS (default 2), FIAPX_EXTRACAO_CPUS (default 1;
 #            teto baixo de proposito — esta maquina tem menos nucleos que a do 026/027, e o
 #            que esta sob julgamento aqui e o `videos`, nao o `extracao`), FIAPX_FIXTURE,
-#            FIAPX_AMOSTRA, FIAPX_ATRASO_KILL.
+#            FIAPX_AMOSTRA, FIAPX_ATRASO_KILL, FIAPX_PROJETO_COMPOSE (namespace Docker
+#            opcional, para isolar a corrida), FIAPX_AQUECER (envios sequenciais antes da
+#            rajada) e FIAPX_PAUSA_AQUECIMENTO (default 10s).
 set -euo pipefail
 export LC_ALL=C
 
@@ -42,12 +44,16 @@ fixture="${FIAPX_FIXTURE:-controle-3s.mp4}"
 amostra="${FIAPX_AMOSTRA:-10}"
 frames_esperados="${FIAPX_FRAMES_ESPERADOS:-3}"   # controle-3s.mp4 a 1 fps
 atraso_kill="${FIAPX_ATRASO_KILL:-2}"
+aquecimento="${FIAPX_AQUECER:-0}"
+pausa_aquecimento="${FIAPX_PAUSA_AQUECIMENTO:-10}"
 usuario="${FIAPX_USUARIO:-demo}"
 senha="${FIAPX_SENHA:-demo}"
 segundos_por_video=1
 
 case "$modo" in escala|mata-replica) ;; *) echo "modo desconhecido: $modo" >&2; exit 2 ;; esac
 [[ "$n_videos" =~ ^[0-9]+$ && "$n_videos" -ge 1 ]] || { echo "N invalido: $n_videos" >&2; exit 2; }
+[[ "$aquecimento" =~ ^[0-9]+$ ]] || { echo "FIAPX_AQUECER invalido: $aquecimento" >&2; exit 2; }
+[[ "$pausa_aquecimento" =~ ^[0-9]+$ ]] || { echo "FIAPX_PAUSA_AQUECIMENTO invalido: $pausa_aquecimento" >&2; exit 2; }
 if [[ "$modo" == mata-replica && "$n_videos" -lt 2 ]]; then
     echo "mata-replica exige N >= 2 — matar a unica replica nao testaria sobrevivencia, testaria o 025 de novo" >&2
     exit 2
@@ -62,6 +68,9 @@ fi
 raiz_docker="${LOCAL_WORKSPACE_FOLDER:-$raiz}"
 
 export COMPOSE_PROJECT_NAME="$(basename "$raiz")"
+if [[ -n "${FIAPX_PROJETO_COMPOSE:-}" ]]; then
+    export COMPOSE_PROJECT_NAME="$FIAPX_PROJETO_COMPOSE"
+fi
 export FIAPX_EXTRACAO_REPLICAS="$extracao_replicas"
 export FIAPX_EXTRACAO_CPUS="$extracao_cpus"
 export FIAPX_VIDEOS_REPLICAS="$n_videos"
@@ -153,6 +162,26 @@ while :; do
     sleep 3
 done
 ok "$esperados containers saudaveis ($n_videos de videos atras do proxy, $extracao_replicas de extracao)"
+
+# ---------------------------------------------------------------------------------------
+if (( aquecimento > 0 )); then
+    passo "1b. Aquecimento com $aquecimento envio(s) sequencial(is) e pausa de ${pausa_aquecimento}s"
+    mkdir -p "$saida/aquecimento"
+    docker run --rm --network "$rede" --user "$(id -u):$(id -g)" \
+        -v "$raiz_docker/scripts/carga/injetor.js:/injetor.js:ro" \
+        -v "$raiz_docker/scripts/carga/fixtures:/fixtures:ro" \
+        -v "$raiz_docker/scripts/carga/saida/$rotulo/aquecimento:/saida" \
+        -e VIDEOS_URL=http://videos-proxy:8080 \
+        -e KEYCLOAK_URL=http://keycloak:8080 \
+        -e USUARIO="$usuario" -e SENHA="$senha" \
+        -e ARQUIVO="/fixtures/$fixture" -e VUS=1 -e ENVIOS="$aquecimento" \
+        grafana/k6:latest run --quiet --console-output=/saida/injetor.log /injetor.js \
+        > "$saida/aquecimento/k6.out" 2> "$saida/aquecimento/k6.err" \
+        || { cat "$saida/aquecimento/k6.out" "$saida/aquecimento/k6.err" >&2; falha "aquecimento falhou"; }
+    cat "$saida/aquecimento/k6.out"
+    sleep "$pausa_aquecimento"
+    ok "aquecimento concluido; a rajada medida comeca apos a pausa"
+fi
 
 # ---------------------------------------------------------------------------------------
 passo "2. Criterio, fixado antes de rodar"

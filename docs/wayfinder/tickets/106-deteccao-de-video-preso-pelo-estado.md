@@ -123,3 +123,13 @@ detecta cedo, nunca tarde. Aplicada no volume local, que só tinha terminais.
   exportação e `for: 1m`.
 - **Sem guarda no smoke.** Um rename da métrica deixaria as regras 4 e 5 em silêncio, e o passo
   12 só lê as queries do painel.
+
+## Correção (113)
+
+O primeiro item de *Limites que ficam* foi medido pelo
+[ticket 113](113-falso-positivo-de-video-preso-em-processando-sob-pico.md), e metade dele não se
+realiza. Sob `mata-extracao`, a entrega devolvida pelo crash da réplica volta ao **começo** de
+`extracao.extrair` e é pega na hora: posição 3 com 352 mensagens prontas, e desfecho 30 s depois do
+`iniciada_em`, num pico de 400 Vídeos de 2 min que levou 24 min para drenar. A contagem de presos
+ficou em zero. Continuam de pé os 420 s que não são teto duro, e um caminho que o 113 não mediu: o
+`nack` com requeue da falha transitória.

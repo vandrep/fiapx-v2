@@ -401,10 +401,13 @@ elif [[ "$modo" == mata-extracao ]]; then
     sleep 5
     alvo="$("${compose[@]}" ps -q extracao | head -1)"
     read -r prontas_no_kill sem_ack_no_kill <<< "$(fila_extrair)"
-    instante_kill="$(date --iso-8601=ns)"
+    # Ponto decimal fixo: `date --iso-8601=ns` segue a localidade, e em pt_BR sai virgula, que
+    # o Postgres recusa na consulta das interrompidas (achado na rodada A do ticket 113).
+    instante_kill="$(date +%Y-%m-%dT%H:%M:%S.%N%:z)"
     docker kill "$alvo" >/dev/null
     aviso "uma replica do extracao morta no meio da drenagem (container ${alvo:0:12})"
     aviso "extracao.extrair no kill: $prontas_no_kill pronta(s), $sem_ack_no_kill sem ack, em $instante_kill"
+    echo "$instante_kill $prontas_no_kill $sem_ack_no_kill" > "$saida/fila-no-kill.txt"
     "${compose[@]}" up -d extracao > /dev/null 2>&1
     aviso "replica de volta"
 elif [[ "$modo" == redeploy-extracao ]]; then
@@ -452,15 +455,15 @@ while :; do
     censo="$(scripts/carga/oraculo.sh censo "$aceitos_arquivo")"
     terminais="$(awk '$1=="CONCLUIDO"||$1=="FALHOU"{s+=$2} END{print s+0}' <<< "$censo")"
     decorrido=$(( SECONDS - inicio_drenagem ))
+    linha="$(printf '    %4ds  %s' "$decorrido" "$(tr '\n' ' ' <<< "$censo")")"
     if [[ "$modo" == mata-extracao ]]; then
         read -r presos_agora idade_agora <<< "$(scripts/carga/oraculo.sh presos)"
         (( presos_agora > presos_max )) && presos_max=$presos_agora
         (( idade_agora > idade_max )) && idade_max=$idade_agora
-        printf '    %4ds  %s presos=%s idade_max=%ss\n' "$decorrido" "$(tr '\n' ' ' <<< "$censo")" \
-            "$presos_agora" "$idade_agora" | tee -a "$saida/drenagem.txt"
-    else
-        printf '    %4ds  %s\n' "$decorrido" "$(tr '\n' ' ' <<< "$censo")"
+        linha+=" presos=$presos_agora idade_max=${idade_agora}s"
+        echo "$linha" >> "$saida/drenagem.txt"
     fi
+    echo "$linha"
     (( terminais == aceitos )) && break
     (( decorrido > limite_drenagem )) && { aviso "limite de ${limite_drenagem}s estourado"; break; }
     sleep 5
@@ -474,14 +477,15 @@ fi
 
 if [[ "$modo" == mata-extracao ]]; then
     scratch_extracao > "$saida/scratch-depois.txt"
+    # cut -c1-36: o idVideo, sem o sufixo aleatorio da tentativa.
     comm -13 "$saida/scratch-antes.txt" "$saida/scratch-depois.txt" | cut -c1-36 | sort -u \
-        > "$saida/interrompidos.txt"
-    interrompidos="$(wc -l < "$saida/interrompidos.txt")"
+        > "$saida/ids-interrompidos.txt"
+    interrompidos="$(wc -l < "$saida/ids-interrompidos.txt")"
     if (( interrompidos > 0 )); then
-        scripts/carga/oraculo.sh interrompidas "$aceitos_arquivo" "$saida/interrompidos.txt" "$instante_kill" \
-            > "$saida/interrompidas.txt"
+        scripts/carga/oraculo.sh interrompidas "$aceitos_arquivo" "$saida/ids-interrompidos.txt" "$instante_kill" \
+            > "$saida/desfecho-das-interrompidas.txt"
     else
-        : > "$saida/interrompidas.txt"
+        : > "$saida/desfecho-das-interrompidas.txt"
     fi
 fi
 
@@ -590,7 +594,7 @@ if [[ "$modo" == mata-extracao ]]; then
     ok "6. Reentrega (ticket 113), medido e nao julgado — $prontas_no_kill pronta(s) e $sem_ack_no_kill sem ack no kill:"
     while read -r id estado segundos posicao; do
         echo "         $id  $estado  iniciada_em->desfecho ${segundos:-?}s  posicao $posicao"
-    done < "$saida/interrompidas.txt"
+    done < "$saida/desfecho-das-interrompidas.txt"
     ok "6. Maior contagem de presos em PROCESSANDO na drenagem: $presos_max (PROCESSANDO mais velho: ${idade_max}s)"
 fi
 

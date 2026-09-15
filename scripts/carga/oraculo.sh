@@ -20,9 +20,22 @@
 # Uso:
 #   scripts/carga/oraculo.sh censo   <arquivo-de-ids>
 #   scripts/carga/oraculo.sh amostra <arquivo-de-ids> [quantidade]
-#   scripts/carga/oraculo.sh presos  [limiar]
+#   scripts/carga/oraculo.sh presos
 #   scripts/carga/oraculo.sh interrompidas <aceitos> <interrompidos> <instante-do-kill>
 set -euo pipefail
+
+psql_videos() {
+    docker compose exec -T postgres psql -U fiapx -d fiapx_videos -q -t -A -F' ' -v ON_ERROR_STOP=1
+}
+
+# Carrega um arquivo de ids numa tabela temporaria, para o LEFT JOIN a partir da lista.
+tabela_de_ids() {
+    local tabela="$1" ids="$2"
+    echo "CREATE TEMP TABLE $tabela (id uuid PRIMARY KEY);"
+    echo "COPY $tabela FROM STDIN;"
+    cat "$ids"
+    echo '\.'
+}
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$raiz"
@@ -35,15 +48,11 @@ senha="${FIAPX_SENHA:-demo}"
 censo() {
     local ids="$1"
     {
-        echo "CREATE TEMP TABLE enviados (id uuid PRIMARY KEY);"
-        echo "COPY enviados FROM STDIN;"
-        cat "$ids"
-        echo '\.'
+        tabela_de_ids enviados "$ids"
         echo "SELECT coalesce(v.estado, 'AUSENTE'), count(*)
                 FROM enviados e LEFT JOIN video v ON v.id = e.id
                GROUP BY 1 ORDER BY 1;"
-    } | docker compose exec -T postgres \
-            psql -U fiapx -d fiapx_videos -q -t -A -F' ' -v ON_ERROR_STOP=1
+    } | psql_videos
 }
 
 # Token proprio, e nao o do injetor: o oraculo roda *depois* da drenagem, quando o token da
@@ -84,19 +93,15 @@ amostra() {
     return $(( divergencias > 0 ? 1 : 0 ))
 }
 
-psql_videos() {
-    docker compose exec -T postgres psql -U fiapx -d fiapx_videos -q -t -A -F' ' -v ON_ERROR_STOP=1
-}
-
 # A contagem do gauge fiapx.videos.presos{estado="PROCESSANDO"} (ticket 106), feita direto no
 # Postgres porque o overlay de carga desliga a observabilidade (ticket 113). E o mesmo predicado
 # do ContarVideosPresosUseCase, sobre TODOS os Videos e nao so os da rodada, como o gauge. A
 # segunda coluna e a idade do PROCESSANDO mais velho, em segundos: e ela que mostra quanto falta
-# para o limiar numa corrida curta, em que a contagem fica em zero.
+# para o limiar numa corrida curta, em que a contagem fica em zero. Os 30 min sao o
+# fiapx.deteccao.limiar-de-video-preso do videos; se ele mudar, este muda junto.
 presos() {
-    local limiar="${1:-30 minutes}"
     psql_videos <<SQL
-SELECT count(*) FILTER (WHERE iniciada_em < now() - interval '$limiar'),
+SELECT count(*) FILTER (WHERE iniciada_em < now() - interval '30 minutes'),
        coalesce(round(extract(epoch FROM now() - min(iniciada_em))), 0)
   FROM video WHERE estado = 'PROCESSANDO';
 SQL
@@ -106,18 +111,13 @@ SQL
 # desfecho em segundos, e a posicao em que a entrega voltou a fila. A posicao e contada pelos
 # Videos da rodada cuja PRIMEIRA tentativa comecou depois do kill e antes do desfecho do
 # interrompido: entrega recolocada no comeco fica perto de zero (so os que as outras replicas ja
-# tinham pego), no fim fica perto das mensagens prontas no instante do kill.
+# tinham pego), no fim fica perto das mensagens prontas no instante do kill. A contagem inclui o
+# que as outras replicas pegaram durante a propria reentrega, entao erra para cima.
 interrompidas() {
     local aceitos="$1" interrompidos="$2" instante_kill="$3"
     {
-        echo "CREATE TEMP TABLE enviados (id uuid PRIMARY KEY);"
-        echo "COPY enviados FROM STDIN;"
-        cat "$aceitos"
-        echo '\.'
-        echo "CREATE TEMP TABLE interrompidos (id uuid PRIMARY KEY);"
-        echo "COPY interrompidos FROM STDIN;"
-        cat "$interrompidos"
-        echo '\.'
+        tabela_de_ids enviados "$aceitos"
+        tabela_de_ids interrompidos "$interrompidos"
         echo "SELECT i.id, coalesce(v.estado, 'AUSENTE'),
                      round(extract(epoch FROM v.finalizado_em - v.iniciada_em)),
                      (SELECT count(*) FROM enviados e JOIN video o ON o.id = e.id
@@ -132,7 +132,7 @@ interrompidas() {
 case "${1:-}" in
     censo)         censo "$2" ;;
     amostra)       amostra "$2" "${3:-10}" ;;
-    presos)        presos "${2:-30 minutes}" ;;
+    presos)        presos ;;
     interrompidas) interrompidas "$2" "$3" "$4" ;;
-    *)             echo "uso: $0 censo|amostra <arquivo-de-ids> [quantidade] | presos [limiar] | interrompidas <aceitos> <interrompidos> <instante-do-kill>" >&2; exit 2 ;;
+    *)             echo "uso: $0 censo|amostra <arquivo-de-ids> [quantidade] | presos | interrompidas <aceitos> <interrompidos> <instante-do-kill>" >&2; exit 2 ;;
 esac

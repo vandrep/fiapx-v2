@@ -1485,6 +1485,8 @@ verificadas por teste, não são sugestão). Projeto original em
   automático. A métrica passa pela recusa de *Vídeos por estado* do ADR 0004: a listagem é por
   Dono, e quem consulta em regime é um alerta. Falso positivo aceito e escrito: entrega devolvida
   por crash espera atrás do backlog.
+  *Medido pelo [ticket 113](tickets/113-falso-positivo-de-video-preso-em-processando-sob-pico.md):
+  a entrega devolvida por crash volta ao começo da fila, e esse falso positivo não se realiza.*
 
 - [Resgate de Vídeo preso pela marca de
   publicação](tickets/107-resgate-de-video-preso-pela-marca.md) — resgate é apagar a marca.
@@ -1533,6 +1535,16 @@ verificadas por teste, não são sugestão). Projeto original em
   e rótulos, tem série. Reprova com a regra e o seletor que faltam. As duas séries de `estado` de
   `fiapx_videos_presos` ficam cobertas pelos seletores do arquivo, sem lista no script. Visto
   reprovar com uma métrica e uma fila renomeadas, e verde de novo depois de desfazer.
+
+- [O falso positivo de Vídeo preso em `PROCESSANDO` sob
+  pico](tickets/113-falso-positivo-de-video-preso-em-processando-sob-pico.md) — medido, e não se
+  realiza para crash de réplica. A entrega devolvida pelo `SIGKILL` volta ao **começo** da fila
+  quorum. Isso deu posição 2 com 360 mensagens prontas, e posição 3 com 352 num pico de 400
+  Vídeos de 2 min, com desfecho 30 s depois do `iniciada_em` e zero presos. As tentativas interrompidas foram
+  identificadas pelo órfão no scratch. Critérios fixados antes de rodar, e o modo `mata-extracao`
+  do `conservacao.sh` passou a medir isso. Os textos do limite foram corrigidos no `alertas.yaml`,
+  ao lado do limiar, no runbook e numa `## Correção (113)` do 106. Ficam de pé os 420 s sem teto
+  duro e o `nack` com requeue, que não foi medido.
 
 ## Ainda não especificado
 

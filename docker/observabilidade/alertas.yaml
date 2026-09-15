@@ -186,10 +186,12 @@ groups:
       # 4. PROCESSANDO ha mais que o limiar desde o inicio da Extracao. O relogio e o da PRIMEIRA
       #    tentativa, entao as tres entregas cabem dentro dele quando saem seguidas.
       #
-      #    O falso positivo conhecido, nao medido: uma entrega devolvida a fila por crash da
-      #    replica (SIGKILL, OOM) espera atras do backlog antes da proxima tentativa, e num pico
-      #    longo o Video legitimo passa do limiar ainda em PROCESSANDO. Aceito porque o custo e
-      #    um humano olhar a fila e ver o Video andando; o inverso, calar, e o Video perdido.
+      #    Crash de replica nao as separa, e isso foi medido (ticket 113): a entrega devolvida
+      #    pelo SIGKILL volta ao COMECO de extracao.extrair e e pega na hora, mesmo com 352
+      #    mensagens prontas atras dela. O falso positivo que sobra: os 420 s por tentativa nao
+      #    sao teto duro, porque o I/O nao tem timeout, e a posicao do nack com requeue (falha
+      #    transitoria) nao foi medida. Aceito porque o custo e um humano olhar a fila e ver o
+      #    Video andando; o inverso, calar, e o Video perdido.
       - uid: fiapx-video-preso-processando
         title: Video preso em PROCESSANDO
         condition: B

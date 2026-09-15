@@ -2,7 +2,7 @@
 
 - id: 113
 - label: ready-for-agent
-- status: aberto
+- status: fechado
 - assignee: claude (sessão de 2026-09-14, SHA inicial f40b703)
 - bloqueado-por:
 - prioridade: P3
@@ -56,11 +56,11 @@ A corrida passa de 10 min: rode sob `systemd-inhibit`.
 
 ## Critérios de aceite
 
-- [ ] Critérios fixados por escrito antes da corrida.
-- [ ] Posição da entrega recolocada e intervalo `iniciada_em` → desfecho medidos sob
+- [x] Critérios fixados por escrito antes da corrida.
+- [x] Posição da entrega recolocada e intervalo `iniciada_em` → desfecho medidos sob
       `mata-extracao`, com o volume da rajada registrado.
-- [ ] Um dos dois desfechos acima, com o texto dos limites atualizado onde o 106 os escreveu.
-- [ ] Linha em "Decisões até aqui" no mapa.
+- [x] Um dos dois desfechos acima, com o texto dos limites atualizado onde o 106 os escreveu.
+- [x] Linha em "Decisões até aqui" no mapa.
 
 ## Critérios, fixados antes de rodar
 
@@ -120,3 +120,83 @@ esperaria mais que o limiar. `FIAPX_VUS=200` porque 400 conexões saturaram o in
   contagem sempre zero, **e** a posição da rodada A for no começo. Posição no fim com a rodada B
   abaixo do limiar não fecha o ticket por esse desfecho: o número depende do tamanho do pico, e a
   conta da espera vai para o mantenedor junto com a medição.
+
+## Resolução
+
+Medido em 2026-09-14 sobre `develop @ c6213fa`. **O limite não se realiza** para crash de réplica:
+a entrega devolvida volta ao começo da fila quorum.
+
+| Rodada | Volume | Prontas no kill | Posição | `iniciada_em` → desfecho | Maior contagem de presos | Conservação |
+|---|---|---|---|---|---|---|
+| A, `113-a-controle` | 400 × `controle-3s.mp4`, 400 VUs | 360 (4 sem ack) | **2** | 1 s | 0 | 400/400 `CONCLUIDO`, drenagem em 63 s |
+| B2, `113-b2-carga2min-vus10` | 400 × `carga-2min.mp4`, 10 VUs | 352 (4 sem ack) | **3** | 30 s | 0 (`PROCESSANDO` mais velho: 25 s) | 400/400 `CONCLUIDO`, drenagem em 1449 s, cinco critérios verdes |
+
+Nas duas, uma tentativa interrompida, identificada pelo órfão no scratch. Na B2 o kill caiu 10 s
+dentro de uma tentativa de ~21 s, e o desfecho saiu 30 s depois do início: a segunda tentativa
+começou logo depois do kill, à frente das 352 prontas. Se tivesse ido para o fim, esperaria ~24 min,
+a drenagem inteira. Pela leitura fixada, as duas posições estão no começo (≤ 4), a B2 teve todos os
+intervalos ≤ 1800 s e a contagem sempre zero. Maior intervalo entre amostras: 6 s nas duas.
+
+O veredito se apoia na **posição**, e não no limiar. A B2 drenou em 24 min, e não nos ~35 que a
+conta de 21 s por Vídeo previa. Por isso, mesmo recolocada no fim, a entrega teria esperado menos
+que os 30 min, e a B2 sozinha não teria flagrado o limite. O que o afasta é a entrega voltar ao
+começo nas duas rodadas, com mais de 350 mensagens prontas atrás dela: a espera não cresce com o
+pico.
+
+A posição, como foi fixada, erra para cima. Ela conta também o que as outras réplicas pegaram
+durante a própria reentrega: na B2 são ~20 s com 3 réplicas, o que sozinho já dá ~3. Então
+"posição 3" não quer dizer três entregas à frente, mas não muda a leitura de começo contra fim.
+
+A evidência de cada rodada está em `scripts/carga/saida/<rótulo>/`, fora do git. Lá ficam
+`terminal.log`, com a saída completa, `fila-no-kill.txt`, `drenagem.txt` e o resultado das
+tentativas interrompidas. O script da rodada A não escreveu esses arquivos: foram gravados depois,
+a partir da saída do terminal. O mesmo vale para o `censo.txt` da A, que foi refeito.
+
+### Desvios do que foi fixado
+
+- **A rodada B, como escrita, saiu inválida.** Com `FIAPX_VUS=200`, o k6 morreu com código 137 antes
+  do primeiro `202`: cada VU carrega uma cópia de 41 MB, e o host tem 7 GB de RAM. O portão 0
+  barrou a rodada (zero tentativas interrompidas), e a saída ficou em `113-b-carga2min`. A B2 é a
+  mesma rodada com `FIAPX_VUS=10`. O que a pergunta precisa é o backlog no kill, e ele foi de 352.
+- **A consulta final da rodada A falhou.** `date --iso-8601=ns` sai com vírgula decimal na
+  localidade do host, e o Postgres recusou o instante. A drenagem já tinha terminado. A mesma
+  consulta foi refeita à mão, com ponto decimal, sobre os arquivos da rodada, e o script passou a
+  formatar o instante com ponto antes da B. Por isso a rodada A não imprimiu o veredito dos
+  critérios 1 a 5. O censo refeito deu 400 `CONCLUIDO`.
+
+### O que foi atualizado
+
+O texto do limite em `alertas.yaml` (regra 4), ao lado do limiar no `application.properties` do
+`videos`, no runbook de resgate (texto do 107, que citava este ticket), numa seção
+`## Correção (113)` no fim do 106 e num ponteiro de uma linha sob a entrada do 106 no mapa.
+
+### Revisão
+
+`/code-review` em dois eixos. Depois dela:
+
+- o mapa ganhou o ponteiro sob a entrada do 106;
+- o script passou a gravar a fila no kill em arquivo;
+- entrou a ressalva sobre o que a posição conta;
+- no `oraculo.sh`, o `censo` passou a usar o mesmo `psql_videos`, e o carregamento de ids deixou de
+  se repetir;
+- o `presos` perdeu o parâmetro de limiar, que ninguém passava;
+- os arquivos de saída ganharam nomes que não diferem só no gênero;
+- a linha da drenagem passou a sair de um só lugar.
+
+Ficou sem mudança, de propósito, o `if` por modo no `conservacao.sh`, que já é a forma do arquivo.
+
+Uma rodada curta validou o script editado. Foi a `113-validacao-pos-revisao`, igual à A, em
+2026-09-15: cinco critérios verdes, 400/400 em 81 s e uma tentativa interrompida. Ela voltou na
+posição 2 com 384 prontas, desfecho em 1 s e zero presos. É o terceiro ponto no começo da fila, e ele
+não entra na leitura fixada.
+
+### Limites que ficam
+
+- **`nack` com requeue não medido.** A falha transitória do `extracao` volta pela
+  `failure-strategy=requeue`, que é outro caminho de retorno ao broker. Esta medição só cobre a
+  entrega devolvida pelo fechamento do canal.
+- **Os 420 s por tentativa continuam sem teto duro**, porque download e upload não têm timeout.
+- **Uma réplica derrubada por rodada, uma tentativa interrompida em cada.** A mesma tentativa
+  derrubada duas vezes não foi exercitada; pelo mecanismo medido, cada devolução volta ao começo.
+- Sem a stack de observabilidade, a contagem de presos foi a do predicado do gauge feita no
+  Postgres, e não a série exportada.

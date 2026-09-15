@@ -31,9 +31,11 @@ devolvida. Sem `x-delivery-limit` declarado, vale o limite padrão do RabbitMQ 4
 dead-letter a mensagem que o atinge é descartada. Leia uma vez e anote os ids. As duas DLQs
 clássicas não contam entregas.
 
-Antes de resgatar, confirme que o Vídeo está parado mesmo. Um `PROCESSANDO` sob pico pode estar só
-atrás do backlog ([ticket 113](../wayfinder/tickets/113-falso-positivo-de-video-preso-em-processando-sob-pico.md)).
-Olhe o trace pelo `idVideo` e as filas de `extracao.extrair`.
+Antes de resgatar, confirme que o Vídeo está parado mesmo. Crash de réplica não deixa um
+`PROCESSANDO` atrás do backlog: a entrega devolvida volta ao começo da fila ([ticket
+113](../wayfinder/tickets/113-falso-positivo-de-video-preso-em-processando-sob-pico.md)). Um
+`PROCESSANDO` legítimo ainda pode passar do limiar por I/O lento, sem timeout, ou por falha
+transitória repetida. Olhe o trace pelo `idVideo` e as filas de `extracao.extrair`.
 
 ## 2. Resgatar
 

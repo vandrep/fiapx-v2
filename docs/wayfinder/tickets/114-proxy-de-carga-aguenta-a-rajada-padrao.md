@@ -97,3 +97,8 @@ Maven nem nenhuma guarda do agregador lê. O que a valida é o `nginx -t` e a ro
 envios simultâneos e passou a acabar em 400, porque os 224 de folga já estão reservados; 800 virou
 teto, não pico medido; "envios" e "conexões" deixaram de se confundir; e a explicação da mediana do
 `202`, que a evidência não sustentava, virou "não investigado", com o indício de partida a frio.
+
+## Desdobramento
+
+Os event loops bloqueados no começo da rajada viraram o
+[ticket 120](120-event-loops-bloqueados-no-primeiro-envio-sob-rajada.md), a pedido do mantenedor.

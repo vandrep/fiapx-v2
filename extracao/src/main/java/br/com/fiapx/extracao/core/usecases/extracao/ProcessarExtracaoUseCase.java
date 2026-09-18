@@ -1,6 +1,7 @@
 package br.com.fiapx.extracao.core.usecases.extracao;
 
 import br.com.fiapx.extracao.core.entities.ResultadoExtracao;
+import br.com.fiapx.extracao.core.exceptions.FalhaAoPublicarExtracaoFalhouException;
 import br.com.fiapx.extracao.core.exceptions.FalhaPermanenteDeExtracaoException;
 import br.com.fiapx.extracao.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.extracao.core.interfaces.gateway.EspacoDeTrabalhoGateway;
@@ -24,6 +25,9 @@ import java.util.concurrent.CompletionException;
  * ExtracaoFalhou} e o metodo completa <b>normalmente</b> — e o que faz o consumidor dar ack
  * sem gastar o {@code x-delivery-limit}. Qualquer outra falha propaga como excecao, e e o
  * consumidor quem da nack (ADR 0001).
+ * Se a publicacao da propria falha permanente falhar, a classificacao e preservada em
+ * {@link FalhaAoPublicarExtracaoFalhouException}; a borda precisa distingui-la de uma falha
+ * transitoria do trabalho para nao executar a mesma Extracao para sempre (ticket 029).
  *
  * <p>O diretorio de trabalho e sempre limpo, sucesso ou falha (ticket 011): o worker morre
  * no meio por desenho, entao a limpeza mora aqui, nao num {@code finally} do chamador que um
@@ -80,11 +84,28 @@ public class ProcessarExtracaoUseCase {
     }
 
     private CompletableFuture<Void> tratarFalha(UUID idVideo, Throwable erro) {
-        var causa = erro instanceof CompletionException ? erro.getCause() : erro;
+        var causa = causaRaiz(erro);
         if (causa instanceof FalhaPermanenteDeExtracaoException falha) {
-            return extracaoEventosSender.enviarFalhou(idVideo, falha.motivo(), falha.detalheTecnico(), Instant.now());
+            return extracaoEventosSender.enviarFalhou(idVideo, falha.motivo(), falha.detalheTecnico(), Instant.now())
+                    .exceptionallyCompose(falhaDePublicacao -> CompletableFuture.failedFuture(
+                            new FalhaAoPublicarExtracaoFalhouException(causaRaiz(falhaDePublicacao))));
         }
         return CompletableFuture.failedFuture(causa);
+    }
+
+    /**
+     * Tira o envelope que o {@code CompletionStage} poe por cima da falha de verdade, e so ele:
+     * um nivel, e nao a cadeia inteira. Quem decide o motivo da Extracao e quem decide se o nack
+     * requeue precisam da falha que o adapter lancou, e nao do {@code CompletionException} que a
+     * composicao acrescentou.
+     *
+     * <p>Estava escrito duas vezes nesta classe ate o ticket 087. Ele <b>nao</b> e a mesma coisa
+     * que o percurso de causas do {@code ExtrairVideoConsumer} nem que o {@code desembrulhar} do
+     * `videos`; o porque de os tres nao convergirem esta no `AGENTS.md`
+     * § <i>As copias deliberadas entre servicos</i>.
+     */
+    private Throwable causaRaiz(Throwable falha) {
+        return falha instanceof CompletionException ? falha.getCause() : falha;
     }
 
     public record Command(UUID idVideo, String chaveVideo, String chaveDestinoPacote) {

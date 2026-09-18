@@ -12,7 +12,7 @@
       "vhost": "/",
       "pattern": ".*",
       "apply-to": "queues",
-      "definition": { "dead-letter-strategy": "at-least-once" },
+      "definition": { "dead-letter-strategy": "at-least-once", "overflow": "reject-publish" },
       "priority": 0
     }
   ],

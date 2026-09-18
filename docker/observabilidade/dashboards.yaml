@@ -1,0 +1,51 @@
+# Provider de dashboard por arquivo (ticket 092), ao lado do `alertas.yaml`.
+#
+# Ele existe porque o provisionamento de dashboard do Grafana NAO e por arquivo solto: o
+# `alertas.yaml` cai direto em `provisioning/alerting/` e e lido, mas um JSON de dashboard
+# posto em `provisioning/dashboards/` e ignorado — aquele diretorio guarda PROVIDERS, e o
+# unico que a imagem traz la (`sample.yaml`) esta inteiro comentado. Dai o custo de dois
+# mounts para um painel: este arquivo e o JSON que ele aponta.
+#
+# Este arquivo e um provider A MAIS, e convive com o `grafana-dashboards.yaml` da imagem, que
+# provisiona os dashboards de fabrica. Ate o ticket 101 aquele arquivo NAO era tocado, e o
+# comentario daqui dizia isso; o ticket 101 passou a sobrescreve-lo, por
+# `docker/observabilidade/grafana-dashboards.yaml`, para tirar da lista o *RED Metrics (native
+# histogram)* — que e dashboard morto contra um exportador de histograma classico. Sao dois
+# arquivos com papeis distintos: aqui mora o provider do painel NOSSO, la a lista dos de
+# fabrica, com a instrucao de rederivar no upgrade.
+#
+# `allowUiUpdates: false` e `disableDeletion: true` deixam o arquivo ser a verdade: o painel
+# volta ao versionado a cada boot, e ninguem o apaga por engano no meio da demo. O ganho e o
+# mesmo que o `alertas.yaml` tem — o que esta na tela esta no repositorio.
+apiVersion: 1
+
+providers:
+  - name: "FIAP X"
+    orgId: 1
+    type: file
+    # `FIAP X` e a MESMA pasta que o `alertas.yaml` declara (ticket 099): no Grafana, pasta de
+    # alerta e pasta de dashboard sao a mesma entidade, casada por titulo. O painel entra nela
+    # porque dela derivam as expressoes de fila — as tres regras de fila daquele arquivo —, e porque uma
+    # pasta que so tem alerta aparece VAZIA na lista de Dashboards, que foi como o defeito
+    # aparente chegou.
+    #
+    # O clique a mais na busca, que o 092 evitava deixando o painel na raiz, esta pago: quem abre
+    # localhost:3000 cai no painel pela HOME (GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH no
+    # `docker-compose.yml`), que le ARQUIVO do disco e nao depende de pasta nenhuma.
+    #
+    # O TITULO e o contrato, e ele nao esta so aqui: tem de bater com o `folder:` do
+    # `alertas.yaml` letra por letra. Divergindo, o Grafana cria uma SEGUNDA pasta em silencio e
+    # o defeito do 099 volta inteiro. Quem guarda isso e o passo 12 do `scripts/smoke.sh`, que le
+    # o titulo dos dois arquivos em vez de fixa-lo.
+    #
+    # Conferir mudanca aqui por `docker compose restart` ENGANA: o provisionador pula o dashboard
+    # cujo ARQUIVO nao mudou, e so o provider mudou — o painel fica onde estava e parece que a
+    # edicao nao pegou. Quem move e base nova: `docker compose up -d --force-recreate
+    # observabilidade` (o Grafana desta imagem guarda a base dentro do container).
+    folder: "FIAP X"
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /otel-lgtm/grafana/conf/provisioning/dashboards/fiapx/
+      foldersFromFilesStructure: false

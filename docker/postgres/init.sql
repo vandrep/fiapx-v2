@@ -31,6 +31,12 @@ CREATE TABLE video (
     estado               VARCHAR(20)  NOT NULL,
     recebido_em          TIMESTAMPTZ  NOT NULL,
 
+    -- Inicio da PRIMEIRA tentativa de Extracao, o `iniciadaEm` do ExtracaoIniciada. A reentrega
+    -- nao o reescreve: o UPDATE so o grava junto da saida de RECEBIDO. E o que distingue um
+    -- PROCESSANDO legitimo de um preso (ticket 106, que reverte o 033). Nulo em RECEBIDO e no
+    -- terminal que chegou antes do ExtracaoIniciada.
+    iniciada_em          TIMESTAMPTZ,
+
     -- Instante terminal, de CONCLUIDO ou de FALHOU. Os dois estados sao mutuamente
     -- exclusivos, entao uma coluna basta; sai como `concluidoEm` no contrato HTTP.
     finalizado_em        TIMESTAMPTZ,
@@ -83,6 +89,12 @@ CREATE TABLE video (
     -- silencio, em vez de deixar a garantia dependendo de quem escreve.
     CONSTRAINT ck_video_falhou_finalizado CHECK (
         estado <> 'FALHOU' OR finalizado_em IS NOT NULL
+    ),
+
+    -- O mesmo raciocinio, para o alerta de Video preso (ticket 106): ele compara `iniciada_em`
+    -- com o limiar, e um PROCESSANDO sem instante nunca seria preso aos olhos dele.
+    CONSTRAINT ck_video_processando_iniciada CHECK (
+        estado <> 'PROCESSANDO' OR iniciada_em IS NOT NULL
     )
 );
 
@@ -107,3 +119,14 @@ CREATE INDEX ix_video_comando_pendente
 CREATE INDEX ix_video_falha_pendente
     ON video (finalizado_em)
     WHERE estado = 'FALHOU' AND falha_publicada_em IS NULL;
+
+-- Indices da deteccao de Video preso (ticket 106). A contagem roda a cada minuto, com o mesmo
+-- motivo dos dois acima: sem `dono_sub` no predicado, e numa tabela que nunca perde linhas.
+-- Parciais pelo estado, porque em regime quase toda linha e terminal.
+CREATE INDEX ix_video_processando
+    ON video (iniciada_em)
+    WHERE estado = 'PROCESSANDO';
+
+CREATE INDEX ix_video_recebido_publicado
+    ON video (comando_publicado_em)
+    WHERE estado = 'RECEBIDO';

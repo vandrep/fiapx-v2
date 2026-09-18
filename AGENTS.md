@@ -30,12 +30,13 @@ O resto do contexto está atrás de ponteiros, cada um com o seu gatilho:
 | tocar em transição de estado do Vídeo | [ADR 0002](docs/adr/0002-maquina-de-estados-em-duas-camadas.md) |
 | tocar em publicação de comando ou de falha no `videos` | [ADR 0003](docs/adr/0003-reconciliacao-por-varredura.md) |
 | tocar em span, métrica, log estruturado ou na stack de observabilidade | [ADR 0004](docs/adr/0004-camada-de-observabilidade.md) — e § Nomes na observabilidade, abaixo |
+| tocar em retenção do MinIO, no `seed.sh` ou em quem grava e apaga o original | [ADR 0005](docs/adr/0005-retencao-do-original.md) |
 
 ## Layout
 
 ```
 pom.xml         parent agregador, packaging pom, br.com.fiapx:fiapx — não gera artefato
-videos/         pom + src + Dockerfile
+videos/         pom + src + Dockerfile + entrypoint.sh
 extracao/       idem
 notificacao/    idem
 ```
@@ -135,23 +136,140 @@ produção. Medido: 4 travamentos em ~60 ciclos com o interceptor, 0 em 90 sem e
 retenta dentro da própria cadeia — a política do [ADR 0001](docs/adr/0001-politica-de-falhas.md)
 não mudou, só quem a implementa. A extensão saiu dos três `pom.xml` junto com a regra.
 
+Uma sétima chegou no ticket 064, estendendo a sexta ao `application.properties`: nenhuma chave
+de tolerância a falhas por interceptor pode ser configurada, nem no formato do MicroProfile
+(`.../Retry/...` e as demais anotações conhecidas) nem no namespace `quarkus.fault-tolerance`
+ou `smallrye.faulttolerance`. A sexta regra lê fonte Java, e uma chave de configuração não é
+import nem anotação — ela sobrevive ao interceptor que saiu do `pom.xml`. Foi assim que duas
+chaves `%test.../Retry/delay` sobreviveram no `application.properties` do `videos`,
+configurando um `@Retry` que já não existia, com um comentário e um javadoc que ainda
+descreviam a proteção antiga. É o mesmo ponto cego que o ticket 034 já havia fechado para
+`publish-confirms`, aplicado agora à sexta regra em vez da quinta.
+
+Uma oitava chegou no ticket 068: nenhum serviço além do `videos` pode declarar pacote
+`framework.web`. `extracao` e `notificacao` não têm borda HTTP — a tabela "O que difere entre
+os três serviços" traz "nenhuma" na linha da borda para os dois —, então o nome do pacote
+promete um `Resource` que não existe e engana quem lê o código. `ExtracaoConfiguration` e
+`NotificacaoConfiguration` são raízes de composição CDI, não borda de entrada; migraram para
+`framework.configuration`, e a regra deriva o serviço do mesmo `MODULO_DO_SERVICO` que as
+demais, então as três cópias seguem idênticas sem precisar de exceção por serviço.
+
+O ticket 081 fechou a divergência que essa migração abriu: `VideosConfiguration` ficara sozinha
+em `framework.web` e os três serviços passaram a nomear o mesmo papel de dois jeitos. Ela também
+foi para `framework.configuration`. **A raiz de composição de qualquer serviço mora em
+`framework.configuration`**; no `videos`, `framework.web` fica para o que é de fato borda HTTP —
+`Resource`, mapeadores de `ProblemDetail`, filtro de OpenAPI. Nenhuma regra cobrava isso, e
+nenhuma passou a cobrar: a regra oitava só proíbe `framework.web` nos workers, e uma guarda que
+exigisse o pacote da configuração no `videos` cobraria layout que só tem um exemplo por serviço.
+
+Uma nona regra fecha a série, e ela é **mais velha que as quatro anteriores**: chegou no ticket
+031 e só foi escrita aqui pelo 084 — o ordinal é de registro, não de chegada.
+`bordaNaoPodeBuscarVideoSemDono` proíbe `Resource` e controller de chamar `.buscarPorId(`; na
+borda, só `.buscarPorIdEDono(`. O `VideoGateway` oferece as duas de propósito, porque o caminho
+de mensageria não carrega `Dono` e precisa da busca sem posse.
+
+O defeito que ela evita não é de camada, é de autorização: `GET /videos/{id}` recebe um `id`
+adivinhável do cliente e o `Dono` **só** do token (`docs/contratos/http-videos.md` — "o dono vem
+do token, nunca do request"). Uma borda que buscasse por id e devolvesse o que achou entregaria o
+Vídeo de outro usuário a quem digitasse o UUID certo, e o teste passaria: a busca sem posse é
+legítima em `core`, o tipo de retorno é o mesmo e nada no compilador distingue as duas. A regra é
+sintática porque o erro é sintático — uma chamada trocada, num arquivo em que a outra seria
+igualmente válida.
+
+Ela também guarda o `404` do contrato. Vídeo de outro usuário responde `404`, não `403`, para não
+confirmar que aquele id existe (`docs/contratos/http-videos.md` § *Vídeo de outro usuário*). Esse
+`404` só sai de graça enquanto a consulta filtra por dono no banco: com `buscarPorId`, a borda
+teria o Vídeo em mãos e precisaria comparar o dono ela mesma para então mentir — e é aí que
+alguém escreve `403`, ou esquece a comparação. Filtrando na consulta, "não é seu" e "não existe"
+chegam ao Resource como o mesmo `Optional.empty()`, e o não-vazamento é estrutural em vez de
+depender de disciplina na borda.
+
 ## As cópias deliberadas entre serviços
 
-Além dos records do contrato de mensagens, quatro implementações se repetem entre serviços:
-`Rastro` e `JsonObjectPayloadConverter` nos três, `comRepeticao` nos três clientes de I/O e
-`MotivoFalha.doCodigo` em `videos` e `notificacao`. As cópias são deliberadas. Cada serviço
-continua dono do próprio código e do próprio artefato; um módulo `shared` transformaria
-coincidência de implementação em acoplamento de build e de evolução entre os três serviços.
+Além dos records do contrato de mensagens, cinco implementações se repetem entre serviços:
+`Rastro` e `JsonObjectPayloadConverter` nos três, `comRepeticao` nos três clientes de I/O,
+`MotivoFalha.doCodigo` em `videos` e `notificacao`, e `AckManual` nos três
+(`framework/dispatcher/`). As cópias são deliberadas. Cada serviço continua dono do próprio
+código e do próprio artefato; um módulo `shared` transformaria coincidência de implementação
+em acoplamento de build e de evolução entre os três serviços. Há ainda uma **sexta**, e ela é a
+exceção ao título desta seção: se repete dentro de um serviço só, e está no fim.
 
 Ao mudar a parte comum de uma dessas implementações, inspecione todas as cópias e aplique em
 cada uma somente o que preserva o mesmo contrato. Não as force a convergir: o `Rastro`, por
 exemplo, documenta recursos externos diferentes e só o de `videos` oferece `marcar`.
 
-Não há guarda automática de divergência para essas quatro famílias. Nenhuma delas tem
+Uma divergência viva, e o motivo dela: as três cópias de `comRepeticao` leem a espera entre
+repetições de configuração, com default de 2 s no próprio código, mas só o `videos` a baixa por
+`%test.` no `application.properties`. O cenário de blip do `videos` é um `@QuarkusTest` e recebe
+o bean do CDI; os do `extracao` e do `notificacao` montam o bean à mão e atribuem o campo direto,
+e nenhum `@QuarkusTest` desses dois serviços injeta blip — um `%test.` neles não teria leitor
+(ticket 085). O código das três continua com a mesma forma; o que diverge é onde o teste baixa a
+espera.
+
+Outra divergência viva, e só do download do `extracao` (ticket 102): lá `comRepeticao` ganhou uma
+sobrecarga com filtro, e `baixar` repete por `deferred`, porque cada chamada toma posse do arquivo
+de destino antes de baixar. Colisão no destino e falha ao descartar o parcial encerram o download
+sem repetir. O upload do `extracao` e as cópias dos outros dois serviços continuam repetindo toda
+`Exception` pela forma de um argumento. A gestão do parcial é do download, e só dele: quem mexer na
+parte comum aplica nas cópias o que é comum e deixa o filtro onde está.
+
+A sexta família é a única que se repete **dentro** de um serviço, e não entre eles: o `videos`
+carrega duas implementações da mesma forma reativa — `RepeticaoNoPostgres.executar` em
+`framework/db` e `comRepeticao` no `ArquivoMinioClient`. Elas não se fundem porque repetem por
+motivos diferentes: uma absorve blip de I/O no MinIO, a outra indisponibilidade transitória do
+Postgres. O ticket 087 alinhou tudo o que não tinha motivo para divergir — o vocabulário (o
+nome da classe, `MAXIMO_DE_REPETICOES`, `esperaEntreRepeticoes`), a aritmética do ticket 086, o
+jitter de 10% e a costura da espera, que nas quatro é `@ConfigProperty` no namespace `fiapx.`
+com o default de 2 s no próprio código. O `%test.` do parágrafo anterior continua sendo só do
+`comRepeticao` do `videos`: a espera do banco não tem quem a baixe por `.properties`, porque
+quem exercita a repetição monta o bean à mão.
+
+Sobrou uma divergência, e ela é a razão de as duas existirem: **o filtro de falha**. O
+`comRepeticao` repete qualquer `Exception`, porque do S3 quase toda falha é o blip que a
+política quer absorver. O `RepeticaoNoPostgres` repete **só** indisponibilidade transitória —
+conexão, timeout, as duas exceções do Hibernate e um punhado de SQLSTATE, cuja lista é do
+código e só de lá —, porque uma violação de constraint repetida três vezes dá três vezes o mesmo erro e ainda segura
+a borda HTTP por 4 s. O `deferred(Supplier)` é consequência disso: cada repetição do banco
+reabre a sessão ou a transação que o Hibernate marcou como abortada, e o MinIO não tem nada
+equivalente para reabrir. Não force nenhuma das duas para a forma da outra.
+
+As três travessias de `getCause()` do repositório **não** são uma família, e o ticket 087
+decidiu isso em vez de unificá-las: elas fazem perguntas diferentes. O `desembrulhar` do
+`RepeticaoNoPostgres` tira envelopes de `CompletionStage` até o primeiro não-envelope; o
+`causaRaiz` do `ProcessarExtracaoUseCase` tira **um** nível; o `metadadosDoNack` do
+`ExtrairVideoConsumer`
+varre a cadeia inteira procurando um tipo. O que o 087 unificou foi a única repetição de fato —
+o `causaRaiz` estava escrito duas vezes na mesma classe. As duas primeiras também vivem em
+serviços diferentes, e uma delas em `core`, onde `framework` não alcança.
+
+Não há guarda automática de divergência para quatro das cinco famílias entre serviços — `Rastro`,
+`JsonObjectPayloadConverter`, `comRepeticao` e `MotivoFalha.doCodigo`. Nenhuma delas tem
 identidade byte a byte como invariante, e uma comparação parcial confundiria diferença local
 legítima com esquecimento. Os testes de cada serviço guardam o comportamento; a revisão
-coordenada guarda a parte comum. O `ArchitectureConstraintsTest` é a exceção explícita porque
-suas três cópias foram desenhadas para ser idênticas, e por isso têm a guarda do agregador.
+coordenada guarda a parte comum.
+
+A sexta fica **declaradamente sem guarda**, e não por dívida: ela não cabe no
+`scripts/verifica-ackmanual.sh` nem em nenhuma variante dele. Aquele script compara texto, e o
+que ele exige é identidade — o par do parágrafo acima diverge de propósito no filtro de falha,
+que é justamente o que uma comparação de texto acusaria. Quem guarda o número de chamadas e o
+que cada uma repete são os quatro testes de comportamento: `RepeticaoNoPostgresTest`,
+`RepeticaoNoMinioTest`, `RepeticaoNoSmtpTest` e `EnvioResisteABlipDoArmazenamentoTest`.
+
+`ArchitectureConstraintsTest` e `AckManual` são as exceções explícitas: nada no desenho de
+nenhum dos dois sugere divergência local legítima, e por isso têm guarda do agregador. As três
+cópias de `ArchitectureConstraintsTest` são byte a byte idênticas — inclusive
+`MODULO_DO_SERVICO`, que é derivado em runtime do nome do diretório do módulo, não fixado por
+cópia —, e a guarda em `scripts/verifica-testes-arquiteturais.sh` compara sem normalização. As
+três cópias de `AckManual` diferem só na linha `package`, que carrega o nome do serviço; a
+guarda em `scripts/verifica-ackmanual.sh` normaliza essa linha antes de comparar o resto.
+
+As famílias contadas até aqui são de código Java. Fora dele há uma terceira com guarda, que não
+entra naquela contagem: o `entrypoint.sh` de cada imagem (ticket 096),
+que declara o nome do container à observabilidade e só então dá `exec` no JVM. As três cópias
+existem porque o contexto de build de cada imagem é o diretório do serviço, e um `COPY` não
+alcança o vizinho; são byte a byte idênticas, e `scripts/verifica-entrypoint.sh` compara sem
+normalização. O `exec` não é detalhe: sem ele o JVM deixa de ser o PID 1 e não recebe o SIGTERM
+de que o dreno do `extracao` depende.
 
 ## Nomes na observabilidade
 
@@ -163,13 +281,15 @@ origens, e duas regras** — não misture:
   contrato com a ferramenta. Traduzir para o vocabulário do projeto quebra consulta e receita
   de ecossistema, e não compra nada em troca. Vale inclusive quando o nome soa feio ao lado
   do resto do código.
-- **O que é nosso usa o vocabulário do [`CONTEXT.md`](CONTEXT.md).** A métrica própria é
+- **O que é nosso usa o vocabulário do [`CONTEXT.md`](CONTEXT.md).** As métricas próprias são
   `fiapx.extracao.duracao`, com o atributo `resultado` em `concluida`/`falhou` — as palavras
-  do glossário, não `success`/`error`. A mesma regra vale para atributo próprio de span e
+  do glossário, não `success`/`error` —, e `fiapx.videos.presos`, com `estado` nos nomes do
+  estado do Vídeo. A mesma regra vale para atributo próprio de span e
   campo estruturado de log: `idVideo` é `idVideo`, como no contrato de mensagens.
 
-Métrica nova precisa de justificativa igual à da primeira: existe uma só, e ela existe porque
-mede um intervalo que roda fora do JVM e que nenhuma auto-instrumentação enxerga. O que já é
+Métrica nova precisa de justificativa igual à das duas que existem: cada uma responde algo que
+nem a auto-instrumentação nem um endpoint alcançam — um intervalo que roda fora do JVM, e Vídeos
+presos de todos os Donos, que a listagem por Dono não enxerga (ticket 106). O que já é
 respondível pela auto-instrumentação ou por um endpoint não vira métrica.
 
 Instrumentação vive **só em `framework`**, e quem cobra isso é o `ArchitectureConstraintsTest`
@@ -261,6 +381,24 @@ ele reprova onde o `smoke.sh` passa, porque o `smoke.sh` manda um vídeo de cada
 defeitos de correção que ele reprovava de propósito (terminal fora de ordem, marca do ADR 0003)
 foram corrigidos no ticket 027; remedido contra o código atual no ticket 073, ele passa: 400/400
 em `limpo`, 41/41 em `mata-videos` com o `videos` derrubado no meio da rajada.
+
+`scripts/resgate-ponta-a-ponta.sh` prova o resgate do ticket 107 contra o Compose: força um Vídeo
+preso em `RECEBIDO` e outro em `PROCESSANDO`, confere que a varredura não os toca sem resgate e
+que `scripts/resgata-video.sh` os leva a `CONCLUIDO`. Rode-o quando mexer na varredura do
+[ADR 0003](docs/adr/0003-reconciliacao-por-varredura.md), nas marcas de publicação ou no script
+de resgate. Ele para o `extracao` e purga `extracao.extrair`, então não rode com trabalho na fila.
+O procedimento humano está em
+[`docs/operacao/resgate-de-video-preso.md`](docs/operacao/resgate-de-video-preso.md).
+
+`scripts/trafego.sh` é o único script deste repositório que **não reprova nada**, e isso é o
+desenho dele: ele gera tráfego sintético contra o Compose principal — blocos de 5 min alternando
+chegada sustentada e rajada, mais um ciclo de listagem/consulta/download e erros de borda
+deliberados — só para que os painéis tenham dado. Rode-o quando quiser **olhar** os painéis
+(ticket 092 e os dois de fábrica do 091), nunca para medir escala: medição é dos scripts de
+`scripts/carga/`, que rodam sob `docker-compose.carga.yml` e portanto com a observabilidade
+zerada e o SDK desligado. É por exigir o oposto daquele overlay que este script mora em
+`scripts/` e não ao lado deles — e ele aborta, com mensagem acionável, se a stack estiver ausente
+ou o SDK desligado, porque nessa configuração ele geraria zero métrica e pareceria funcionar.
 
 ## Commits
 

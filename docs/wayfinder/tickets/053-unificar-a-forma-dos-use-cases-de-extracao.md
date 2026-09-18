@@ -56,3 +56,16 @@ Suíte completa (`./mvnw test` na raiz, com Docker de pé e `ffmpeg`/`ffprobe` n
 e o `ArchitectureConstraintsTest` das três cópias. Nenhuma transição aceita ou recusada
 mudou; os testes existentes de corrida (compare-and-swap perdido), reentrega fora de ordem e
 guarda de unicidade do e-mail passaram sem alteração de asserção.
+
+## Correção (083)
+
+As quatro condições acima seguem `[ ]`, e continuam assim: pela política fixada no
+[082](082-politica-de-reescrita-de-ticket-fechado.md), corpo de ticket fechado não se reescreve,
+e marcar a caixa é reescrever. A nota é o que faltava.
+
+O 053 nasceu aberto, em `d027eb6`, e percorreu o ciclo do rastreador — ao contrário do
+[071](071-agents-versionado-sem-justificativa.md). As caixas ficaram em branco por esquecimento
+no fechamento, não por critério não atendido: a `## Resolução` acima narra as quatro — a forma
+comum passou a existir em `TransicaoDeVideo`, com a decisão de transição intacta na entidade
+`Video`; as três aceitações e recusas seguiram idênticas; o evento repetido continuou sem efeito
+adicional; e a suíte rodou da raiz, 319 testes, 0 falhas.

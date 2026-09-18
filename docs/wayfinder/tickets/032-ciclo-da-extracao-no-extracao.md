@@ -51,7 +51,11 @@ deveria ter morado atrás de um processo externo.
 A tabela exit code → `MotivoFalha` coberta por teste sem ffmpeg no classpath, e o
 `FfmpegExtracaoDeFramesAdapter` menor do que entrou.
 
-## Resolução
+## Resolução (reconstruída em 2026-09-07)
+
+*Escrita a partir do código pelo [072](072-rastreador-contradiz-a-propria-convencao.md),
+não pela sessão que fechou o ticket. Marca acrescentada pelo
+[082](082-politica-de-reescrita-de-ticket-fechado.md).*
 
 A decisão atravessou a costura e a costura ficou onde estava.
 `Extracao.classificarFalhaDoFfmpeg(SinaisDoFfmpeg)` mora em `core/entities` e recebe exit code e

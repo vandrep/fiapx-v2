@@ -7,6 +7,10 @@ RUN apk add --no-cache ffmpeg
 
 ENV LANGUAGE=pt_BR:pt
 
+# Nome do container para a observabilidade (ticket 096) -- ver o proprio script. Antes do
+# fast-jar porque muda menos que ele.
+COPY --chmod=755 entrypoint.sh /app/entrypoint.sh
+
 COPY target/quarkus-app/lib/ /app/lib/
 COPY target/quarkus-app/*.jar /app/
 COPY target/quarkus-app/app/ /app/app/
@@ -20,4 +24,4 @@ RUN mkdir -p /var/fiapx/extracao && chown -R 185:185 /var/fiapx
 
 EXPOSE 8080
 USER 185
-ENTRYPOINT ["java", "-jar", "/app/quarkus-run.jar"]
+ENTRYPOINT ["/app/entrypoint.sh"]

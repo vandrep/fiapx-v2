@@ -52,7 +52,7 @@ class VideoTest {
         var concluidaEm = Instant.parse("2026-08-21T14:05:47Z");
         var video = recebido();
 
-        assertTrue(video.marcaComoIniciada());
+        assertTrue(video.marcaComoIniciada(Instant.now()));
         assertTrue(video.marcaComoConcluida(new ResultadoExtracao(concluidaEm, "pac.zip", 1200, 900L)));
 
         assertEquals(EstadoVideo.CONCLUIDO, video.estado());
@@ -67,7 +67,7 @@ class VideoTest {
     void aFalhaGuardaOCodigoEOInstante() {
         var falhouEm = Instant.parse("2026-08-21T14:05:47Z");
         var video = recebido();
-        video.marcaComoIniciada();
+        video.marcaComoIniciada(Instant.now());
 
         assertTrue(video.marcaComoFalha(falhouEm, MotivoFalha.DURACAO_EXCEDIDA));
 
@@ -80,10 +80,40 @@ class VideoTest {
     @Test
     void transicaoJaAplicadaNaoMudaNadaENaoLevantaExcecao() {
         var video = recebido();
-        video.marcaComoIniciada();
+        video.marcaComoIniciada(Instant.now());
 
-        assertFalse(video.marcaComoIniciada());
+        assertFalse(video.marcaComoIniciada(Instant.now()));
         assertEquals(EstadoVideo.PROCESSANDO, video.estado());
+    }
+
+    @Test
+    void aIniciadaGuardaOInstanteDoEvento() {
+        var iniciadaEm = Instant.parse("2026-09-14T10:00:00Z");
+        var video = recebido();
+        assertNull(video.iniciadaEm());
+
+        assertTrue(video.marcaComoIniciada(iniciadaEm));
+
+        assertEquals(iniciadaEm, video.iniciadaEm());
+    }
+
+    @Test
+    void reentregaNaoTrocaOInstanteDaPrimeiraTentativa() {
+        // O limiar de Video preso conta as tres entregas desde a primeira (ticket 106): se a
+        // segunda tentativa reescrevesse o instante, o Video ganharia 30 min a cada reentrega.
+        var primeira = Instant.parse("2026-09-14T10:00:00Z");
+        var video = recebido();
+        video.marcaComoIniciada(primeira);
+
+        assertFalse(video.marcaComoIniciada(primeira.plusSeconds(420)));
+
+        assertEquals(primeira, video.iniciadaEm());
+    }
+
+    @Test
+    void iniciadaSemInstanteERecusada() {
+        // Sem instante, um PROCESSANDO preso seria invisivel ao alerta para sempre.
+        assertThrows(IllegalArgumentException.class, () -> recebido().marcaComoIniciada(null));
     }
 
     @Test
@@ -111,7 +141,7 @@ class VideoTest {
         var video = recebido();
         video.marcaComoConcluida(new ResultadoExtracao(Instant.now(), "pac.zip", 1, 1L));
 
-        assertFalse(video.marcaComoIniciada());
+        assertFalse(video.marcaComoIniciada(Instant.now()));
         assertEquals(EstadoVideo.CONCLUIDO, video.estado());
     }
 
@@ -119,7 +149,7 @@ class VideoTest {
     void reconstituirAceitaQualquerEstadoValidoSemRodarInvariantesDeCriacao() {
         var id = UUID.randomUUID();
         var video = Video.reconstituir(id, "ferias.mp4", 10L, DONO, "k", EstadoVideo.FALHOU,
-                Instant.EPOCH, Instant.EPOCH, null, null, null, MotivoFalha.TENTATIVAS_ESGOTADAS);
+                Instant.EPOCH, null, Instant.EPOCH, null, null, null, MotivoFalha.TENTATIVAS_ESGOTADAS);
 
         assertEquals(id, video.id());
         assertEquals(EstadoVideo.FALHOU, video.estado());

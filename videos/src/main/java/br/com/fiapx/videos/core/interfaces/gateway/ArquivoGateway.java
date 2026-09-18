@@ -20,9 +20,23 @@ public interface ArquivoGateway {
 
     /**
      * Grava o Video enviado e <b>devolve a chave que gravou</b>, para o Video recebe-la
-     * pronta.
+     * pronta. A falha, ja depois das repeticoes, chega como
+     * {@link br.com.fiapx.videos.core.exceptions.ArmazenamentoIndisponivelException} (ticket 108).
      */
     CompletableFuture<String> gravarVideo(UUID idVideo, String nome, Path arquivo);
+
+    /**
+     * O Video chegou a um estado terminal, e so a partir daqui o original pode expirar
+     * (ticket 105). Original sem esta marca <b>nunca</b> expira: e o que impede um Video preso
+     * de perder o arquivo antes de alguem o resgatar. Idempotente.
+     */
+    CompletableFuture<Void> marcarDesfechoDoOriginal(String chaveVideo);
+
+    /**
+     * Apaga o original que ficou sem linha no banco. Existe so para a limpeza do envio que
+     * falhou no {@code INSERT} (ticket 105); o caminho feliz nao apaga nada.
+     */
+    CompletableFuture<Void> apagarOriginal(String chaveVideo);
 
     /**
      * A chave onde o Pacote deste Video sera gravado. Quem a constroi e este gateway, e nao

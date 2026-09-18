@@ -14,10 +14,34 @@
 # O censo e sempre um LEFT JOIN a partir da lista de envios: o estado `AUSENTE` — aceito com
 # 202 e sem linha no banco — e a perda que um `SELECT count(*) FROM video` jamais mostraria.
 #
+# Mais consultas ao Postgres, so dos modos que medem falha de worker, para os tickets 113 e 119:
+# `presos`, a contagem de Video preso; `processando`, o total bruto nesse estado;
+# `interrompidas`, o destino das tentativas mortas pelo kill;
+# `em-voo`, a unica tentativa identificavel no modo blip-minio; e `nackadas`, a posicao e o
+# intervalo de uma entrega devolvida por nack com requeue.
+#
 # Uso:
 #   scripts/carga/oraculo.sh censo   <arquivo-de-ids>
 #   scripts/carga/oraculo.sh amostra <arquivo-de-ids> [quantidade]
+#   scripts/carga/oraculo.sh presos
+#   scripts/carga/oraculo.sh processando
+#   scripts/carga/oraculo.sh interrompidas <aceitos> <interrompidos> <instante-do-kill>
+#   scripts/carga/oraculo.sh em-voo <arquivo-de-ids>
+#   scripts/carga/oraculo.sh nackadas <aceitos> <em-voo> <instante-da-injecao> <instante-do-nack>
 set -euo pipefail
+
+psql_videos() {
+    docker compose exec -T postgres psql -U fiapx -d fiapx_videos -q -t -A -F' ' -v ON_ERROR_STOP=1
+}
+
+# Carrega um arquivo de ids numa tabela temporaria, para o LEFT JOIN a partir da lista.
+tabela_de_ids() {
+    local tabela="$1" ids="$2"
+    echo "CREATE TEMP TABLE $tabela (id uuid PRIMARY KEY);"
+    echo "COPY $tabela FROM STDIN;"
+    cat "$ids"
+    echo '\.'
+}
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$raiz"
@@ -30,15 +54,11 @@ senha="${FIAPX_SENHA:-demo}"
 censo() {
     local ids="$1"
     {
-        echo "CREATE TEMP TABLE enviados (id uuid PRIMARY KEY);"
-        echo "COPY enviados FROM STDIN;"
-        cat "$ids"
-        echo '\.'
+        tabela_de_ids enviados "$ids"
         echo "SELECT coalesce(v.estado, 'AUSENTE'), count(*)
                 FROM enviados e LEFT JOIN video v ON v.id = e.id
                GROUP BY 1 ORDER BY 1;"
-    } | docker compose exec -T postgres \
-            psql -U fiapx -d fiapx_videos -q -t -A -F' ' -v ON_ERROR_STOP=1
+    } | psql_videos
 }
 
 # Token proprio, e nao o do injetor: o oraculo roda *depois* da drenagem, quando o token da
@@ -79,8 +99,92 @@ amostra() {
     return $(( divergencias > 0 ? 1 : 0 ))
 }
 
+# A contagem do gauge fiapx.videos.presos{estado="PROCESSANDO"} (ticket 106), feita direto no
+# Postgres porque o overlay de carga desliga a observabilidade (ticket 113). E o mesmo predicado
+# do ContarVideosPresosUseCase, sobre TODOS os Videos e nao so os da rodada, como o gauge. A
+# segunda coluna e a idade do PROCESSANDO mais velho, em segundos: e ela que mostra quanto falta
+# para o limiar numa corrida curta, em que a contagem fica em zero. Os 30 min sao o
+# fiapx.deteccao.limiar-de-video-preso do videos; se ele mudar, este muda junto.
+presos() {
+    psql_videos <<SQL
+SELECT count(*) FILTER (WHERE iniciada_em < now() - interval '30 minutes'),
+       coalesce(round(extract(epoch FROM now() - min(iniciada_em))), 0)
+  FROM video WHERE estado = 'PROCESSANDO';
+SQL
+}
+
+# A pre-condicao do modo blip-minio e mais forte que o gauge: qualquer Video em PROCESSANDO
+# contamina a identificacao da unica tentativa da rodada, mesmo que ainda nao tenha cruzado os
+# 30 min do predicado de Video preso.
+processando() {
+    psql_videos <<SQL
+SELECT count(*) FROM video WHERE estado = 'PROCESSANDO';
+SQL
+}
+
+# Uma linha por Video cuja tentativa foi interrompida (ticket 113): estado, iniciada_em ->
+# desfecho em segundos, e a posicao em que a entrega voltou a fila. A posicao e contada pelos
+# Videos da rodada cuja PRIMEIRA tentativa comecou depois do kill e antes do desfecho do
+# interrompido: entrega recolocada no comeco fica perto de zero (so os que as outras replicas ja
+# tinham pego), no fim fica perto das mensagens prontas no instante do kill. A contagem inclui o
+# que as outras replicas pegaram durante a propria reentrega, entao erra para cima.
+interrompidas() {
+    local aceitos="$1" interrompidos="$2" instante_kill="$3"
+    {
+        tabela_de_ids enviados "$aceitos"
+        tabela_de_ids interrompidos "$interrompidos"
+        echo "SELECT i.id, coalesce(v.estado, 'AUSENTE'),
+                     round(extract(epoch FROM v.finalizado_em - v.iniciada_em)),
+                     (SELECT count(*) FROM enviados e JOIN video o ON o.id = e.id
+                       WHERE o.id <> i.id
+                         AND o.iniciada_em > '$instante_kill'::timestamptz
+                         AND o.iniciada_em < v.finalizado_em)
+                FROM interrompidos i LEFT JOIN video v ON v.id = i.id
+               ORDER BY 1;"
+    } | psql_videos
+}
+
+# No modo blip-minio ha uma replica e prefetch 1. A lista resultante tem no maximo um id e o
+# snapshot da fila e tomado no mesmo ciclo que a injecao; isto substitui o scratch para identificar
+# a tentativa que terminou em nack, porque a falha transitoria limpa o proprio parcial.
+em_voo() {
+    local aceitos="$1"
+    {
+        tabela_de_ids enviados "$aceitos"
+        echo "SELECT v.id
+                FROM enviados e JOIN video v ON v.id = e.id
+               WHERE v.estado = 'PROCESSANDO' AND v.iniciada_em IS NOT NULL
+               ORDER BY v.iniciada_em;"
+    } | psql_videos
+}
+
+# Uma linha por candidata identificada no momento do nack: estado, intervalo iniciado_em ->
+# desfecho e a posicao aproximada pela quantidade de Videos que comecaram depois da injecao e
+# antes do instante em que o primeiro redeliver foi observado. Com uma replica e uma candidata,
+# o id nao e uma inferencia entre varias mensagens em voo.
+nackadas() {
+    local aceitos="$1" em_voo="$2" instante_injecao="$3" instante_nack="$4"
+    {
+        tabela_de_ids enviados "$aceitos"
+        tabela_de_ids em_voo "$em_voo"
+        echo "SELECT i.id, coalesce(v.estado, 'AUSENTE'),
+                     round(extract(epoch FROM v.finalizado_em - v.iniciada_em)),
+                     (SELECT count(*) FROM enviados e JOIN video o ON o.id = e.id
+                       WHERE o.id <> i.id
+                         AND o.iniciada_em > '$instante_injecao'::timestamptz
+                         AND o.iniciada_em < '$instante_nack'::timestamptz)
+                FROM em_voo i LEFT JOIN video v ON v.id = i.id
+               ORDER BY 1;"
+    } | psql_videos
+}
+
 case "${1:-}" in
-    censo)   censo "$2" ;;
-    amostra) amostra "$2" "${3:-10}" ;;
-    *)       echo "uso: $0 censo|amostra <arquivo-de-ids> [quantidade]" >&2; exit 2 ;;
+    censo)         censo "$2" ;;
+    amostra)       amostra "$2" "${3:-10}" ;;
+    presos)        presos ;;
+    processando)   processando ;;
+    interrompidas) interrompidas "$2" "$3" "$4" ;;
+    em-voo)        em_voo "$2" ;;
+    nackadas)      nackadas "$2" "$3" "$4" "$5" ;;
+    *)             echo "uso: $0 censo|amostra <arquivo-de-ids> [quantidade] | presos | interrompidas <aceitos> <interrompidos> <instante-do-kill> | em-voo <aceitos> | nackadas <aceitos> <em-voo> <instante-da-injecao> <instante-do-nack>" >&2; exit 2 ;;
 esac

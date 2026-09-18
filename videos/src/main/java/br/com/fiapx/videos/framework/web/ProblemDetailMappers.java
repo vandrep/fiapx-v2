@@ -1,5 +1,6 @@
 package br.com.fiapx.videos.framework.web;
 
+import br.com.fiapx.videos.core.exceptions.ArmazenamentoIndisponivelException;
 import br.com.fiapx.videos.core.exceptions.ArquivoAusenteException;
 import br.com.fiapx.videos.core.exceptions.FormatoNaoSuportadoException;
 import br.com.fiapx.videos.core.exceptions.PacoteExpiradoException;
@@ -12,12 +13,15 @@ import jakarta.ws.rs.ext.Provider;
 import org.jboss.logging.Logger;
 
 /**
- * As seis situacoes da tabela de erros do contrato HTTP, num arquivo so — cada uma e tres
- * linhas, e espalha-las por seis arquivos esconderia a tabela em vez de mostra-la.
+ * As situacoes da tabela de erros do contrato HTTP que passam pelo JAX-RS, num arquivo so —
+ * cada uma e tres linhas, e espalha-las por varios arquivos esconderia a tabela em vez de
+ * mostra-la.
  *
- * <p>Falta uma setima: o <b>413</b> do corpo acima do teto. O Vert.x corta o corpo antes do
- * JAX-RS, entao ele nao passa por ExceptionMapper e nao sai como problem+json. E
- * inconsistencia assumida no ticket 008, nao bug a cacar.
+ * <p>Faltam duas, e as duas acontecem antes do JAX-RS. O <b>413</b> do corpo acima do teto: o
+ * Vert.x corta o corpo, entao ele nao passa por ExceptionMapper e nao sai como problem+json — e
+ * inconsistencia assumida no ticket 008, nao bug a cacar. E o <b>503</b> da recusa por
+ * capacidade, que sai de {@link RecusaPorCapacidade} antes de o corpo ser lido; esse escreve o
+ * problem+json por conta propria (ticket 108).
  */
 public final class ProblemDetailMappers {
 
@@ -68,6 +72,25 @@ public final class ProblemDetailMappers {
         @Override
         public Response toResponse(ArquivoAusenteException exception) {
             return resposta(Response.Status.BAD_REQUEST, "Requisicao invalida", exception.getMessage());
+        }
+    }
+
+    /**
+     * O MinIO recusou a primeira escrita do envio. A causa vai para o log, porque o
+     * {@code detail} nao a carrega e sem ela um MinIO fora do ar seria so uma sequencia de 503.
+     */
+    @Provider
+    public static class ArmazenamentoIndisponivel implements ExceptionMapper<ArmazenamentoIndisponivelException> {
+
+        private static final Logger LOG = Logger.getLogger(ArmazenamentoIndisponivel.class);
+
+        @Override
+        public Response toResponse(ArmazenamentoIndisponivelException exception) {
+            LOG.warn(exception.getMessage(), exception.getCause());
+            return Response.fromResponse(resposta(Response.Status.SERVICE_UNAVAILABLE, "Armazenamento indisponivel",
+                            ProblemDetail.comEsperaSugerida("Não foi possível armazenar o Vídeo agora, e ele não foi aceito")))
+                    .header("Retry-After", ProblemDetail.ESPERA_SUGERIDA_EM_SEGUNDOS)
+                    .build();
         }
     }
 

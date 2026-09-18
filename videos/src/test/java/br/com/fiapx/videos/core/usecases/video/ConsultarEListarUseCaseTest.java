@@ -9,6 +9,7 @@ import br.com.fiapx.videos.core.interfaces.presenter.dto.VideoDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
@@ -93,7 +94,7 @@ class ConsultarEListarUseCaseTest {
     @Test
     void oFiltroPorEstadoEOpcional() {
         var emAndamento = persistido(DONO, "andando.mp4");
-        emAndamento.marcaComoIniciada();
+        emAndamento.marcaComoIniciada(Instant.now());
         persistido(DONO, "parado.mp4");
         var capturada = new PaginaCapturada();
 

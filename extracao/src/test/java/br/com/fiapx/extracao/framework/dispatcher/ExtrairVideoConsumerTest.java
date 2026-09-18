@@ -1,17 +1,21 @@
 package br.com.fiapx.extracao.framework.dispatcher;
 
 import br.com.fiapx.extracao.core.usecases.extracao.ProcessarExtracaoUseCase;
+import br.com.fiapx.extracao.core.exceptions.FalhaAoPublicarExtracaoFalhouException;
 import br.com.fiapx.extracao.framework.observabilidade.Rastro;
 import br.com.fiapx.extracao.framework.shutdown.DrenoDaExtracao;
 import br.com.fiapx.extracao.interfaces.controllers.ExtracaoController;
 import io.opentelemetry.api.OpenTelemetry;
 import org.eclipse.microprofile.reactive.messaging.Message;
+import org.eclipse.microprofile.reactive.messaging.Metadata;
+import io.smallrye.reactive.messaging.rabbitmq.RabbitMQRejectMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -36,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ExtrairVideoConsumerTest {
 
     private static final int SEM_ACK = -1;
+    private static final String METADADO_ORIGINAL = "metadado-original";
 
     private DrenoDaExtracao dreno;
     private UUID idVideo;
@@ -46,6 +51,7 @@ class ExtrairVideoConsumerTest {
 
     private final AtomicReference<Resposta> resposta = new AtomicReference<>();
     private final AtomicReference<Throwable> motivoDoNack = new AtomicReference<>();
+    private final AtomicReference<Metadata> metadadosDoNack = new AtomicReference<>();
     /** Quantas Extracoes o dreno via no instante do ack. Tem que ser 1, nunca 0. */
     private final AtomicInteger emVooNoAck = new AtomicInteger(SEM_ACK);
 
@@ -55,6 +61,7 @@ class ExtrairVideoConsumerTest {
         idVideo = UUID.randomUUID();
         resposta.set(null);
         motivoDoNack.set(null);
+        metadadosDoNack.set(null);
         emVooNoAck.set(SEM_ACK);
     }
 
@@ -82,7 +89,26 @@ class ExtrairVideoConsumerTest {
         assertSame(falha, causaRaiz(motivoDoNack.get()),
                 "o failure-strategy=requeue precisa receber a causa real: e ela que aparece no"
                         + " log do conector quando o x-delivery-limit esgota");
+        assertEquals(METADADO_ORIGINAL, metadadosDoNack.get().get(String.class).orElseThrow(),
+                "o nack comum deve preservar os metadados que chegaram com a mensagem");
         assertEquals(0, dreno.emVoo());
+    }
+
+    @Test
+    void publicacaoDaFalhaPermanenteQueFalhaRejeitaSemRecircular() throws Exception {
+        var falha = new FalhaAoPublicarExtracaoFalhouException(
+                new IllegalStateException("exchange recusou a publicacao"));
+        var consumidor = consumidorCom(id -> CompletableFuture.failedFuture(
+                new CompletionException(new CompletionException(falha))));
+
+        consumir(consumidor).get(5, TimeUnit.SECONDS);
+
+        assertEquals(Resposta.NACK, resposta.get());
+        var rejeicao = metadadosDoNack.get().get(RabbitMQRejectMetadata.class).orElseThrow();
+        assertFalse(rejeicao.isRequeue(),
+                "uma Extração que já falhou permanentemente deve seguir à DLQ, não executar de novo");
+        assertEquals(METADADO_ORIGINAL, metadadosDoNack.get().get(String.class).orElseThrow(),
+                "a decisão de não reenfileirar não deve apagar os demais metadados");
     }
 
     /**
@@ -126,14 +152,16 @@ class ExtrairVideoConsumerTest {
     private CompletableFuture<Void> consumir(ExtrairVideoConsumer consumidor) {
         Message<ExtrairVideo> mensagem = Message.of(
                 new ExtrairVideo(idVideo, "videos/x.mp4", "pacotes/x.zip"),
-                () -> {
+                Metadata.of(METADADO_ORIGINAL),
+                metadados -> {
                     emVooNoAck.set(dreno.emVoo());
                     resposta.set(Resposta.ACK);
                     return CompletableFuture.completedFuture(null);
                 },
-                falha -> {
+                (falha, metadados) -> {
                     resposta.set(Resposta.NACK);
                     motivoDoNack.set(falha);
+                    metadadosDoNack.set(metadados);
                     return CompletableFuture.completedFuture(null);
                 });
         return consumidor.consumir(mensagem).subscribeAsCompletionStage();

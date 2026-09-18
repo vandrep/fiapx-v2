@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 
 /**
@@ -44,11 +45,32 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
  * aponta para ele, e delegar reentraria em si mesmo. Por isso ele tambem serve os bytes do
  * Pacote — o que esta sob julgamento aqui e o desfecho da requisicao, nao o armazenamento,
  * que os cenarios BDD exercitam de verdade.
+ *
+ * <h2>A protecao que existe hoje, e o que este cenario custa</h2>
+ *
+ * <p>A protecao e {@code onFailure().retry()} do Mutiny dentro do
+ * {@link ArquivoMinioClient}: 3 chamadas ao MinIO — a primeira mais 2 repeticoes (ticket 086)
+ * —, jitter de 10%, so sobre {@code Exception}. Nenhum interceptor participa — {@code @Retry}
+ * saiu no ticket 061 e as chaves que o configuravam sairam no 064.
+ *
+ * <p><b>A espera e configuravel por perfil, e aqui vale 1 ms</b>
+ * ({@code fiapx.armazenamento.espera-entre-repeticoes}, ticket 080). Com os 2 s de producao
+ * estes quatro cenarios ficariam <b>16 s parados</b> — 4 s em cada um dos quatro, que sao as
+ * duas esperas da politica. Os numeros medidos no ticket 080 eram 20 s parados e <b>26,5 s</b>
+ * de classe, com a espera de producao e uma repeticao a mais nos dois cenarios de
+ * armazenamento fora; com 1 ms a classe levava <b>6,2 s</b>, e e essa a configuracao daqui.
+ * O que esta sob teste e a repeticao <i>acontecer</i> e o desfecho que ela produz, nao a
+ * duracao da espera, e foi essa a leitura do ticket 048 quando ele comprou o mesmo efeito pela
+ * chave do interceptor.
+ *
+ * <p>O que a espera curta <b>deixa</b> de cobrir, e esta registrado como escolha: que os 2 s do
+ * ADR 0001 sejam os 2 s. Esse numero e guardado pelo default do {@code @ConfigProperty}, e nao
+ * por cenario — cobra-lo aqui custaria os 20 s de volta para reafirmar uma constante.
  */
 @QuarkusTest
 class EnvioResisteABlipDoArmazenamentoTest {
 
-    /** O armazenamento que nao volta: falha em toda tentativa, nao so nas primeiras. */
+    /** O armazenamento que nao volta: falha em toda chamada, nao so nas primeiras. */
     private static final int SEMPRE = Integer.MAX_VALUE;
 
     private static final byte[] PACOTE = "pacote de frames para teste".getBytes();
@@ -65,14 +87,21 @@ class EnvioResisteABlipDoArmazenamentoTest {
         enviarVideo().then().statusCode(202);
     }
 
+    /**
+     * No envio, a gravacao no MinIO e a primeira escrita: quando ela falha nada mais foi gravado,
+     * e o sistema nao assumiu o Video. Por isso {@code 503} com {@code Retry-After}, e nao o
+     * {@code 500} ambiguo (ticket 108). O download continua {@code 500}, no cenario abaixo.
+     */
     @Test
-    void armazenamentoPersistentementeForaContinuaChegandoComoErroInterno() {
+    void armazenamentoPersistentementeForaNoEnvioChegaComoIndisponivel() {
         QuarkusMock.installMockForType(new S3QueFalhaAsPrimeiras(SEMPRE), S3AsyncClient.class);
 
         enviarVideo().then()
-                .statusCode(500)
+                .statusCode(503)
+                .header("Retry-After", notNullValue())
                 .contentType("application/problem+json")
-                .body("title", is("Erro interno"));
+                .body("title", is("Armazenamento indisponivel"))
+                .body("status", is(503));
     }
 
     @Test
@@ -141,7 +170,7 @@ class EnvioResisteABlipDoArmazenamentoTest {
     private static class S3QueFalhaAsPrimeiras implements S3AsyncClient {
 
         private final int falhasIniciais;
-        private final AtomicInteger tentativas = new AtomicInteger();
+        private final AtomicInteger chamadas = new AtomicInteger();
 
         private S3QueFalhaAsPrimeiras(int falhasIniciais) {
             this.falhasIniciais = falhasIniciais;
@@ -171,11 +200,11 @@ class EnvioResisteABlipDoArmazenamentoTest {
         }
 
         private boolean falharDestaVez() {
-            return tentativas.incrementAndGet() <= falhasIniciais;
+            return chamadas.incrementAndGet() <= falhasIniciais;
         }
 
         private static SdkClientException inalcancavel() {
-            return SdkClientException.create("MinIO inalcancavel nesta tentativa");
+            return SdkClientException.create("MinIO inalcancavel nesta chamada");
         }
 
         @Override

@@ -100,7 +100,8 @@ Em teste, cada serviço declara pelo conector SmallRye o que publica e o que con
 (`exchange.declare`, `queue.declare`, `auto-bind-dlq`, `dead-letter-*`). No Compose, o
 `definitions.json` pré-provisiona a mesma topologia durável — exchanges, filas, DLQs,
 argumentos quorum e bindings — antes de os serviços de negócio subirem. Ele também carrega
-os usuários e a policy `dead-letter-strategy=at-least-once`. As declarações dos conectores
+os usuários e a policy `dead-letter-strategy=at-least-once` com `overflow=reject-publish` (sem o
+segundo campo o broker volta a *at-most-once*, ticket 103). As declarações dos conectores
 continuam ativas em produção e são idempotentes no Compose.
 
 O motivo da declaração duplicada é o teste: os Dev Services sobem um broker limpo em
@@ -165,6 +166,10 @@ Existe porque `CONTEXT.md` define que "aguardando na fila" é `RECEBIDO`, não
 `PROCESSANDO`. O `videos` não pode marcar `PROCESSANDO` ao publicar o comando — só quando
 o worker de fato pegou o trabalho. Numa reentrega o evento chega de novo e a transição
 `PROCESSANDO → PROCESSANDO` não faz nada.
+
+O `videos` grava `iniciadaEm` na coluna `iniciada_em` junto da transição, então fica o instante
+da primeira tentativa; é dele que conta o alerta de Vídeo preso em `PROCESSANDO` (ticket 106).
+Evento sem o campo não é recusado: o `videos` usa o instante do consumo.
 
 ### `ExtracaoConcluida` — evento, `extracao` → `videos`
 
@@ -233,7 +238,8 @@ que a mensagem foi entregue três vezes sem ack. É o único código que ele pod
 
 `DURACAO_EXCEDIDA` é o único código que não vem de um exit code: vem do `ffprobe` que o
 `extracao` já roda para conferir a contagem de frames. É falha **permanente** — ack imediato,
-sem gastar as três entregas. O teto existe porque bytes não limitam frames, e a borda não
+após o broker confirmar `ExtracaoFalhou`, sem gastar as três entregas quando a publicação
+funciona. O teto existe porque bytes não limitam frames, e a borda não
 pode medir duração sem instalar ffmpeg no `videos` (ticket 011).
 
 ## Caminhos de falha
@@ -242,7 +248,11 @@ Falha **permanente** e falha **transitória esgotada** convergem no mesmo evento
 caminhos diferentes:
 
 - **Permanente** (o usuário mandou um `.txt`): o `extracao` publica `ExtracaoFalhou`
-  imediatamente e dá **ack**. Não gasta viagem à DLQ para o caso mais comum.
+  imediatamente e dá **ack** depois que o broker confirma a publicação. Se essa publicação
+  falhar, o consumidor dá **nack com `requeue=false`**: repetir ffprobe/ffmpeg não conserta o
+  canal de saída, então o comando original segue direto para `extracao.extrair.dlq`. O
+  consumidor da DLQ tenta publicar `ExtracaoFalhou` e, se a indisponibilidade persistir,
+  rejeita o comando para `extracao.extrair.estacionamento`.
 - **Transitória** (MinIO fora, disco cheio, worker morto): `nack`, a mensagem volta à
   fila, o `x-delivery-limit=3` esgota, ela cai em `extracao.extrair.dlq`, e o consumidor
   daquela DLQ publica `ExtracaoFalhou` com `TENTATIVAS_ESGOTADAS`.

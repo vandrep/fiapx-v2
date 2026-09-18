@@ -25,6 +25,10 @@ __MACOSX/
 scripts/carga/fixtures/
 scripts/carga/saida/
 
+# Saida do trafego sintetico (ticket 093): separada da de `scripts/carga/` de proposito — saida
+# de experimento medido e saida de demonstracao nao devem cair no mesmo diretorio.
+scripts/saida/
+
 # Lock de runtime do Claude Code: pid de sessao, nao configuracao
 .claude/scheduled_tasks.lock
 

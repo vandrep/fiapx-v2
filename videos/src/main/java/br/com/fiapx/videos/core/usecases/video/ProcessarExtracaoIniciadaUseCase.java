@@ -3,6 +3,7 @@ package br.com.fiapx.videos.core.usecases.video;
 import br.com.fiapx.videos.core.entities.Video;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
 
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -21,11 +22,11 @@ public class ProcessarExtracaoIniciadaUseCase {
 
     public CompletableFuture<Void> executar(Command command) {
         return TransicaoDeVideo.processar(videoGateway, command.idVideo(),
-                Video::marcaComoIniciada,
-                video -> videoGateway.marcarIniciada(command.idVideo()),
+                video -> video.marcaComoIniciada(command.iniciadaEm()),
+                video -> videoGateway.marcarIniciada(command.idVideo(), command.iniciadaEm()),
                 TransicaoDeVideo::semEfeitoPosterior);
     }
 
-    public record Command(UUID idVideo) {
+    public record Command(UUID idVideo, Instant iniciadaEm) {
     }
 }

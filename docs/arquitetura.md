@@ -8,7 +8,9 @@ com três serviços Quarkus que só conversam por mensagem.
 Três decisões estruturais sustentam tudo o que vem abaixo:
 
 1. **O trabalho é aceito antes de ser feito.** O envio responde `202 Accepted` assim que o
-   arquivo está durável e o comando enfileirado — não quando a extração termina.
+   arquivo e a linha do Vídeo estão duráveis — não quando a extração termina. O comando é
+   publicado antes da resposta quando o broker confirma em até 2 s, e pela reconciliação
+   quando não confirma ([ticket 104](wayfinder/tickets/104-aceite-do-video-no-commit-da-linha.md)).
 2. **Um único serviço é dono do estado.** O `videos` é a borda pública e a única autoridade
    sobre o que aconteceu com um Vídeo; `extracao` e `notificacao` não têm banco.
 3. **Cada serviço é Clean Architecture, verificada por teste.** A regra de dependência não é
@@ -135,7 +137,7 @@ proibidos em `core` e `interfaces`, e onde cada tecnologia pode aparecer — `@I
 fase `validate` do agregador reprova o build se as cópias divergirem.
 
 O ganho prático aparece nos testes: o `core` inteiro roda com dublês em memória, sem Docker.
-Dos 130 testes do projeto, 96 não sobem container nenhum.
+Dos 512 testes do projeto, 418 não sobem container nenhum.
 
 ## O caminho feliz
 
@@ -152,9 +154,20 @@ sequenceDiagram
     U->>V: POST /videos (multipart)
     V->>M: grava o vídeo (stream)
     V->>P: INSERT video, estado=RECEBIDO
-    V-->>U: 202 Accepted + Location
+    Note over V,P: o commit da linha é o aceite
     V->>R: ExtrairVideo
-    V->>P: marca comando_publicado_em
+    alt confirm e marca dentro do teto de 2 s
+        R-->>V: confirm
+        V->>P: marca comando_publicado_em
+        V-->>U: 202 Accepted + Location
+    else teto estourado, ou o publish ou a marca falhou
+        V-->>U: 202 Accepted + Location
+        opt confirm tardio
+            R-->>V: confirm
+            V->>P: marca comando_publicado_em
+        end
+        Note over V,P: sem marca, a varredura do ADR 0003 publica depois
+    end
 
     R->>E: ExtrairVideo
     E->>R: ExtracaoIniciada
@@ -167,6 +180,7 @@ sequenceDiagram
     E->>R: ExtracaoConcluida
     R->>V: ExtracaoConcluida
     V->>P: PROCESSANDO → CONCLUIDO
+    V->>M: tag desfecho=sim no original
 
     U->>V: GET /videos/{id}
     V-->>U: CONCLUIDO
@@ -175,9 +189,11 @@ sequenceDiagram
     V-->>U: 200 application/zip
 ```
 
-O `202` sai no passo 4, antes de qualquer trabalho de vídeo existir. Do passo 5 em diante o
-usuário já foi embora — é por isso que a listagem de status é um requisito e não um luxo: ela
-é o único canal pelo qual ele descobre o desfecho.
+O `202` sai antes de qualquer trabalho de vídeo existir, mas depois de tentar o publish: o aceite
+é o commit da linha, e o que o `202` promete sobre o comando está em
+[`contratos/http-videos.md` § O que o `202` promete](contratos/http-videos.md#o-que-o-202-promete).
+Da resposta em diante o usuário já foi embora — é por isso que a listagem de status é um
+requisito e não um luxo: ela é o único canal pelo qual ele descobre o desfecho.
 
 O download é **stream de ponta a ponta**, não presigned URL, e nunca carrega o arquivo em
 memória: `fromFile` na entrada, `toPublisher` na saída.
@@ -191,11 +207,12 @@ sequenceDiagram
     participant E as extracao
     participant V as videos
     participant P as Postgres
+    participant M as MinIO
     participant N as notificacao
     participant S as SMTP
 
     R->>E: ExtrairVideo (entrega 1)
-    Note over E: ffmpeg sai com erro
+    Note over E: falha transitória<br/>(falha permanente, como ARQUIVO_INVALIDO,<br/>publica ExtracaoFalhou já aqui, com ack)
     E--xR: nack → requeue
     R->>E: ExtrairVideo (entrega 2)
     E--xR: nack → requeue
@@ -205,16 +222,18 @@ sequenceDiagram
     Note over R: x-delivery-limit=3 esgotado<br/>a fila é quorum: conta entregas,<br/>inclusive as perdidas por crash
     R->>R: dead-letter → extracao.extrair.dlq
     R->>E: consome a própria DLQ
-    E->>R: ExtracaoFalhou (motivo: ARQUIVO_INVALIDO)
+    E->>R: ExtracaoFalhou (motivo: TENTATIVAS_ESGOTADAS)
 
     R->>V: ExtracaoFalhou
-    V->>P: UPDATE ... WHERE id = ? AND estado = 'PROCESSANDO'
+    Note over V: se a linha já é terminal, a entidade recusa<br/>e dá ack sem UPDATE
+    V->>P: UPDATE ... WHERE id = ? AND estado IN ('RECEBIDO', 'PROCESSANDO')
     alt a linha mudou
         V->>R: VideoFalhou
         V->>P: marca falha_publicada_em
     else nenhuma linha mudou
-        Note over V: entrega repetida — ack sem republicar
+        Note over V: corrida entre entregas — ack sem republicar
     end
+    V->>M: tag desfecho=sim no original
 
     R->>N: VideoFalhou
     N->>N: traduz o código em frase
@@ -225,12 +244,14 @@ Duas coisas merecem atenção aqui.
 
 **A garantia de e-mail único não está no `notificacao`.** Ele é *pelo menos uma vez* por
 desenho e não guarda nada. Quem não deixa a notificação se multiplicar é o `UPDATE`
-condicional no `videos`: ele exige no `WHERE` o **estado predecessor** — `FALHOU` só é
-alcançável a partir de `PROCESSANDO` —, então só a primeira entrega muda a linha, e só a
+condicional no `videos`: ele exige no `WHERE` um **estado predecessor** — `FALHOU` é
+alcançável a partir de `RECEBIDO` ou de `PROCESSANDO`, porque o contrato não garante que
+`ExtracaoIniciada` chegue antes do terminal —, então só a primeira entrega muda a linha, e só a
 transição que mudou a linha publica `VideoFalhou`. A segunda e a terceira entrega da mesma
-mensagem não casam o predicado, não mudam nada e dão ack em silêncio. O grafo de transições é
-declarado uma vez só, em `EstadoVideo.predecessor()`. Isso é o que dispensa
-banco no `notificacao` e torna todo consumo de evento idempotente
+mensagem encontram a linha já em `FALHOU`: a entidade recusa a transição antes do `UPDATE`, e
+duas entregas que correm juntas não casam o predicado. Nenhuma muda nada, e as duas dão ack em
+silêncio. O grafo de transições é declarado uma vez só, em `EstadoVideo.predecessores()`. Isso
+é o que dispensa banco no `notificacao` e torna todo consumo de evento idempotente
 ([ADR 0001](adr/0001-politica-de-falhas.md), [ADR 0002](adr/0002-maquina-de-estados-em-duas-camadas.md)).
 
 **Uma tentativa é uma entrega, não um erro.** Se o worker morre no meio da extração, aquela
@@ -247,7 +268,7 @@ Os dois requisitos que não aparecem numa demonstração. Ambos têm mecanismo, 
 | Serviço | Escala | Por quê |
 |---|---|---|
 | `extracao` | réplicas, **linear até 6 réplicas nesta máquina** | sem estado, `max-outstanding-messages=1` — cada réplica pega **uma** extração por vez e só volta à fila quando termina. *Competing consumers* puro. **Medido** ([ticket 026](wayfinder/tickets/026-linearidade-horizontal.md)): eficiência de escala 0,99 / 0,90 / 0,88 em 2 / 4 / 6 réplicas, de 2,96 para 15,6 Vídeo/min. Acima disso é desconhecido — os 20 núcleos do host já estavam a 77% |
-| `videos` | réplicas atrás de um proxy L7 | o estado está no Postgres, não em memória; a transição é `UPDATE` condicional, então duas réplicas processando a mesma mensagem chegam ao mesmo resultado. **Medido** ([ticket 028](wayfinder/tickets/028-escala-da-borda.md)): com N=3 atrás de um proxy, a mediana de latência do `202` cai **5,5×** (630→114 ms) sob 400 conexões simultâneas contra N=1; matar uma réplica durante a rajada custou **39 recusados de 400 (9,75%)**, contra 361/400 (90,25%) com réplica única — não chega a zero porque o proxy recusa, por padrão, reencaminhar um `POST` (não-idempotente) para outra réplica depois de a conexão falhar, para não arriscar duplicar o Vídeo |
+| `videos` | réplicas atrás de um proxy L7 | o estado está no Postgres, não em memória; a transição é `UPDATE` condicional, então duas réplicas processando a mesma mensagem chegam ao mesmo resultado. **Medido** ([ticket 028](wayfinder/tickets/028-escala-da-borda.md)): com N=3 atrás de um proxy, a mediana de latência do `202` cai **5,5×** (630→114 ms) sob 400 conexões simultâneas contra N=1; matar uma réplica durante a rajada custou **39 envios sem `202` de 400 (9,75%)**, contra 361/400 (90,25%) com réplica única — não chega a zero porque o proxy recusa, por padrão, reencaminhar um `POST` (não-idempotente) para outra réplica depois de a conexão falhar, para não arriscar duplicar o Vídeo |
 | `notificacao` | réplicas | idempotente por construção — a unicidade mora na transição de estado do `videos`, não aqui |
 
 O `prefetch=1` do `extracao` é a escolha central: extração de vídeo é limitada por CPU e
@@ -270,7 +291,7 @@ inviabilizaria o serviço na máquina de quem avalia.
 | Janela de risco | O que a fecha |
 |---|---|
 | Pico de envios | o `202` responde antes do trabalho; a fila absorve o excedente em disco, não em conexões HTTP abertas |
-| Broker reinicia | filas **quorum**, replicadas e duráveis — mensagem confirmada sobrevive |
+| Broker reinicia | filas **quorum**, duráveis — mensagem confirmada sobrevive. Replicáveis, mas no Compose o broker é nó único e não há para onde replicar (*Limitações conhecidas*) |
 | Worker morre no meio | ack **manual**, depois do trabalho; a mensagem volta para a fila |
 | **Deploy** no meio de uma Extração | o dreno cancela a assinatura de `extrair-video`, espera a Extração em voo terminar **e dar ack**, e só então deixa o conector fechar o canal. Zero reentregas no ensaio válido do [ticket 035](wayfinder/tickets/035-drenar-extracao-antes-do-sigterm.md) |
 | Mensagem envenenada | `x-delivery-limit=3` e DLQ — a mensagem sai do caminho, mas não some: o `extracao` consome a própria DLQ e transforma o esgotamento em `ExtracaoFalhou`, que vira e-mail |
@@ -353,7 +374,7 @@ Três coisas a medição **não** mostrou, e que valem tanto quanto o que ela mo
   demonstração só é possível depois de corrigidos os dois primeiros defeitos, que envenenam
   justamente o cenário que a exercitaria. *Resolvido no ticket 027: a varredura passou a
   registrar o que republica, e foi observada fazendo-o.*
-- **A borda é réplica única, e derrubá-la perde envio.** Nessa mesma rodada, 361 dos 400 envios
+- **A borda é réplica única, e derrubá-la derruba envios.** Nessa mesma rodada, 361 dos 400 envios
   não chegaram a ser aceitos — 239 timeouts de conexão, 53 EOF, 46 conexões resetadas, 22
   recusadas. O critério de "zero não-`202`" foi dispensado ali de propósito, porque a queda era
   provocada; o número fica registrado assim mesmo, porque a garantia do enunciado não distingue
@@ -441,13 +462,16 @@ pontos) porque quem limita o dreno é o `extracao`, não o `videos` — a répli
 alivia o aceite, não tem o que acelerar depois dele.
 
 A segunda — **matar uma réplica de N custa zero requisição, como o desenho promete?** — quase:
-**39 recusados de 400 (9,75%)**, contra **361 de 400 (90,25%)** com a réplica única do
+**39 envios sem `202` de 400 (9,75%)**, contra **361 de 400 (90,25%)** com a réplica única do
 [ticket 025](wayfinder/tickets/025-carga-conservacao.md). Os 39 são todos `502` — nenhum
 timeout, EOF ou conexão recusada — e a causa é uma regra deliberada do nginx, não um defeito:
 ele recusa reencaminhar um `POST` (não-idempotente) para outra réplica depois que a conexão com
 a réplica morta já falhou esperando resposta, porque ela pode já ter completado o efeito
 colateral (linha gravada, ZIP no bucket) antes de morrer — reencaminhar arriscaria duplicar o
-Vídeo. O parâmetro que destravaria isso (`non_idempotent`) não foi ligado: fecharia a lacuna às
+Vídeo. Nenhum dos 39 é *Vídeo perdido* ([`CONTEXT.md`](../CONTEXT.md)) nem recusa explícita: um
+`502` não diz ao cliente se o envio foi aceito. Ou não foi, ou foi, e então a linha existe e a
+varredura do [ADR 0003](adr/0003-reconciliacao-por-varredura.md) o leva a desfecho. A rodada não
+conferiu esse segundo caso: o portão de zero presos olhou só os 361 envios com `202`. O parâmetro que destravaria isso (`non_idempotent`) não foi ligado: fecharia a lacuna às
 custas desse risco, e o endpoint `/videos` não tem hoje chave de idempotência que o absorva.
 Fica registrado como candidato não implementado, não como conserto pendente.
 
@@ -467,14 +491,14 @@ Fica registrado como candidato não implementado, não como conserto pendente.
 | Requisito | Como é atendido | Onde |
 |---|---|---|
 | Processar mais de um vídeo ao mesmo tempo | *competing consumers* no `extracao`, `prefetch=1`, réplicas independentes — e a stack padrão sobe **duas**, então o requisito é demonstrável sem overlay: `./scripts/concorrencia.sh` envia a rajada e reprova se nunca houver duas extrações no mesmo instante (ticket 049) | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
-| Não perder requisição em pico | `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit`, reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada. Escalar a borda por réplicas atrás de um proxy reduz a perda ao derrubar uma delas de 90,25% para 9,75% (ticket 028) — a ressalva que resta é que esse número não é zero | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
+| Não perder requisição em pico | Lido como nenhum *Vídeo perdido* ([`CONTEXT.md`](../CONTEXT.md)). `202` antes do trabalho, fila quorum durável, ack manual, `x-delivery-limit` com dead-lettering *at-least-once* (ticket 103), reconciliação por varredura. Medido e **reprovado** no ticket 025, corrigido e **remedido** no 027 — 0 presos em 400 sob pico e em 133 com a borda derrubada. O aceite é o commit da linha, não o publish (104); o original só expira depois do desfecho (105); Vídeo preso é detectado pelo estado (106) e resgatado pela marca (107); sem capacidade, a borda recusa com `503` antes do corpo, e recusa não é Vídeo perdido (108). Os 39 `502` com uma réplica da borda derrubada (ticket 028) também não são Vídeo perdido: ou o envio não foi aceito, ou foi e a varredura o leva a desfecho, o que a rodada não conferiu. Fora do modelo de falha: perda de volume, cota por Dono e idempotência do envio — *Limitações conhecidas* | [ADR 0003](adr/0003-reconciliacao-por-varredura.md) |
 | Protegido por usuário e senha | Keycloak, OIDC *bearer-only*; o dono vem do `sub` do token | [pesquisa](pesquisa/oidc-keycloak.md) |
 | Listagem de status dos vídeos do usuário | `GET /videos` paginado, escopado pelo dono; não existe consulta sem dono na interface do gateway | [contrato HTTP](contratos/http-videos.md) |
 | Notificar o usuário em caso de erro | `VideoFalhou` → `notificacao` → SMTP; unicidade garantida pela transição de estado | [ADR 0001](adr/0001-politica-de-falhas.md) |
 | Persistir os dados | Postgres para o estado, MinIO para os arquivos | [`docker/postgres/init.sql`](../docker/postgres/init.sql) |
 | Arquitetura que permita escalar | serviços sem estado atrás de fila; o único com estado delega ao Postgres | [§ Escalar](#escalar-e-não-perder-requisição-em-pico) |
 | Versionado no GitHub | `vandrep/fiapx-v2`, `main` protegida por ruleset, PR obrigatório | [`AGENTS.md`](../AGENTS.md) |
-| Testes que garantam a qualidade | 144 testes (103 sem Docker): unitários do `core` com dublês, Cucumber pela borda, teste arquitetural, `ffmpeg` real no `extracao`, e o smoke ponta-a-ponta | [`scripts/smoke.sh`](../scripts/smoke.sh) |
+| Testes que garantam a qualidade | 512 testes (418 sem Docker): unitários do `core` com dublês, Cucumber pela borda, teste arquitetural, `ffmpeg` real no `extracao`, e o smoke ponta-a-ponta | [`scripts/smoke.sh`](../scripts/smoke.sh) |
 | CI/CD | GitHub Actions: `verify` e publicação das três imagens multi-arquitetura no GHCR | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) |
 
 Da stack *recomendada*, monitoramento entrou — depois, e não junto. A recusa original valia
@@ -484,9 +508,14 @@ enquanto o CI/CD era o risco; entregue o CI/CD, ela perdeu a premissa. Um contai
 métrica e trace por OTLP ([ticket 059](wayfinder/tickets/059-tres-sinais-nos-tres-servicos.md)):
 buscar um `idVideo` devolve **um** trace com os três serviços dentro, com os registros de log
 pendurados nos spans certos, e três alertas binários avaliam Estacionamento não-vazio, DLQ com
-mensagem, e fila com mensagem e zero consumidores. O que continua de fora é **painel curado e
-canal de notificação de alerta** — veja a seção seguinte. O que a camada deliberadamente não
-faz está no [ADR 0004](adr/0004-camada-de-observabilidade.md) e em *Limitações conhecidas*.
+mensagem, e fila com mensagem e zero consumidores. Desde o
+[ticket 106](wayfinder/tickets/106-deteccao-de-video-preso-pelo-estado.md), outros dois olham o
+estado no Postgres: Vídeo preso em `PROCESSANDO` e em `RECEBIDO` com a fila vazia. Um painel — **um**, sobre o vão que nenhum
+dashboard de fábrica olha — é a home do Grafana desde o
+[ticket 092](wayfinder/tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md), e o que
+continua de fora é o **canal de notificação de alerta** — veja a seção seguinte. O que a camada
+deliberadamente não faz está no [ADR 0004](adr/0004-camada-de-observabilidade.md) e em
+*Limitações conhecidas*.
 
 Redis, esse ficou de fora mesmo: não há leitura repetida o bastante para justificar cache, e a
 consulta de status já é uma linha por chave primária.
@@ -502,7 +531,7 @@ Cada linha tem a discussão inteira no arquivo apontado.
 | **Outbox canônico** com tabela e payload | compraria *exatamente uma vez*, regime que o ADR 0001 já recusou; a tabela `video` com duas colunas marcadoras fecha as mesmas janelas sem tabela nova ([ADR 0003](adr/0003-reconciliacao-por-varredura.md)) |
 | **Kubernetes** | o enunciado aceita Compose *ou* Kubernetes; Compose garante que a demonstração roda na máquina de quem avalia, sem cluster |
 | **Módulo Maven `shared`** com os contratos | duplicar cinco records é mais honesto que acoplar três serviços por um jar; extrair depois, se doer |
-| **Painel curado no Grafana e canal de notificação de alerta** | a coleta dos três sinais entrou (tickets 058 e 059) e os três alertas avaliam; o painel e o *contact point* continuam custando sem pagar nesta entrega, e por isso a detecção não mudou ([ADR 0004](adr/0004-camada-de-observabilidade.md), e a limitação abaixo) |
+| **Painel curado no Grafana e canal de notificação de alerta** | a coleta dos três sinais entrou (tickets 058 e 059) e os três alertas avaliam; o painel e o *contact point* continuam custando sem pagar nesta entrega, e por isso a detecção não mudou ([ADR 0004](adr/0004-camada-de-observabilidade.md), e a limitação abaixo). *Revertido em parte pelo [ticket 092](wayfinder/tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md): existe **um** painel, e ele é a home do Grafana. Caiu o argumento do Explore, que pressupunha um leitor que sabe o que perguntar; o do envelhecimento ficou de pé e virou o passo 12 do `scripts/smoke.sh`. O canal de notificação continua recusado, e a detecção continua não tendo mudado.* |
 | **E2E automatizado no CI** | Compose inteiro num runner (ffmpeg + MinIO + Keycloak + RabbitMQ) é fonte de instabilidade que não acrescenta garantia; `scripts/smoke.sh` faz a mesma verificação onde ela é confiável |
 
 ## Limitações conhecidas
@@ -519,7 +548,7 @@ O que eu não defendo — apenas aceitei.
   mesmo cenário e 0 em 133 com a borda derrubada. Deixa de ser limitação; fica aqui como
   histórico porque foi a única a contrariar um requisito explícito do enunciado, e porque
   ninguém a teria encontrado sem medir.
-- **A borda da demo sobe réplica única, e escalar por réplicas não zera a perda.** O
+- **A borda da demo sobe réplica única, e escalar por réplicas não zera os envios que falham.** O
   `extracao` da demo passou a subir com duas réplicas no
   [ticket 049](wayfinder/tickets/049-compose-da-demo-processa-em-paralelo.md) — processar mais
   de um vídeo ao mesmo tempo é requisito do enunciado, e até ali a stack do README o exercia
@@ -527,12 +556,46 @@ O que eu não defendo — apenas aceitei.
   [ticket 028](wayfinder/tickets/028-escala-da-borda.md) mediu N=3 réplicas atrás de um proxy
   no overlay de carga (não no `docker-compose.yml` da demo, que segue com uma só, porque
   escalar a borda exige o proxy na frente da porta publicada): matar uma
-  durante a rajada caiu de 361/400 recusados para **39/400 (9,75%)** — melhor por 9,3×, mas não
+  durante a rajada caiu de 361/400 envios sem `202` para **39/400 (9,75%)** — melhor por 9,3×, mas não
   zero, porque o proxy recusa reencaminhar um `POST` para outra réplica depois que a conexão já
   falhou esperando resposta, para não arriscar duplicar o Vídeo. A varredura do
   [ADR 0003](adr/0003-reconciliacao-por-varredura.md), essa **já foi vista funcionando**: ela
   passou a registrar o que republica, e um Vídeo órfão em `RECEBIDO` foi observado sendo
   republicado e chegando a `CONCLUIDO` (ticket 027).
+- **"Nenhum Vídeo perdido" vale dentro de um modelo de falha, e perder volume ou nó está fora
+  dele.** O modelo cobre crash de processo ou de réplica, queda de rede, dependência fora do ar e
+  bug que manda mensagem para o Estacionamento. Não cobre perder o volume do Postgres, do MinIO, do
+  RabbitMQ ou do Keycloak: no Compose cada um é **nó único**, com um volume nomeado, sem backup e
+  sem replicação. A fila quorum de [§ O que impede a perda](#o-que-impede-a-perda) é durável, mas com um nó só
+  ela não tem para onde replicar. Perdido o volume do Postgres, somem o Vídeo e o seu estado; o do
+  MinIO, o original e o Pacote; o do RabbitMQ, os comandos e eventos em trânsito — e desses a
+  varredura do [ADR 0003](adr/0003-reconciliacao-por-varredura.md) só recupera os que o Postgres
+  ainda conhece; o do Keycloak, os usuários, e um Dono recriado ganha outro `sub` e deixa de
+  ver os próprios Vídeos. O que cobriria: cluster de broker com três nós, réplica do Postgres,
+  MinIO distribuído, Keycloak com banco externo replicado ou, no mínimo, backup dos quatro volumes
+  (ticket 109).
+- **A reserva de uploads é por réplica, mesmo quando o volume é compartilhado.** Cada réplica
+  do `videos` deriva seu teto do volume inteiro e desconta somente as próprias reservas. No
+  overlay de carga, todas montam `fiapx-uploads`: duas podem aceitar simultaneamente corpos
+  que cabem isoladamente no espaço livre, mas não juntos. A recusa por capacidade não garante
+  uma reserva global de disco com N réplicas. O que cobriria: volumes com capacidade isolada por
+  réplica ou coordenação das reservas entre elas; nenhum dos dois está implementado. No Compose,
+  o volume nomeado usa o disco do host, sem cota própria. Ver o
+  [contrato HTTP](contratos/http-videos.md#recusa-por-capacidade) e o
+  [ticket 115](wayfinder/tickets/115-recusa-por-capacidade-com-varias-replicas-da-borda.md).
+- **Não há cota por Dono.** A fila de `extracao.extrair` é FIFO para todos: um único Dono que
+  envie centenas de Vídeos ocupa as réplicas e faz os outros esperarem atrás dele. É problema de
+  equidade, não de conservação — ninguém perde Vídeo, só espera. A recusa por capacidade do
+  [ticket 108](wayfinder/tickets/108-recusa-por-capacidade-antes-do-corpo.md) protege o recurso
+  da borda, não a vez de cada Dono. O que cobriria: cota de envios em andamento por Dono na borda,
+  ou fila justa entre Donos no lugar da FIFO única (ticket 109).
+- **`POST /videos` não é idempotente.** Se a conexão cai depois do commit da linha e antes de a
+  resposta chegar, o cliente não sabe que o Vídeo foi aceito e pode criá-lo de novo ao reenviar.
+  Parte dos 39 `502` do [ticket 028](wayfinder/tickets/028-escala-da-borda.md) pode estar nesse
+  caso — ninguém conferiu duplicatas no Postgres naquela rodada. Duplicar não é perder: o Vídeo
+  aceito chega a desfecho, e o Dono o vê na listagem. É também por isso que o `non_idempotent` do
+  nginx, que zeraria esses `502`, não foi ligado. O que cobriria: cabeçalho `Idempotency-Key`
+  gravado com índice único por Dono, devolvendo o Vídeo existente no reenvio (ticket 109).
 - **A latência do `202` não tem orçamento declarado.** Ela foi medida (med 3,3 s sob 400
   conexões simultâneas de 1 MB) e variou até 9,8 s entre rodadas de mesma configuração. O
   [ticket 026](wayfinder/tickets/026-linearidade-horizontal.md) descartou a hipótese de estado
@@ -559,7 +622,8 @@ O que eu não defendo — apenas aceitei.
   cancelada; o ensaio não prova zero reentregas em toda corrida de entrega. Trabalho que exceda esse teto, SIGKILL, OOM e queda de
   rede continuam podendo gastar entrega. A medição verde cobre redeploy com broker saudável.
 - **Os alertas existem, mas a detecção não mudou.** As três regras do
-  [ticket 058](wayfinder/tickets/058-piso-de-observabilidade.md) avaliam continuamente e
+  [ticket 058](wayfinder/tickets/058-piso-de-observabilidade.md) e as duas do
+  [106](wayfinder/tickets/106-deteccao-de-video-preso-pelo-estado.md) avaliam continuamente e
   guardam histórico, e nenhuma delas sai do Grafana: não há *contact point*, não há e-mail,
   não há webhook. Um alerta disparado só é visto por quem já foi olhar — que é exatamente a
   propriedade do health check no incidente de 06/09/2026, em que `docker ps` dizia `unhealthy`

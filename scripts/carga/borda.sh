@@ -25,7 +25,9 @@
 # Variaveis: FIAPX_VUS, FIAPX_EXTRACAO_REPLICAS (default 2), FIAPX_EXTRACAO_CPUS (default 1;
 #            teto baixo de proposito — esta maquina tem menos nucleos que a do 026/027, e o
 #            que esta sob julgamento aqui e o `videos`, nao o `extracao`), FIAPX_FIXTURE,
-#            FIAPX_AMOSTRA, FIAPX_ATRASO_KILL.
+#            FIAPX_AMOSTRA, FIAPX_ATRASO_KILL, FIAPX_PROJETO_COMPOSE (namespace Docker
+#            opcional, para isolar a corrida), FIAPX_AQUECER (envios sequenciais antes da
+#            rajada) e FIAPX_PAUSA_AQUECIMENTO (default 10s).
 set -euo pipefail
 export LC_ALL=C
 
@@ -42,12 +44,16 @@ fixture="${FIAPX_FIXTURE:-controle-3s.mp4}"
 amostra="${FIAPX_AMOSTRA:-10}"
 frames_esperados="${FIAPX_FRAMES_ESPERADOS:-3}"   # controle-3s.mp4 a 1 fps
 atraso_kill="${FIAPX_ATRASO_KILL:-2}"
+aquecimento="${FIAPX_AQUECER:-0}"
+pausa_aquecimento="${FIAPX_PAUSA_AQUECIMENTO:-10}"
 usuario="${FIAPX_USUARIO:-demo}"
 senha="${FIAPX_SENHA:-demo}"
 segundos_por_video=1
 
 case "$modo" in escala|mata-replica) ;; *) echo "modo desconhecido: $modo" >&2; exit 2 ;; esac
 [[ "$n_videos" =~ ^[0-9]+$ && "$n_videos" -ge 1 ]] || { echo "N invalido: $n_videos" >&2; exit 2; }
+[[ "$aquecimento" =~ ^[0-9]+$ ]] || { echo "FIAPX_AQUECER invalido: $aquecimento" >&2; exit 2; }
+[[ "$pausa_aquecimento" =~ ^[0-9]+$ ]] || { echo "FIAPX_PAUSA_AQUECIMENTO invalido: $pausa_aquecimento" >&2; exit 2; }
 if [[ "$modo" == mata-replica && "$n_videos" -lt 2 ]]; then
     echo "mata-replica exige N >= 2 — matar a unica replica nao testaria sobrevivencia, testaria o 025 de novo" >&2
     exit 2
@@ -62,6 +68,13 @@ fi
 raiz_docker="${LOCAL_WORKSPACE_FOLDER:-$raiz}"
 
 export COMPOSE_PROJECT_NAME="$(basename "$raiz")"
+if [[ -n "${FIAPX_PROJETO_COMPOSE:-}" ]]; then
+    [[ "$FIAPX_PROJETO_COMPOSE" =~ ^fiapx-ticket[0-9]+(-[a-z0-9][a-z0-9-]*)?$ ]] || {
+        echo "FIAPX_PROJETO_COMPOSE invalido: use fiapx-ticketNN[-sufixo] para isolar a corrida" >&2
+        exit 2
+    }
+    export COMPOSE_PROJECT_NAME="$FIAPX_PROJETO_COMPOSE"
+fi
 export FIAPX_EXTRACAO_REPLICAS="$extracao_replicas"
 export FIAPX_EXTRACAO_CPUS="$extracao_cpus"
 export FIAPX_VIDEOS_REPLICAS="$n_videos"
@@ -70,6 +83,24 @@ rotulo="${FIAPX_ROTULO:-${modo}-n${n_videos}}"
 saida="$raiz/scripts/carga/saida/$rotulo"
 rede="${COMPOSE_PROJECT_NAME}_default"
 psql_() { "${compose[@]}" exec -T postgres psql -U fiapx -d fiapx_videos -q -t -A -F' ' -v ON_ERROR_STOP=1; }
+
+executar_k6() {
+    local subdiretorio="$1" quantidade_vus="$2" quantidade_envios="$3"
+    local saida_host="$saida${subdiretorio:+/$subdiretorio}"
+    local saida_docker="$raiz_docker/scripts/carga/saida/$rotulo${subdiretorio:+/$subdiretorio}"
+    mkdir -p "$saida_host"
+    docker run --rm --network "$rede" --user "$(id -u):$(id -g)" \
+        -v "$raiz_docker/scripts/carga/injetor.js:/injetor.js:ro" \
+        -v "$raiz_docker/scripts/carga/fixtures:/fixtures:ro" \
+        -v "$saida_docker:/saida" \
+        -e VIDEOS_URL=http://videos-proxy:8080 \
+        -e KEYCLOAK_URL=http://keycloak:8080 \
+        -e USUARIO="$usuario" -e SENHA="$senha" \
+        -e ARQUIVO="/fixtures/$fixture" \
+        -e VUS="$quantidade_vus" -e ENVIOS="$quantidade_envios" \
+        grafana/k6:latest run --quiet --console-output=/saida/injetor.log /injetor.js \
+        > "$saida_host/k6.out" 2> "$saida_host/k6.err"
+}
 
 # `oraculo.sh amostra` fala com `localhost:8080`/`8081` — certo quando quem roda o harness e o
 # mesmo host do dockerd. Nesta sessao nao e: e Docker-outside-of-Docker (mesmo motivo do
@@ -123,7 +154,7 @@ falha()  { echo "    ${vermelho}FALHOU${normal}  $*" >&2; exit 1; }
 # ---------------------------------------------------------------------------------------
 passo "0. Dependencias, fixtures e stack limpa"
 
-for ferramenta in docker curl jq shuf; do
+for ferramenta in docker curl jq shuf paste; do
     command -v "$ferramenta" >/dev/null || falha "$ferramenta nao esta no PATH"
 done
 scripts/carga/gera-fixtures.sh
@@ -132,7 +163,21 @@ rm -rf "$saida"; mkdir -p "$saida"
 
 # down -v entre corridas, na mesma razao do 026 (item 4 do metodo la): comparar N=1 com N=3
 # sobre banco e bucket sujos da corrida anterior compararia duas maquinas diferentes, nao dois
-# N diferentes.
+# N diferentes. Quando o namespace foi escolhido explicitamente, nao derrube recursos ja
+# existentes — ele pode ser outra corrida experimental; use um sufixo novo para cada execucao.
+if [[ -n "${FIAPX_PROJETO_COMPOSE:-}" ]]; then
+    recursos_existentes="$("${compose[@]}" ps -aq)"
+    if [[ -z "$recursos_existentes" ]]; then
+        recursos_existentes="$(docker volume ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME")"
+    fi
+    if [[ -z "$recursos_existentes" ]]; then
+        recursos_existentes="$(docker network ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME")"
+    fi
+    if [[ -n "$recursos_existentes" ]]; then
+        echo "FIAPX_PROJETO_COMPOSE=$COMPOSE_PROJECT_NAME ja possui recursos; use um sufixo novo para esta corrida" >&2
+        exit 2
+    fi
+fi
 "${compose[@]}" down -v --remove-orphans > "$saida/down.log" 2>&1 || true
 ok "fixture $fixture, saida em scripts/carga/saida/$rotulo/, stack derrubada antes de subir"
 
@@ -153,6 +198,22 @@ while :; do
     sleep 3
 done
 ok "$esperados containers saudaveis ($n_videos de videos atras do proxy, $extracao_replicas de extracao)"
+
+# ---------------------------------------------------------------------------------------
+if (( aquecimento > 0 )); then
+    passo "1b. Aquecimento com $aquecimento envio(s) sequencial(is) e pausa de ${pausa_aquecimento}s"
+    executar_k6 aquecimento 1 "$aquecimento" \
+        || { cat "$saida/aquecimento/k6.out" "$saida/aquecimento/k6.err" >&2; falha "aquecimento falhou"; }
+    cat "$saida/aquecimento/k6.out"
+    aquecidos_aceitos="$(grep -c 'ACEITO ' "$saida/aquecimento/injetor.log" || true)"
+    aquecidos_recusados="$(grep -c 'RECUSADO ' "$saida/aquecimento/injetor.log" || true)"
+    if (( aquecidos_aceitos != aquecimento || aquecidos_recusados != 0 )); then
+        cat "$saida/aquecimento/injetor.log" >&2
+        falha "aquecimento invalido: esperados $aquecimento ACEITO e zero RECUSADO; obtidos $aquecidos_aceitos ACEITO e $aquecidos_recusados RECUSADO"
+    fi
+    sleep "$pausa_aquecimento"
+    ok "aquecimento concluido; a rajada medida comeca apos a pausa"
+fi
 
 # ---------------------------------------------------------------------------------------
 passo "2. Criterio, fixado antes de rodar"
@@ -185,17 +246,8 @@ echo "       terminal 'certo' nao basta, tem que ser terminal com o conteudo cer
 # ---------------------------------------------------------------------------------------
 passo "3. Rajada, contra o proxy (nao contra o videos direto)"
 
-docker run --rm --network "$rede" --user "$(id -u):$(id -g)" \
-    -v "$raiz_docker/scripts/carga/injetor.js:/injetor.js:ro" \
-    -v "$raiz_docker/scripts/carga/fixtures:/fixtures:ro" \
-    -v "$raiz_docker/scripts/carga/saida/$rotulo:/saida" \
-    -e VIDEOS_URL=http://videos-proxy:8080 \
-    -e KEYCLOAK_URL=http://keycloak:8080 \
-    -e USUARIO="$usuario" -e SENHA="$senha" \
-    -e ARQUIVO="/fixtures/$fixture" \
-    -e VUS="$vus" -e ENVIOS="$envios" \
-    grafana/k6:latest run --quiet --console-output=/saida/injetor.log /injetor.js \
-    > "$saida/k6.out" 2> "$saida/k6.err" &
+inicio_rajada="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+executar_k6 "" "$vus" "$envios" &
 k6_pid=$!
 
 if [[ "$modo" == mata-replica ]]; then
@@ -206,6 +258,7 @@ if [[ "$modo" == mata-replica ]]; then
 fi
 
 wait "$k6_pid" && k6_codigo=0 || k6_codigo=$?
+fim_rajada="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
 cat "$saida/k6.out"
 (( k6_codigo == 0 )) || aviso "k6 encerrou com codigo $k6_codigo"
 
@@ -310,7 +363,24 @@ fi
 echo "    Saida completa: scripts/carga/saida/$rotulo/"
 
 # ---------------------------------------------------------------------------------------
-passo "7. Latencia do 202 e drenagem (para a tabela)"
+passo "7. Bloqueios do event loop (para a tabela)"
+"${compose[@]}" logs --since "$inicio_rajada" --until "$fim_rajada" --no-color videos > "$saida/videos.log" 2>&1 \
+    || falha "nao foi possivel capturar o log do videos"
+avisos_bloqueio="$(grep -c 'BlockedThreadChecker' "$saida/videos.log" || true)"
+echo "    avisos BlockedThreadChecker: $avisos_bloqueio"
+if (( avisos_bloqueio > 0 )); then
+    duracoes_bloqueio="$(sed -n -E 's/.*has been blocked for ([0-9]+) ms.*/\1/p' "$saida/videos.log" \
+        | paste -sd, -)"
+    menor_bloqueio="$(sed -n -E 's/.*has been blocked for ([0-9]+) ms.*/\1/p' "$saida/videos.log" \
+        | sort -n | head -1)"
+    maior_bloqueio="$(sed -n -E 's/.*has been blocked for ([0-9]+) ms.*/\1/p' "$saida/videos.log" \
+        | sort -n | tail -1)"
+    echo "    duracoes dos avisos (ms): $duracoes_bloqueio"
+    echo "    menor/maior aviso ......: ${menor_bloqueio}ms/${maior_bloqueio}ms"
+fi
+
+# ---------------------------------------------------------------------------------------
+passo "8. Latencia do 202 e drenagem (para a tabela)"
 grep -B1 -A4 'latencia do 202' "$saida/k6.out" || true
 awk -v c="$concluidos" -v d="$drenagem" 'BEGIN{ if (d>0) printf "    vazao aproximada : %.4f Video/s (%d concluidos em %ds)\n", c/d, c, d }'
 

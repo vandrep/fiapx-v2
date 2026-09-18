@@ -1,6 +1,7 @@
 package br.com.fiapx.extracao.core.usecases.extracao;
 
 import br.com.fiapx.extracao.core.entities.MotivoFalha;
+import br.com.fiapx.extracao.core.exceptions.FalhaAoPublicarExtracaoFalhouException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -10,6 +11,8 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -113,6 +116,20 @@ class ProcessarExtracaoUseCaseTest {
         useCase.executar(new ProcessarExtracaoUseCase.Command(ID_VIDEO, "v", "p")).get();
 
         assertEquals(1, espacoDeTrabalhoGateway.limpos.size());
+    }
+
+    @Test
+    void falhaAoPublicarFalhaPermanentePreservaAClassificacaoParaNaoRecircular() {
+        extracaoDeFramesGateway.falha = () -> GatewaysEmMemoria.falhaPermanente(MotivoFalha.ARQUIVO_INVALIDO);
+        var falhaDePublicacao = new IllegalStateException("exchange recusou a publicacao");
+        sender.falhaAoEnviarFalhou = falhaDePublicacao;
+
+        var excecao = assertThrows(ExecutionException.class,
+                () -> useCase.executar(new ProcessarExtracaoUseCase.Command(ID_VIDEO, "v", "p")).get());
+
+        var falhaClassificada = assertInstanceOf(FalhaAoPublicarExtracaoFalhouException.class,
+                excecao.getCause());
+        assertSame(falhaDePublicacao, falhaClassificada.getCause());
     }
 
     @Test

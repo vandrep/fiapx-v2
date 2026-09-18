@@ -21,7 +21,7 @@ Estados de um Vídeo:
 
 | Estado | Significado |
 |---|---|
-| `RECEBIDO` | Armazenado e enfileirado; nada foi extraído ainda |
+| `RECEBIDO` | Armazenado e aceito; nada foi extraído ainda |
 | `PROCESSANDO` | A Extração está em andamento |
 | `CONCLUIDO` | A Extração terminou e há um Pacote disponível para download |
 | `FALHOU` | A Extração falhou definitivamente, após esgotadas as tentativas |
@@ -48,6 +48,70 @@ Uma **tentativa** é uma *entrega* do trabalho ao serviço `extracao`, não um e
 worker morre no meio de uma Extração, aquela tentativa foi gasta, ainda que nada tenha dado
 errado com o Vídeo. Isso é deliberado: um Vídeo que derruba o worker repetidamente esgota
 suas tentativas e falha definitivamente.
+
+## Repetição e chamada ao recurso
+
+Uma **repetição** é uma nova ida ao mesmo recurso externo — MinIO, SMTP, Postgres — depois que
+a ida anterior falhou por indisponibilidade passageira. Ela acontece dentro de **uma** unidade
+de trabalho e não cria outra: dentro de uma tentativa, onde há tentativa, e dentro da própria
+requisição na borda HTTP do `videos`, onde não há entrega nenhuma para consumir. Repetição não
+gasta tentativa, não aparece na fila e não muda o estado do Vídeo — quem chamou vê uma única
+operação, que demorou mais. Esgotadas as repetições, a falha volta a quem chamou: ao consumidor
+HTTP ou ao mecanismo de reentrega da fila.
+
+O conceito **não é de Extração**, embora conviva com ela: o `videos`, que não executa Extração
+nenhuma, repete ao falar com o MinIO e com o Postgres. Onde há recurso externo com falha
+passageira, há repetição.
+
+O que conta como falha passageira é decisão **de cada recurso**, e os lugares que implementam a
+política não respondem igual: do MinIO e do SMTP quase toda falha é o blip que a política quer
+absorver, e no Postgres só a indisponibilidade transitória é repetida — repetir uma violação de
+constraint daria três vezes o mesmo erro. Essa divergência é deliberada, e o motivo dela está
+no `AGENTS.md` § *As cópias deliberadas entre serviços*.
+
+Uma **chamada ao recurso** é a unidade em que a política se conta: a primeira ida mais as
+repetições. Três chamadas ao recurso — a primeira mais duas repetições — é a política do
+[ADR 0001](docs/adr/0001-politica-de-falhas.md), e é lá que moram a aritmética, o motivo do
+número e a forma em que o Mutiny a escreve.
+
+O verbete de *tentativa*, em § *Extração*, fica intocado, e a relação entre os dois é de
+escala: uma tentativa é uma **entrega** do trabalho ao `extracao`, e cada tentativa pode gastar
+várias chamadas ao recurso — inclusive a tentativa que morre no meio, que já gastou as que
+fez. Os dois limites valem 3, e isso é **coincidência**: são contagens de coisas diferentes,
+decididas em lugares diferentes, e uma pode mudar sem a outra. Foi essa coincidência, somada à
+palavra *tentativa* gasta nas duas contagens, que fez a mesma frase do ADR ser implementada em
+dois números e custou o
+[ticket 086](docs/wayfinder/tickets/086-contagem-de-repeticoes-em-dois-numeros.md).
+
+## Vídeo perdido
+
+Um Vídeo que o sistema **aceitou** e que nunca chega a um desfecho que o Dono consiga
+observar. É o que o requisito "não perder uma requisição" proíbe, lido pelo lado do Dono. Há
+três formas:
+
+- o Vídeo nunca chega a `CONCLUIDO` nem a `FALHOU`;
+- chega a `FALHOU`, mas o Dono nunca é avisado;
+- o arquivo enviado deixa de existir antes de o Vídeo chegar a um estado terminal.
+
+Não é Vídeo perdido:
+
+- **Pacote expirado.** O prazo é um desfecho previsto, e o sistema o comunica a quem pede o
+  download.
+- **Envio recusado.** Quando o sistema recusa o envio, ele não assumiu o Vídeo: quem enviou
+  sabe que precisa tentar de novo. Recusar de forma explícita é legítimo, inclusive por falta
+  de capacidade. Perder é outra coisa: aceitar e depois não entregar desfecho.
+
+Um Vídeo **preso** é um Vídeo perdido visto por dentro: parado num estado não-terminal. Nem
+todo Vídeo não-terminal está preso, porque um Vídeo esperando na fila durante um pico é
+`RECEBIDO` legítimo.
+
+Por isso o arquivo enviado é guardado **enquanto o Vídeo não tiver desfecho**. Ele também tem
+prazo, como o Pacote, mas esse prazo só pode vencer depois de o Vídeo chegar a um estado
+terminal. Um Vídeo preso pode ser descoberto tarde sem deixar de ser recuperável.
+
+Um **resgate** é a ação humana que recoloca um Vídeo preso a caminho do desfecho: pede de novo
+a Extração, ou anuncia de novo a falha, pelo mesmo caminho do envio original. O resgate começa
+uma nova série de tentativas. Ele não se aplica a Vídeo com desfecho: terminal é terminal.
 
 ## Estacionamento
 

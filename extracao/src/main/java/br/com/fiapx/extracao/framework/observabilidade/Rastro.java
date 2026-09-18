@@ -66,9 +66,10 @@ import java.util.function.Supplier;
  *       WARN. Perder o encadeamento e ruim, e ainda assim e melhor que pendurar contexto numa
  *       thread que ninguem limpa — e, pela medicao, o ramo nao e alcancado em servico nenhum.</li>
  *   <li>{@link #emTorno} <b>nao precisa</b>. Quem le o contexto corrente e a instrumentacao que
- *       monta a requisicao — MinIO, SMTP —, e ela roda no disparo; ja o {@code ffmpeg} nao tem
- *       instrumentacao nenhuma dentro, entao ali o escopo aberto nao servia a ninguem. O escopo
- *       abre e fecha na mesma thread, em volta do disparo, e o span segue vivo ate a conclusao.</li>
+ *       monta a requisicao — aqui, o SDK da AWS em volta do MinIO —, e ela roda no disparo; ja o
+ *       {@code ffmpeg} nao tem instrumentacao nenhuma dentro, entao ali o escopo aberto nao
+ *       servia a ninguem. O escopo abre e fecha na mesma thread, em volta do disparo, e o span
+ *       segue vivo ate a conclusao.</li>
  * </ul>
  *
  * <p>O que a regressao trava esta em {@code EscopoNaoAtravessaThreadTest}, no {@code extracao}
@@ -107,13 +108,12 @@ import java.util.function.Supplier;
  * <h2>Onde {@link #emTorno} vale a pena, e onde nao</h2>
  *
  * So no I/O que a auto-instrumentacao nao cobre — e quem decide isso e a medicao, nao o
- * catalogo de extensoes. A mensageria e o Postgres aparecem sozinhos. O MinIO <b>nao</b>: a
- * extensao da AWS arrasta o {@code opentelemetry-aws-sdk-2.2} e monta o
- * {@code AwsSdkTelemetry}, mas <b>nenhum span de S3 chegou ao Tempo</b> num ciclo completo de
- * Video (ticket 059, verificado no {@code smoke.sh}). O que fica sem dono aqui e o
- * {@code ffmpeg}, que roda
- * fora do JVM como processo externo, e as duas idas ao MinIO — o download do Video e o upload
- * do Pacote, os dois trechos de rede de uma Extracao.
+ * catalogo de extensoes. A mensageria aparece sozinha. O MinIO <b>nao</b>: a extensao da AWS
+ * arrasta o {@code opentelemetry-aws-sdk-2.2} e monta o {@code AwsSdkTelemetry}, mas
+ * <b>nenhum span de S3 chegou ao Tempo</b> num ciclo completo de Video (ticket 059, verificado
+ * no {@code smoke.sh}). O que fica sem dono aqui e o {@code ffmpeg}, que roda fora do JVM como
+ * processo externo, e as duas idas ao MinIO — o download do Video e o upload do Pacote, os dois
+ * trechos de rede de uma Extracao.
  */
 @ApplicationScoped
 public class Rastro {
@@ -183,10 +183,11 @@ public class Rastro {
     }
 
     /**
-     * Envolve uma ida a um recurso externo num adapter de I/O — MinIO, SMTP. Filho do que
-     * estiver corrente, que e o span de {@link #naMensagem} no worker ou o span de servidor
-     * HTTP da borda. Sem {@code idVideo}: o adapter de I/O nao o conhece, e o span pai que o
-     * carrega ja esta logo acima.
+     * Envolve uma ida a um recurso externo num adapter de I/O — aqui, o MinIO e o
+     * {@code ffmpeg}. Filho do que estiver corrente, que e sempre o span de
+     * {@link #naMensagem}: este servico nao tem borda HTTP, entao todo trabalho dele comeca no
+     * consumo de uma mensagem. Sem {@code idVideo}: o adapter de I/O nao o conhece, e o span pai
+     * que o carrega ja esta logo acima.
      */
     public <T> CompletableFuture<T> emTorno(String nome, Supplier<CompletableFuture<T>> trabalho) {
         var span = tracer.spanBuilder(nome).startSpan();

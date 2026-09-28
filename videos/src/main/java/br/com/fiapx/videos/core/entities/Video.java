@@ -24,6 +24,7 @@ public final class Video {
 
     private String chaveVideo;
     private EstadoVideo estado;
+    private Instant iniciadaEm;
     private Instant finalizadoEm;
     private String chavePacote;
     private Integer quantidadeFrames;
@@ -71,6 +72,7 @@ public final class Video {
                                      String chaveVideo,
                                      EstadoVideo estado,
                                      Instant recebidoEm,
+                                     Instant iniciadaEm,
                                      Instant finalizadoEm,
                                      String chavePacote,
                                      Integer quantidadeFrames,
@@ -79,6 +81,7 @@ public final class Video {
         var video = new Video(id, nome, tamanhoBytes, dono, recebidoEm);
         video.chaveVideo = chaveVideo;
         video.estado = estado;
+        video.iniciadaEm = iniciadaEm;
         video.finalizadoEm = finalizadoEm;
         video.chavePacote = chavePacote;
         video.quantidadeFrames = quantidadeFrames;
@@ -99,12 +102,20 @@ public final class Video {
     /**
      * A Extracao comecou. Devolve false para reentrega fora de ordem, que e caminho
      * esperado e termina em ack — nao em excecao (ADR 0002).
+     *
+     * <p>O instante e o da <b>primeira</b> tentativa: a reentrega nao sai de PROCESSANDO e nao o
+     * reescreve. E dele que conta o limiar de Video preso em PROCESSANDO (ticket 106), e sem ele
+     * um PROCESSANDO legitimo e um preso sao indistinguiveis — por isso a recusa do nulo.
      */
-    public boolean marcaComoIniciada() {
+    public boolean marcaComoIniciada(Instant iniciadaEm) {
+        if (iniciadaEm == null) {
+            throw new IllegalArgumentException("Instante de início da Extração é obrigatório");
+        }
         if (!estado.transitaPara(EstadoVideo.PROCESSANDO)) {
             return false;
         }
         this.estado = EstadoVideo.PROCESSANDO;
+        this.iniciadaEm = iniciadaEm;
         return true;
     }
 
@@ -161,6 +172,11 @@ public final class Video {
 
     public Instant recebidoEm() {
         return recebidoEm;
+    }
+
+    /** Nulo enquanto RECEBIDO, e tambem no terminal que chegou antes da ExtracaoIniciada. */
+    public Instant iniciadaEm() {
+        return iniciadaEm;
     }
 
     public Instant finalizadoEm() {

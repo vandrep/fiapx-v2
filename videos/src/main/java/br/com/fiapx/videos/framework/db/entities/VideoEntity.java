@@ -49,6 +49,10 @@ public class VideoEntity extends PanacheEntityBase {
     @Column(name = "recebido_em", nullable = false)
     public Instant recebidoEm;
 
+    /** Inicio da primeira tentativa de Extracao; o limiar de Video preso conta daqui (ticket 106). */
+    @Column(name = "iniciada_em")
+    public Instant iniciadaEm;
+
     /** Instante terminal, de CONCLUIDO ou de FALHOU; sai como {@code concluidoEm} na API. */
     @Column(name = "finalizado_em")
     public Instant finalizadoEm;

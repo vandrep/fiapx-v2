@@ -104,6 +104,7 @@ final class GatewaysEmMemoria {
         final List<UUID> iniciadas = new ArrayList<>();
         final List<Concluida> concluidas = new ArrayList<>();
         final List<Falha> falhas = new ArrayList<>();
+        RuntimeException falhaAoEnviarFalhou;
 
         @Override
         public CompletableFuture<Void> enviarIniciada(UUID idVideo, Instant iniciadaEm) {
@@ -122,6 +123,9 @@ final class GatewaysEmMemoria {
         public CompletableFuture<Void> enviarFalhou(UUID idVideo, MotivoFalha motivo, String detalheTecnico,
                                                      Instant ocorridoEm) {
             falhas.add(new Falha(idVideo, motivo, detalheTecnico, ocorridoEm));
+            if (falhaAoEnviarFalhou != null) {
+                return CompletableFuture.failedFuture(falhaAoEnviarFalhou);
+            }
             return CompletableFuture.completedFuture(null);
         }
     }

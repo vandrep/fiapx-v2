@@ -3,13 +3,18 @@ package br.com.fiapx.videos.framework.service;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.reactivestreams.FlowAdapters;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectTaggingRequest;
+import software.amazon.awssdk.services.s3.model.Tag;
+import software.amazon.awssdk.services.s3.model.Tagging;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
@@ -20,7 +25,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Flow;
 
 /**
- * As duas chamadas ao MinIO com a retentativa do ADR 0001, isoladas num bean proprio — o
+ * As chamadas ao MinIO com a retentativa do ADR 0001, isoladas num bean proprio — o
  * mesmo desenho que o `extracao` e o `notificacao` usam.
  *
  * <p>A retentativa e do Mutiny, e nao do {@code @Retry} do SmallRye Fault Tolerance: o
@@ -42,13 +47,35 @@ import java.util.concurrent.Flow;
 @ApplicationScoped
 public class ArquivoMinioClient {
 
-    private static final int MAXIMO_DE_REPETICOES = 3;
-    private static final Duration ESPERA_ENTRE_REPETICOES = Duration.ofSeconds(2);
-    /** Os 200 ms do default do {@code @Retry}, sobre os 2 s de espera: o Mutiny pede fracao. */
+    /**
+     * Duas repeticoes depois da primeira chamada, que sao as 3 chamadas ao recurso do
+     * ADR 0001 — a aritmetica esta em {@link #comRepeticao} (ticket 086).
+     */
+    private static final int MAXIMO_DE_REPETICOES = 2;
+    /**
+     * Fracao da espera, e nao valor absoluto: o Mutiny pede fracao. Os 10% vieram dos 200 ms de
+     * jitter que o {@code @Retry} do MicroProfile trazia por default sobre 2 s, e continuam
+     * amarrados a {@link #esperaEntreRepeticoes} — sobre a espera de producao dao os mesmos
+     * 200 ms; sobre a espera reduzida do perfil de teste dao proporcionalmente menos.
+     */
     private static final double JITTER = 0.1;
 
     @Inject
     S3AsyncClient s3;
+
+    /**
+     * Os 2 s do ADR 0001 em producao, reduzidos ao piso so no perfil de teste. E configuracao <b>deste
+     * bean</b>, no namespace {@code fiapx.} do projeto — nao chave de tolerancia a falhas por
+     * interceptor, que a setima regra do teste arquitetural proibe desde o ticket 064.
+     *
+     * <p>O que o cenario do blip julga e a repeticao <i>acontecer</i>, nao quanto ela espera
+     * (ticket 048): com a espera de producao, os quatro cenarios do
+     * {@code EnvioResisteABlipDoArmazenamentoTest} ficavam 20 s parados. O default de 2 s vive
+     * aqui, e nao no {@code .properties}, para que a espera de producao sobreviva a um arquivo
+     * de configuracao incompleto (ticket 080).
+     */
+    @ConfigProperty(name = "fiapx.armazenamento.espera-entre-repeticoes", defaultValue = "2s")
+    Duration esperaEntreRepeticoes;
 
     public CompletionStage<Void> gravar(String bucket, String chave, Path arquivo) {
         var requisicao = PutObjectRequest.builder().bucket(bucket).key(chave).build();
@@ -59,12 +86,35 @@ public class ArquivoMinioClient {
     }
 
     /**
+     * Substitui o conjunto inteiro de tags do objeto por esta uma — a API S3 nao acrescenta tag,
+     * so troca o conjunto. Nenhum objeto deste servico carrega outra tag, entao trocar e
+     * acrescentar dao no mesmo.
+     */
+    public CompletionStage<Void> marcarComTag(String bucket, String chave, String tag, String valor) {
+        var requisicao = PutObjectTaggingRequest.builder().bucket(bucket).key(chave)
+                .tagging(Tagging.builder().tagSet(Tag.builder().key(tag).value(valor).build()).build())
+                .build();
+        return comRepeticao(Uni.createFrom()
+                .completionStage(() -> s3.putObjectTagging(requisicao))
+                .replaceWithVoid())
+                .subscribeAsCompletionStage();
+    }
+
+    /** Apagar chave que nao existe e sucesso na API S3, entao repetir e seguro. */
+    public CompletionStage<Void> apagar(String bucket, String chave) {
+        var requisicao = DeleteObjectRequest.builder().bucket(bucket).key(chave).build();
+        return comRepeticao(Uni.createFrom()
+                .completionStage(() -> s3.deleteObject(requisicao))
+                .replaceWithVoid())
+                .subscribeAsCompletionStage();
+    }
+
+    /**
      * O objeto ausente e traduzido para {@link Optional#empty()} <b>dentro</b> da chamada, e
      * nao depois da retentativa: assim a chave que nao existe completa a chamada com sucesso
-     * e nao gasta tentativa nenhuma. Repetir tres vezes um
-     * {@code NoSuchKey} seria segurar o 410 do contrato por segundos para um desfecho que ja
-     * se sabe no primeiro erro. Qualquer outra falha continua falha, e e essa que o retry
-     * cobre (ticket 019).
+     * e nao gasta repeticao nenhuma. Repetir um {@code NoSuchKey} seria segurar o 410 do
+     * contrato por segundos para um desfecho que ja se sabe no primeiro erro. Qualquer outra
+     * falha continua falha, e e essa que o retry cobre (ticket 019).
      */
     public CompletionStage<Optional<Flow.Publisher<ByteBuffer>>> abrirSeExistir(String bucket, String chave) {
         var requisicao = GetObjectRequest.builder().bucket(bucket).key(chave).build();
@@ -77,25 +127,27 @@ public class ArquivoMinioClient {
     }
 
     /**
-     * A repeticao do ADR 0001, com os mesmos numeros que o {@code @Retry} tinha ate o
-     * ticket 061: 3 repeticoes, 2 s de espera, jitter de 10% (que e os 200 ms sobre 2 s do
-     * default do MicroProfile) e so sobre {@code Exception} — {@code Error} nao e repetido.
-     * {@code withBackOff(x, x)} e como o Mutiny escreve espera constante; backoff crescente
-     * seria outra politica, que o ADR nao pediu.
+     * A repeticao do ADR 0001: <b>3 chamadas ao recurso — a primeira mais 2 repeticoes</b>,
+     * 2 s de espera, jitter de 10% e so sobre {@code Exception} — {@code Error} nao e repetido.
+     * A aritmetica, o motivo do numero e a lista dos quatro lugares que a implementam moram no
+     * ADR 0001, na emenda do ticket 086; aqui fica so o que o codigo precisa dizer:
+     * {@code atMost(n)} do Mutiny conta as repeticoes <i>depois</i> da primeira chamada, e
+     * {@code withBackOff(x, x)} e como ele escreve espera constante — backoff crescente seria
+     * outra politica, que o ADR nao pediu.
+     *
+     * <p>A contagem e fixa e a espera e {@link #esperaEntreRepeticoes}: o numero de chamadas e a
+     * politica, e a espera e o preco dela.
      *
      * <p><b>Repeticao, e nao "tentativa".</b> No {@code CONTEXT.md} tentativa e uma <i>entrega</i>
-     * da mensagem ao worker, e o limite dela tambem e 3 — os dois numeros coincidirem torna a
-     * confusao facil. Estes 3 aqui sao repeticoes de uma chamada de I/O dentro de <b>uma</b>
-     * tentativa.
+     * da mensagem ao worker; estas aqui sao chamadas de I/O dentro de <b>uma</b> tentativa.
      *
-     * <p>O que <b>nao</b> veio junto: o {@code maxDuration} de 3 min do {@code @Retry}. Ele
-     * nunca chegou a limitar nada — 3 repeticoes de 2 s ficam duas ordens de grandeza abaixo —,
-     * e o caso que ele parecia cobrir, a chamada que nao volta, ele nao cobria: era o
-     * travamento deste ticket.
+     * <p>O que <b>nao</b> veio junto do {@code @Retry} removido no ticket 061: o
+     * {@code maxDuration} de 3 min. Ele nunca chegou a limitar nada, e o caso que parecia cobrir
+     * — a chamada que nao volta — era o travamento daquele ticket.
      */
-    private static <T> Uni<T> comRepeticao(Uni<T> chamada) {
+    private <T> Uni<T> comRepeticao(Uni<T> chamada) {
         return chamada.onFailure(Exception.class::isInstance).retry()
-                .withBackOff(ESPERA_ENTRE_REPETICOES, ESPERA_ENTRE_REPETICOES)
+                .withBackOff(esperaEntreRepeticoes, esperaEntreRepeticoes)
                 .withJitter(JITTER)
                 .atMost(MAXIMO_DE_REPETICOES);
     }

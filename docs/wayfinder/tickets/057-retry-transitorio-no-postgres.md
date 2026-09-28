@@ -54,7 +54,7 @@ Nenhuma. Pode começar imediatamente e não depende do ticket 056.
 
 **Implementado.** `VideoDataSourceAdapter` passou a executar todas as leituras, escritas,
 transições de estado e consultas da reconciliação por `PostgresRetry`. O executor usa retry
-reativo limitado a **3 retentativas**, com espera de **2 segundos**, e só repete falhas de
+reativo limitado a **3 tentativas totais**, com espera de **2 segundos**, e só repete falhas de
 conexão, timeout, lock/transação abortada ou SQLSTATE transitório (`08`, `40`, `53` e
 `57P01`). Violações permanentes, como `23505`, seguem imediatamente para o chamador.
 
@@ -66,7 +66,7 @@ condicionais continuam sendo as guardas de unicidade dos ADRs 0001/0002; as marc
 continuam sujeitas à reconciliação do ADR 0003.
 
 `PostgresRetryTest` fixa recuperação na terceira tentativa, não-repetição de erro permanente
-e esgotamento em quatro execuções totais. O teste integrado que exercita o adapter contra o
+e esgotamento em três execuções totais. O teste integrado que exercita o adapter contra o
 Postgres também ganhou a prova de que inserir o mesmo Vídeo duas vezes mantém uma única linha.
 
 Validações: o teste unitário do retry e o teste integrado do adapter contra Postgres passaram.
@@ -74,3 +74,19 @@ A suíte raiz passou com **137 testes no `videos`, 269 no `extracao` e 24 no `no
 a guarda das três cópias de `ArchitectureConstraintsTest` também passou. O `smoke.sh` e o
 ensaio de conservação não foram executados: esta mudança não altera contratos ou Compose, e
 o ensaio de carga já registra falhas preexistentes no ticket 027.
+
+## Correção (083)
+
+As oito condições acima seguem `[ ]`, e continuam assim: pela política fixada no
+[082](082-politica-de-reescrita-de-ticket-fechado.md), corpo de ticket fechado não se reescreve,
+e marcar a caixa é reescrever. A nota é o que faltava.
+
+**Este ticket nasceu fechado**, como o [071](071-agents-versionado-sem-justificativa.md): o
+arquivo foi criado em `2e723c0`, o commit que implementou o retry, já com `status: fechado` e
+`assignee` preenchido. O ciclo `aberto → reivindicado → fechado` do [`TRACKER.md`](../TRACKER.md)
+não foi percorrido, e por isso não houve momento em que as caixas seriam marcadas.
+
+Sete das oito estão narradas como atendidas na `## Resolução`. A oitava **não está**, e a própria
+resolução diz por quê: a suíte rodou da raiz, mas o `smoke.sh` e o ensaio de conservação não
+foram executados, porque a mudança não altera contrato nem Compose e o ensaio de carga já
+registrava falhas preexistentes no [027](027-melhorias-medidas.md).

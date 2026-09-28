@@ -1,4 +1,4 @@
-package br.com.fiapx.videos.framework.web;
+package br.com.fiapx.videos.framework.configuration;
 
 import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.core.interfaces.gateway.VideoGateway;
@@ -7,6 +7,7 @@ import br.com.fiapx.videos.core.interfaces.presenter.VideosPaginadosPresenter;
 import br.com.fiapx.videos.core.interfaces.sender.ExtracaoSender;
 import br.com.fiapx.videos.core.interfaces.sender.NotificacaoSender;
 import br.com.fiapx.videos.core.usecases.video.BaixarPacoteUseCase;
+import br.com.fiapx.videos.core.usecases.video.ContarVideosPresosUseCase;
 import br.com.fiapx.videos.core.usecases.video.ConsultarVideoUseCase;
 import br.com.fiapx.videos.core.usecases.video.EnviarVideoUseCase;
 import br.com.fiapx.videos.core.usecases.video.ListarVideosDoDonoUseCase;
@@ -19,11 +20,15 @@ import br.com.fiapx.videos.core.usecases.video.ReconciliarPublicacoesPendentesUs
 import br.com.fiapx.videos.interfaces.controllers.ExtracaoEventosController;
 import br.com.fiapx.videos.interfaces.controllers.ReconciliacaoController;
 import br.com.fiapx.videos.interfaces.controllers.VideosController;
+import br.com.fiapx.videos.interfaces.controllers.VideosPresosController;
 import br.com.fiapx.videos.interfaces.presenters.VideoPresenterAdapter;
 import br.com.fiapx.videos.interfaces.presenters.VideosPaginadosPresenterAdapter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.RequestScoped;
 import jakarta.enterprise.inject.Produces;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+import java.time.Duration;
 
 /**
  * O unico lugar que conhece o grafo de objetos: os use cases sao POJOs sem anotacao de CDI,
@@ -31,6 +36,23 @@ import jakarta.enterprise.inject.Produces;
  */
 @ApplicationScoped
 public class VideosConfiguration {
+
+    /**
+     * Quanto o {@code POST /videos} espera a confirmacao do {@code ExtrairVideo} depois do commit
+     * da linha (ticket 104). Passado o teto, o Video sai aceito e a varredura do ADR 0003 cobre o
+     * comando. O default vive aqui, e nao no {@code .properties}, pelo mesmo motivo das esperas
+     * de repeticao (ticket 080).
+     */
+    @ConfigProperty(name = "fiapx.mensageria.teto-do-publish-no-envio", defaultValue = "2s")
+    Duration tetoDoPublishNoEnvio;
+
+    /**
+     * Sem default no codigo, ao contrario do teto acima: o numero e derivado dos tetos do
+     * {@code extracao}, e a derivacao esta escrita ao lado dele no {@code application.properties}
+     * (ticket 106). Um default aqui seria um segundo lugar para o mesmo numero envelhecer.
+     */
+    @ConfigProperty(name = "fiapx.deteccao.limiar-de-video-preso")
+    Duration limiarDeVideoPreso;
 
     @Produces
     @ApplicationScoped
@@ -53,7 +75,8 @@ public class VideosConfiguration {
                                       VideosPaginadosPresenter videosPaginadosPresenter,
                                       PublicarExtrairVideo publicarExtrairVideo) {
         return new VideosController(
-                new EnviarVideoUseCase(arquivoGateway, videoGateway, publicarExtrairVideo, videoPresenter),
+                new EnviarVideoUseCase(arquivoGateway, videoGateway, publicarExtrairVideo, videoPresenter,
+                        tetoDoPublishNoEnvio),
                 new ListarVideosDoDonoUseCase(videoGateway, videosPaginadosPresenter),
                 new ConsultarVideoUseCase(videoGateway, videoPresenter),
                 new BaixarPacoteUseCase(videoGateway, arquivoGateway));
@@ -61,11 +84,12 @@ public class VideosConfiguration {
 
     @Produces
     ExtracaoEventosController extracaoEventosController(VideoGateway videoGateway,
+                                                        ArquivoGateway arquivoGateway,
                                                         PublicarVideoFalhou publicarVideoFalhou) {
         return new ExtracaoEventosController(
                 new ProcessarExtracaoIniciadaUseCase(videoGateway),
-                new ProcessarExtracaoConcluidaUseCase(videoGateway),
-                new ProcessarExtracaoFalhouUseCase(videoGateway, publicarVideoFalhou));
+                new ProcessarExtracaoConcluidaUseCase(videoGateway, arquivoGateway),
+                new ProcessarExtracaoFalhouUseCase(videoGateway, arquivoGateway, publicarVideoFalhou));
     }
 
     @Produces
@@ -74,6 +98,11 @@ public class VideosConfiguration {
                                                     PublicarVideoFalhou publicarVideoFalhou) {
         return new ReconciliacaoController(
                 new ReconciliarPublicacoesPendentesUseCase(videoGateway, publicarExtrairVideo, publicarVideoFalhou));
+    }
+
+    @Produces
+    VideosPresosController videosPresosController(VideoGateway videoGateway) {
+        return new VideosPresosController(new ContarVideosPresosUseCase(videoGateway, limiarDeVideoPreso));
     }
 
     /** Request-scoped: o presenter guarda o resultado de <b>uma</b> requisicao. */

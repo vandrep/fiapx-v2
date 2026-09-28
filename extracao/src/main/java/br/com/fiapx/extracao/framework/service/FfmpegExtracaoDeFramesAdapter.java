@@ -120,7 +120,7 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         double segundos;
         try {
             segundos = Double.parseDouble(duracaoBruta.stdout().trim());
-        } catch (NumberFormatException | NullPointerException erro) {
+        } catch (NumberFormatException erro) {
             throw new FalhaPermanenteDeExtracaoException(MotivoFalha.ARQUIVO_INVALIDO,
                     "ffprobe nao devolveu duracao valida: " + duracaoBruta.stdout());
         }
@@ -137,7 +137,7 @@ public class FfmpegExtracaoDeFramesAdapter implements ExtracaoDeFramesGateway {
         if (streamDeVideo.exitCode() != 0) {
             throw new FalhaPermanenteDeExtracaoException(MotivoFalha.ARQUIVO_INVALIDO, detalheDoStream);
         }
-        if (streamDeVideo.stdout() == null || streamDeVideo.stdout().isBlank()) {
+        if (streamDeVideo.stdout().isBlank()) {
             throw new FalhaPermanenteDeExtracaoException(MotivoFalha.SEM_FLUXO_DE_VIDEO, detalheDoStream);
         }
 

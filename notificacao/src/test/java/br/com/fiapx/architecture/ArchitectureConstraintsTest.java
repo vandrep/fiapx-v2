@@ -123,9 +123,8 @@ class ArchitectureConstraintsTest {
      * mao — e esbarrar aqui.
      */
     private static final Pattern TOLERANCIA_A_FALHAS_POR_INTERCEPTOR = Pattern.compile(
-            // Partido para a busca textual do ticket 064 nao encontrar o proprio guarda.
-            "(?m)^import\\s+(static\\s+)?(org\\.eclipse\\.microprofile\\.fault" + "tolerance"
-                    + "|io\\.smallrye\\.fault" + "tolerance)\\.");
+            "(?m)^import\\s+(static\\s+)?(org\\.eclipse\\.microprofile\\.faulttolerance"
+                    + "|io\\.smallrye\\.faulttolerance)\\.");
     private static final Pattern COMENTARIO_DE_BLOCO = Pattern.compile("(?s)/\\*.*?\\*/");
     private static final Pattern COMENTARIO_DE_LINHA = Pattern.compile("(?m)//.*$");
     /**
@@ -141,7 +140,7 @@ class ArchitectureConstraintsTest {
      */
     private static final String NOMES_DE_TOLERANCIA_A_FALHAS =
             "Retry|Asynchronous|AsynchronousNonBlocking|Timeout|Fallback"
-                    + "|CircuitBreaker|CircuitBreakerName|Bulkhead|ApplyGuard|ApplyFault" + "Tolerance"
+                    + "|CircuitBreaker|CircuitBreakerName|Bulkhead|ApplyGuard|ApplyFaultTolerance"
                     + "|RetryWhen|BeforeRetry|ExponentialBackoff|FibonacciBackoff|CustomBackoff"
                     + "|RateLimit|BlockingGuard|NonBlockingGuard";
     private static final Pattern TOLERANCIA_A_FALHAS_ANOTACAO = Pattern.compile(
@@ -149,13 +148,26 @@ class ArchitectureConstraintsTest {
     /**
      * A regra dos fontes nao enxerga configuracao orfa de um interceptor que ja saiu. Uma
      * chave do MicroProfile nomeia a anotacao entre barras ({@code /Retry/}); a extensao do
-     * SmallRye tambem oferece o namespace {@code quarkus.fault-tolerance}. Ambos ficam fora
-     * do application.properties pelo mesmo motivo que barra imports e anotacoes (ticket 064).
+     * SmallRye tambem oferece dois namespaces proprios, {@code quarkus.fault-tolerance} e
+     * {@code smallrye.faulttolerance}. Os tres ficam fora do application.properties pelo
+     * mesmo motivo que barra imports e anotacoes (tickets 064 e 076).
+     *
+     * <p>Limite conhecido, no mesmo espirito do que o ticket 034 registrou para
+     * publish-confirms: a regra le o {@code .properties} do proprio servico, entao a mesma
+     * chave chegando por variavel de ambiente ({@code MP_Fault_Tolerance_*},
+     * {@code SMALLRYE_FAULTTOLERANCE_*}) passa por fora. Aqui o limite pesa menos que no
+     * canal de mensageria: a extensao saiu dos tres {@code pom.xml} no ticket 061, entao a
+     * variavel nao muda nenhum comportamento sem que alguem reintroduza a dependencia
+     * primeiro — o que ja esbarraria nesta mesma classe de regras. Recusado de proposito
+     * (ticket 076): nenhum {@code docker-compose*.yml} deste repositorio declara variavel
+     * nesse formato hoje; se um passar a declarar, revisar junto do arquivo que a declara,
+     * como o 034 ja pede para o override de canal.
      */
     private static final Pattern TOLERANCIA_A_FALHAS_CONFIGURADA = Pattern.compile(
             "(?i)^((?:%[^.=:\\s]+\\.)?(?:(?:[^=:\\s]*/)?(?:"
                     + NOMES_DE_TOLERANCIA_A_FALHAS
-                    + ")/|quarkus\\.fault-tolerance(?:\\.|[=:\\s]|$)))");
+                    + ")/|quarkus\\.fault-tolerance(?:\\.|[=:\\s]|$)"
+                    + "|smallrye\\.faulttolerance(?:\\.|[=:\\s]|$)))");
     /**
      * Publicar sem publish-confirms perde mensagem em silencio: o send completa quando o byte
      * sai no socket, nao quando o broker aceita, entao uma recusa do broker vira ack do

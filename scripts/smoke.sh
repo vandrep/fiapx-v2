@@ -20,6 +20,23 @@
 # decoracao: o 10 e a UNICA coisa no repositorio que exercita a correlacao ponta a ponta —
 # nenhum @QuarkusTest publica mensagem entre servicos, e a suite roda com o SDK desligado —, e
 # o 11 e o que impede a observabilidade de virar, ela propria, uma causa de indisponibilidade.
+#
+# O passo 12 e do ticket 092 e julga o PAINEL: ele le as queries do arquivo versionado e
+# reprova a que devolver serie vazia num sistema que acabou de processar um Video. E o preco
+# que a reversao da recusa de painel curado paga ao argumento que dela sobrou de pe — um painel
+# e a parte que envelhece primeiro, e envelhecer, aqui, e mostrar "No data" e nao quebrar nada.
+# Ele tambem confere ONDE o painel mora (ticket 099): a pasta que ele divide com os alertas
+# e casada por titulo entre dois arquivos de provisionamento, e uma divergencia ali nao levanta
+# erro nenhum — o Grafana cria a segunda pasta calado. E confere QUANTOS dashboards o Grafana
+# lista (ticket 101): o repositorio agora escolhe os de fabrica, e escolha assim erra calada nos
+# dois sentidos — o morto que volta no upgrade e o novo que o override esconde.
+#
+# O passo 13 e do ticket 105 e julga a retencao do original: a regra de ciclo de vida que o seed
+# aplicou ao MinIO e a marca que o `videos` grava no desfecho, que precisam dizer o mesmo par.
+#
+# O passo 14 e do ticket 112 e faz pelos ALERTAS o que o 12 faz pelo painel: le os seletores das
+# regras em `alertas.yaml` e reprova o que nao tem serie no Prometheus. Com `noDataState: OK`, uma
+# metrica renomeada nao dispara nem avisa — a regra so fica `inactive` para sempre.
 set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -339,9 +356,477 @@ religa_observabilidade
 ok "observabilidade de volta"
 
 # ---------------------------------------------------------------------------------------
+passo "12. Nenhuma query do painel curado devolve série vazia"
+
+# O passo que impede o painel de envelhecer (ticket 092). O ADR 0004 recusou painel curado com
+# dois argumentos, e um deles continua de pe depois da reversao: um painel e a parte que
+# envelhece primeiro. Uma query que deixou de casar serie nenhuma — porque a metrica mudou de
+# nome, porque o rotulo sumiu, porque a fila foi renomeada — nao quebra nada; ela so mostra
+# "No data" sobre um sistema saudavel, que e exatamente a mentira que o ticket 091 achou nos
+# tres dashboards de fabrica. Este passo transforma esse silencio em reprovacao.
+#
+# Ele le as queries DO ARQUIVO, e nao de uma copia aqui — inclusive o `allValue` da variavel de
+# servico: duas verdades sobre a mesma pergunta e como as duas comecam a divergir. Editar o
+# painel muda o que este passo cobra, de graca.
+#
+# Desde o ticket 094 o painel voltou a ter um quantil, e a contagem de amostras nao-`NaN` aqui
+# embaixo e a guarda dele: foi ela que expos o defeito original — limites de bucket de
+# milissegundos sobre uma metrica gravada em segundos — e e ela que reprova se a expressao voltar
+# a nao desenhar nada, seja por bucket errado, seja por `rate()` numa janela sem Extracao.
+#
+# E ele roda DEPOIS do ciclo do Video, e nao antes, porque `fiapx.extracao.duracao` esta
+# legitimamente vazia ate a primeira Extracao — 88 nomes de metrica na base, zero com `durac`,
+# medido numa stack recem-subida. Um passo posto cedo demais reprovaria um sistema saudavel.
+#
+# A linha `Borda` do painel (ticket 097) e coberta por este mesmo laco, e quem a alimenta e o
+# PROPRIO smoke: o 401 do passo 3, o 409 do passo 7 e o 404 do passo 9 sao 4xx. Um painel de erro
+# com dado numa corrida VERDE nao e contradicao: 4xx e a borda recusando o que o contrato manda
+# recusar, e o RED Metrics de fabrica nao conta nenhuma delas, porque conta so `5..`. As outras
+# classes (415, 400) so aparecem depois de uma corrida do `scripts/trafego.sh`, que e quem
+# exercita o cenario `erro` inteiro.
+#
+# Nenhuma das tres series e garantida sozinha. O 097 viu a 401 faltar no fim de uma corrida, e o
+# 110 viu a 404 faltar: numa stack recem-criada, o 404 do passo 9 nao entrou no contador, que
+# nasceu com 2 depois de dois 404 manuais. Nenhum dos dois sumicos tem explicacao ainda. Por isso
+# a espera abaixo aceita QUALQUER serie 4xx, e nao uma em particular.
+#
+# E ha uma espera, porque os dois paineis da `Borda` usam `rate()`, que exige DUAS amostras na
+# janela, e o `videos` exporta metrica por OTLP a cada 60 s (default do SDK). Numa stack recem-
+# criada o smoke inteiro cabe na primeira janela de exportacao — medido no ticket 110: o script
+# terminou 5 s antes da primeira amostra HTTP do `videos` chegar ao Prometheus — e o painel 4xx
+# reprovava um sistema saudavel. Com a stack em uso ele passava, o que escondia o defeito de quem
+# roda o smoke duas vezes. Os paineis de fila e de Extracao consultam valor instantaneo e nao
+# dependem disso. O intervalo do SDK nao foi baixado para o smoke caber: isso mudaria o Compose
+# que o smoke existe para julgar.
+#
+# O painel de 5xx ao lado passa com ZERO, e nao vazio, que e exatamente o ponto dele — o
+# `or vector(0)` no numerador —, e este laco aprova o zero de proposito: ele conta amostra
+# nao-`NaN`, e nao valor diferente de zero. Um 5xx aqui, alias, seria defeito de verdade.
+# Ele PODERIA voltar vazio num caso, e a `description` dele diz qual: borda ociosa por mais de
+# 5 min zera tambem o DENOMINADOR, e razao sem denominador nao existe. Numa stack recem-criada o
+# denominador tambem saia vazio, antes da segunda exportacao (ticket 110). Nao e mais uma excecao
+# a lista abaixo porque a espera da `Borda` cobre os dois casos: o denominador nao filtra status,
+# entao inclui a propria serie 4xx que a espera exige com duas amostras.
+#
+# UM painel escapa deste passo, e escapa de proposito: o `count(...) or vector(0)` das filas sem
+# consumidor nunca volta vazio, porque sem o `or vector(0)` ele diria "No data" justamente com o
+# sistema saudavel. O que sobraria descoberto sao as duas metricas que ele usa, e as duas estao
+# cobertas cruas por outros dois paineis (`..._messages_ready` e `..._consumers`): renomeada
+# qualquer uma no upgrade do broker, quem reprova sao eles.
+
+painel="docker/observabilidade/painel-infraestrutura.json"
+[[ -f "$painel" ]] || falha "$painel não existe"
+
+# O passo 11 acabou de reiniciar o container; o Grafana leva alguns segundos ate responder.
+inicio=$SECONDS
+until curl -sf "$grafana_url/api/health" > /dev/null 2>&1; do
+    (( SECONDS - inicio > 120 )) && falha "Grafana não voltou 120s depois do religa do passo 11"
+    printf '    ... aguardando o Grafana voltar\n'
+    sleep 3
+done
+
+# A espera do paragrafo sobre `rate()`, acima. Ela olha a metrica e o rotulo CRUS que a linha
+# `Borda` usa, e nao a query do painel, e isso e uma copia deliberada: esperando a query, o teto
+# estourado nao separaria "a exportacao ainda nao chegou" de "a query quebrou", que e o que o
+# laco abaixo julga. A copia e so do seletor; renomeado no painel, esta espera reprova no teto e
+# a mensagem cita o rotulo. O teto e duas exportacoes mais margem.
+duas_amostras_4xx() {
+    curl -sf -G "$grafana_url/api/datasources/proxy/uid/prometheus/api/v1/query" \
+        --data-urlencode 'query=max(count_over_time(http_server_request_duration_seconds_count{job="fiapx-videos", http_response_status_code=~"4.."}[5m])) >= 2' \
+        | jq -e '.data.result | length > 0' > /dev/null 2>&1
+}
+inicio=$SECONDS
+until duas_amostras_4xx; do
+    (( SECONDS - inicio > 150 )) \
+        && falha "nenhuma série 4xx do fiapx-videos tem duas amostras no Prometheus 150s depois do passo 11 — a exportação OTLP do videos parou, ou a métrica ou o rótulo que a linha Borda do painel usa mudou de nome"
+    printf '    ... aguardando a segunda exportação de métrica do videos\n'
+    sleep 10
+done
+
+# O painel e a home: abrir localhost:3000 cai nele sem navegar. Sem isso ele e mais um item
+# numa lista de tres (eram quatro ate o ticket 101), e o avaliador abre o RED por engano.
+home="$(curl -sS "$grafana_url/api/dashboards/home" | jq -r '.redirectUri // empty' || true)"
+[[ "$home" == *infraestrutura* ]] \
+    || falha "a home do Grafana é '$home', e não o painel de infraestrutura"
+ok "a home do Grafana é o painel: $home"
+
+# O painel mora na MESMA pasta dos alertas (ticket 099), e o casamento e por TITULO entre
+# dois arquivos — `folder:` no `alertas.yaml` e `folder:` no `dashboards.yaml`. Renomear um sem o
+# outro nao quebra nada em voz alta: o Grafana cria uma segunda pasta em silencio, o painel volta
+# a ficar fora da pasta dos alertas e a lista de Dashboards volta a mostrar a pasta vazia que o
+# 099 consertou. Por isso os dois titulos saem dos ARQUIVOS, e nao sao fixados aqui.
+alertas="docker/observabilidade/alertas.yaml"
+provider="docker/observabilidade/dashboards.yaml"
+pasta_alertas="$(sed -n 's/^ *folder: *//p' "$alertas" | head -1 | tr -d '"')"
+pasta_painel="$(sed -n 's/^ *folder: *//p' "$provider" | head -1 | tr -d '"')"
+[[ -n "$pasta_alertas" && "$pasta_alertas" == "$pasta_painel" ]] \
+    || falha "a pasta do painel ('$pasta_painel', em $provider) não é a dos alertas ('$pasta_alertas', em $alertas)"
+
+uid_painel="$(jq -r '.uid' "$painel")"
+meta="$(curl -sS "$grafana_url/api/dashboards/uid/$uid_painel")"
+pasta_no_grafana="$(jq -r '.meta.folderTitle // empty' <<< "$meta")"
+uid_da_pasta="$(jq -r '.meta.folderUid // empty' <<< "$meta")"
+[[ "$pasta_no_grafana" == "$pasta_alertas" ]] \
+    || falha "o painel está na pasta '$pasta_no_grafana' do Grafana, e não em '$pasta_alertas'"
+
+# E a pasta e mesmo a dos alertas, e nao uma homonima: as regras provisionadas apontam para
+# o mesmo `folderUid` que o painel.
+regras_fora="$(curl -sS "$grafana_url/api/v1/provisioning/alert-rules" \
+    | jq -r --arg f "$uid_da_pasta" '[.[] | select(.folderUID != $f)] | length')"
+(( regras_fora == 0 )) \
+    || falha "$regras_fora regra(s) de alerta fora da pasta do painel ($uid_da_pasta) — há duas pastas '$pasta_alertas'"
+ok "o painel e os alertas dividem a pasta '$pasta_alertas'"
+
+# Os tres uids de datasource que o painel fixa precisam existir de verdade — se a imagem
+# renomear um deles no upgrade, todo painel que o usa vira "Datasource not found", e o erro
+# aparece na tela em vez de aqui.
+for uid in prometheus loki tempo; do
+    curl -sf "$grafana_url/api/datasources/uid/$uid" > /dev/null \
+        || falha "o painel aponta para o datasource '$uid', que não existe neste Grafana"
+done
+ok "os três datasources do painel existem: prometheus, loki, tempo"
+
+# Os dois links do topo do painel apontam para os dashboards que a IMAGEM mantem — o RED e o
+# JVM que o ticket 091 fez enxergar os tres servicos —, e o painel os identifica por `uid`
+# fixo. Esse uid e o unico lugar do repositorio onde aqueles dois dashboards sao nomeados, e
+# quem os mantem muda sozinho no upgrade da imagem. Link morto RENDERIZA COMO LINK NORMAL: e a
+# mesma mentira silenciosa que este passo existe para pegar, e vale ainda mais aqui, porque e
+# do lado de la deste link que moram o HTTP e a JVM que o painel deliberadamente nao repete.
+uids_linkados="$(jq -r '.links[]? | select(.url != null) | .url | ltrimstr("/d/")' "$painel" || true)"
+links=0
+while read -r uid_link; do
+    [[ -n "$uid_link" ]] || continue
+    links=$(( links + 1 ))
+    curl -sf "$grafana_url/api/dashboards/uid/$uid_link" > /dev/null \
+        || falha "o painel linka para o dashboard '$uid_link', que não existe nesta imagem"
+done <<< "$uids_linkados"
+(( links == 2 )) \
+    || falha "o painel deveria linkar os dois dashboards de fábrica do 091, e linka $links"
+ok "os $links links para os dashboards de fábrica resolvem"
+
+# E o Grafana nao lista NADA alem desses tres — o curado e os dois linkados (ticket 101). O
+# `grafana-dashboards.yaml` da imagem provisionava um terceiro de fabrica, o *RED Metrics (native
+# histogram)*, que respondia "No data" sobre um sistema saudavel porque consulta histograma nativo
+# contra um exportador classico; o 101 o tirou da lista, sobrescrevendo aquele arquivo por
+# `docker/observabilidade/grafana-dashboards.yaml`. Essa subtracao mente em silencio dos DOIS
+# lados, e por isso esta guarda conta em vez de procurar o que sumiu: o upgrade da imagem
+# reintroduz o dashboard morto para quem esquecer de rederivar o arquivo, e um dashboard de
+# fabrica NOVO — que o override tambem esconde — nunca apareceria na tela. Nos dois casos a demo
+# fica plausivel, e e aqui que a conta nao fecha.
+dashboards_esperados=$(( links + 1 ))
+uids_do_repositorio="$(jq -r '.uid' "$painel"; printf '%s\n' "$uids_linkados")"
+uids_no_grafana="$(curl -sS "$grafana_url/api/search?type=dash-db" | jq -r '.[].uid' || true)"
+listados="$(grep -c . <<< "$uids_no_grafana")"
+(( listados == dashboards_esperados )) \
+    || falha "o Grafana lista $listados dashboards, e não os $dashboards_esperados que este repositório provisiona"
+while read -r uid_listado; do
+    [[ -n "$uid_listado" ]] || continue
+    grep -qx "$uid_listado" <<< "$uids_do_repositorio" \
+        || falha "o Grafana lista o dashboard '$uid_listado', que não é o curado nem está linkado no topo dele"
+done <<< "$uids_no_grafana"
+ok "o Grafana lista exatamente os $dashboards_esperados dashboards do repositório, sem o RED native"
+
+# As variaveis do painel nao chegam ate aqui resolvidas — resolve-las e o trabalho do browser.
+# `$servico` vira o `allValue` LIDO DO ARQUIVO, e `$idVideo` vira o Video que CONCLUIU: e o
+# unico que tem span do ffmpeg, que e o que o segundo spanset da busca exige. Variavel nova no
+# painel sem tratamento aqui nao passa em silencio — a guarda logo abaixo reprova.
+servico_all="$(jq -r '.templating.list[] | select(.name == "servico") | .allValue' "$painel" || true)"
+[[ -n "$servico_all" && "$servico_all" != null ]] \
+    || falha "a variável 'servico' do painel não tem allValue; o passo não sabe resolvê-la"
+# O valor entra como REPLACEMENT de `sed`, entao `/`, `&` e `\` mudariam o comando em vez de
+# entrar nele — e a query corrompida seria julgada como se fosse a do painel. Reprovar aqui e
+# dizer o que houve custa uma linha; descobrir depois custa um passo que mente.
+[[ "$servico_all" != *[/\&\\]* ]] \
+    || falha "o allValue de 'servico' tem caractere que este passo não sabe substituir: $servico_all"
+
+# `\b` depois do nome: sem ele, uma variavel futura chamada `$servicos` seria comida pela
+# substituicao de `$servico` e sobraria um `s` solto no meio da query — que a guarda de `$`
+# remanescente, logo abaixo, NAO pegaria, porque o cifrao ja teria sumido.
+# O idVideo vem por argumento, com o Video que concluiu como default, porque o passo julga o
+# painel de trace em DOIS estados (ticket 100) e um segundo resolvedor nao saberia de `$servico`:
+# um target de trace que a usasse reprovaria por "variavel que este passo nao sabe resolver".
+resolve_variaveis() {
+    local id_video="${1-$id}"
+    sed -e "s/\\\$servico\\b/$servico_all/g" -e "s/\\\$idVideo\\b/$id_video/g"
+}
+
+# Uma forma so de perguntar ao Tempo, usada pelo laco das queries e pela passagem do idVideo
+# vazio. Devolve a resposta CRUA, e nao a contagem, porque a passagem do idVideo vazio faz tres
+# perguntas sobre a mesma busca — quantos, em que ordem e de quem sao os spans.
+busca_no_tempo() {
+    curl -sS -G "$grafana_url/api/datasources/proxy/uid/tempo/api/search" \
+        --data-urlencode "q=$1" \
+        --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
+        --data-urlencode "limit=20"
+}
+
+agora=$(date +%s)
+desde=$(( agora - 3600 ))
+consultadas=0
+
+# `.panels[].targets[]` e nao uma travessia recursiva: o painel e plano de proposito, sem row
+# colapsavel. Uma travessia recursiva ESCONDERIA o dia em que alguem aninhar um painel — e a
+# forma plana, sozinha, o PULARIA em silencio, que e o mesmo defeito com outra roupa. Dai a
+# guarda abaixo: aninhou, reprova, e quem reprovar decide se ensina o laco ou desaninha.
+#
+# `join` num separador de unidade, e nao `@tsv`: o `@tsv` do jq escapa a contrabarra, e a
+# expressao da DLQ tem uma (`queue=~".+\\.dlq"`) — com ela dobrada, a query nao casa fila
+# nenhuma, e o passo reprovaria um painel correto.
+# Row colapsavel guarda os paineis filhos em `.panels[].panels`, fora do alcance do laco.
+aninhados="$(jq '[.panels[] | select(.panels != null)] | length' "$painel" || true)"
+[[ "$aninhados" == 0 ]] \
+    || falha "$painel tem painel aninhado dentro de row; o passo 12 só enxerga o primeiro nível"
+
+consultas="$(jq -r '.panels[] | .title as $t | .targets[]
+    | [$t, .refId, .datasource.uid, (.expr // .query)] | join("\u001f")' "$painel" || true)"
+[[ -n "$consultas" ]] || falha "nenhuma query lida de $painel"
+
+while IFS=$'\037' read -r titulo refid uid consulta; do
+    consulta="$(resolve_variaveis <<< "$consulta")"
+    consultadas=$(( consultadas + 1 ))
+
+    # Variavel do Grafana que ninguem resolveu chegaria ao datasource como literal e casaria
+    # zero — o passo reprovaria o painel por um defeito DELE PROPRIO. Melhor dizer qual e.
+    [[ "$consulta" != *'$'* ]] \
+        || falha "painel '$titulo' ($refid) usa variável que este passo não sabe resolver: $consulta"
+
+    case "$uid" in
+        prometheus)
+            # `query_range`, e nao `query` instantanea: e assim que o painel consulta, e uma
+            # janela cobre o instante da Extracao mesmo que ela tenha sido ha mais de 5 min.
+            # Conta AMOSTRA nao-NaN, e nao serie: uma serie so de NaN volta como resultado
+            # nao-vazio, e foi assim que a primeira versao deste passo aprovou um quantil que
+            # nao desenhava nada.
+            amostras="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/prometheus/api/v1/query_range" \
+                --data-urlencode "query=$consulta" \
+                --data-urlencode "start=$desde" --data-urlencode "end=$agora" \
+                --data-urlencode "step=15" \
+                | jq '[.data.result[]?.values[]? | select(.[1] != "NaN")] | length' || true)"
+            ;;
+        loki)
+            amostras="$(curl -sS -G "$grafana_url/api/datasources/proxy/uid/loki/loki/api/v1/query_range" \
+                --data-urlencode "query=$consulta" \
+                --data-urlencode "start=${desde}000000000" --data-urlencode "end=${agora}000000000" \
+                --data-urlencode "limit=5" \
+                | jq '[.data.result[]?.values[]?] | length' || true)"
+            ;;
+        tempo)
+            # Conta TRACE, e nao span: e a linha que a tabela do painel desenha.
+            amostras="$(busca_no_tempo "$consulta" | jq '[.traces[]?] | length' || true)"
+            ;;
+        *)
+            falha "painel '$titulo' usa datasource desconhecido '$uid'"
+            ;;
+    esac
+
+    # Nao-numerico e datasource fora do ar ou resposta que o jq nao entendeu, e o `-gt` de um
+    # nao-numero derrubaria o script sem dizer por que. As duas saidas sao reprovacao, e sao
+    # defeitos diferentes.
+    [[ "$amostras" =~ ^[0-9]+$ ]] \
+        || falha "painel '$titulo' ($refid): o datasource '$uid' não respondeu um número consultável"
+    (( amostras > 0 )) \
+        || falha "painel '$titulo' ($refid) não devolveu nada num sistema que acabou de processar um Vídeo: $consulta"
+    printf '    %6s amostras  %s\n' "$amostras" "$titulo [$refid]"
+done <<< "$consultas"
+
+ok "$consultadas queries do painel, todas com série"
+
+# O painel de trace tem DOIS estados, e o laco acima so exercita um: o textbox `idVideo`
+# preenchido, porque o passo resolve a variavel para o Video que acabou de CONCLUIR. O outro
+# estado e o que a demo ABRE — textbox vazio —, e ate o ticket 100 ele devolvia tabela vazia:
+# `= ""` nao casa span nenhum. Agora a query e regex (`=~ ".*$idVideo.*"`), o vazio vira `.*.*`
+# e a tabela lista as travessias recentes. Isso mente em silencio de dois jeitos — voltando a
+# igualdade, ou perdendo a ancora, que e o que separa travessia de GET de acompanhamento —, e
+# nos dois a tela fica plausivel. Dai o segundo par de olhos aqui, com a variavel VAZIA.
+travessias=0
+while IFS=$'\037' read -r titulo refid uid consulta; do
+    [[ "$uid" == tempo ]] || continue
+    consulta="$(resolve_variaveis "" <<< "$consulta")"
+    [[ "$consulta" != *'$'* ]] \
+        || falha "painel '$titulo' ($refid) usa variável que este passo não sabe resolver: $consulta"
+    travessias=$(( travessias + 1 ))
+    busca="$(busca_no_tempo "$consulta")"
+
+    achadas="$(jq '[.traces[]?] | length' <<< "$busca" || true)"
+    [[ "$achadas" =~ ^[0-9]+$ ]] \
+        || falha "painel '$titulo' ($refid): o Tempo não respondeu um número consultável com o idVideo vazio"
+    (( achadas > 0 )) \
+        || falha "painel '$titulo' ($refid) não lista travessia nenhuma com o idVideo VAZIO, que é o estado que a demo abre: $consulta"
+
+    # "A mais nova primeiro" e o que o painel PROMETE no `description`, e nada no JSON a impoe:
+    # a tabela desenha na ordem do quadro, que e a ordem que o Tempo devolveu. Ou seja, a
+    # promessa vale por comportamento de outro processo — exatamente o tipo de coisa que este
+    # passo existe para nao deixar no boca a boca.
+    fora_de_ordem="$(jq '[.traces[].startTimeUnixNano | tonumber] as $t
+        | [range(1; ($t | length)) | select($t[.] > $t[. - 1])] | length' <<< "$busca" || true)"
+    [[ "$fora_de_ordem" == 0 ]] \
+        || falha "painel '$titulo' ($refid): o Tempo devolveu $fora_de_ordem trace(s) fora da ordem decrescente, e o painel promete a mais nova primeiro"
+
+    # A ancora `resource.service.name = "fiapx-extracao"` some sem deixar a tela vazia: sem ela
+    # a busca casa MAIS traces (medido no ticket 100: 19 contra 8, e 11 deles sem span do
+    # extracao), e a contagem acima ficaria verde mostrando GET de acompanhamento no lugar das
+    # travessias. Quem separa os dois e a origem dos spans de cada trace, nao o numero deles.
+    sem_extracao="$(jq '[.traces[] | select((.serviceStats | has("fiapx-extracao")) | not)] | length' <<< "$busca" || true)"
+    [[ "$sem_extracao" == 0 ]] \
+        || falha "painel '$titulo' ($refid): $sem_extracao de $achadas traces não têm span do fiapx-extracao — a âncora da busca se perdeu, e a tabela lista consulta em vez de travessia"
+
+    printf '    %6s traces   %s [%s] com o idVideo vazio, em ordem e todos com span do extracao\n' "$achadas" "$titulo" "$refid"
+done <<< "$consultas"
+(( travessias > 0 )) || falha "nenhuma query de trace lida de $painel; o estado de idVideo vazio ficou sem guarda"
+ok "a tabela de trace lista as travessias recentes sem o idVideo preenchido"
+
+# ---------------------------------------------------------------------------------------
+passo "13. O original só expira depois do desfecho"
+
+# Ticket 105, ADR 0005. A regra de ciclo de vida conta dias, e o MinIO nao tem como adiantar o
+# relogio: um prazo que venca dentro desta execucao nao existe. O que se julga e a regra que o
+# seed aplicou e a marca que ela le. O que esta sob guarda e a costura entre os dois lados, que
+# nada no build amarra: a tag vem da regra, e nao de um literal aqui, e so passa se o `videos`
+# gravou exatamente ela nos originais dos dois terminais deste smoke.
+mc_local() {
+    docker compose run --rm --no-deps -T --entrypoint /bin/sh minio-seed -c \
+        "mc alias set local http://minio:9000 \"\$MINIO_ROOT_USER\" \"\$MINIO_ROOT_PASSWORD\" >/dev/null && $1" \
+        2> "$trabalho/mc.log"
+}
+
+regra_videos="$(mc_local 'mc ilm export local/videos')" \
+    || { cat "$trabalho/mc.log" >&2; falha "nao consegui ler a regra de ciclo de vida do bucket videos"; }
+# Uma regra so, e com filtro: qualquer regra sem filtro ao lado dela expiraria o original de um
+# Video preso, que e o defeito do ticket. Por isso a contagem, e nao "existe uma com tag".
+jq -e '.Rules | length == 1 and .[0].Status == "Enabled" and .[0].Expiration.Days == 7
+        and (.[0].Filter.Tag.Key | type) == "string"' <<< "$regra_videos" > /dev/null \
+    || falha "bucket videos deveria ter uma regra so, filtrada por tag, de 7 dias; tem: $regra_videos"
+tag_chave="$(jq -r '.Rules[0].Filter.Tag.Key' <<< "$regra_videos")"
+tag_valor="$(jq -r '.Rules[0].Filter.Tag.Value' <<< "$regra_videos")"
+ok "bucket videos: expira em 7 dias só o que tem $tag_chave=$tag_valor; original sem a marca nunca expira"
+
+regra_pacotes="$(mc_local 'mc ilm export local/pacotes')" \
+    || { cat "$trabalho/mc.log" >&2; falha "nao consegui ler a regra de ciclo de vida do bucket pacotes"; }
+jq -e '.Rules | length == 1 and .[0].Status == "Enabled" and .[0].Expiration.Days == 7
+        and (.[0].Filter.Tag == null)' <<< "$regra_pacotes" > /dev/null \
+    || falha "bucket pacotes deveria ter uma regra so, sem filtro, de 7 dias; tem: $regra_pacotes"
+ok "bucket pacotes: expira em 7 dias, sem filtro (inalterado)"
+
+for par in "CONCLUIDO:$id" "FALHOU:$id_falha"; do
+    estado_alvo="${par%%:*}"; id_alvo="${par#*:}"
+    chave="$(docker compose exec -T postgres psql -U fiapx -d fiapx_videos -tAc \
+        "select chave_video from video where id = '$id_alvo'")"
+    [[ -n "$chave" ]] || falha "nao achei a chave do original do Video $id_alvo no Postgres"
+    marcas="$(mc_local "mc tag list --json local/videos/$chave")" \
+        || { cat "$trabalho/mc.log" >&2; falha "nao consegui ler as tags de videos/$chave"; }
+    [[ "$(jq -r --arg k "$tag_chave" '.tagset[$k] // empty' <<< "$marcas")" == "$tag_valor" ]] \
+        || falha "original do Video $estado_alvo ($chave) sem a marca $tag_chave=$tag_valor; tem: $marcas"
+    ok "original do Video $estado_alvo marcado: $chave"
+done
+
+# ---------------------------------------------------------------------------------------
+passo "14. Toda série que os alertas leem existe"
+
+# Ticket 112. As cinco regras de `alertas.yaml` declaram `noDataState: OK`, e e isso que as faz
+# calar num sistema saudavel. O preco e o mesmo do painel no passo 12, com um agravante: metrica
+# renomeada deixa a expressao vazia, e a regra fica `inactive` para sempre, sem erro e sem "No
+# data" na tela. As series do plugin do broker mudam de nome no upgrade da imagem, e a do
+# `videos` muda no codigo.
+#
+# O passo julga EXISTENCIA do seletor, e nao o valor da expressao: aqui as cinco devolvem vazio de
+# proposito. E julga o seletor INTEIRO, nome e rotulos, porque o rotulo tambem cala a regra — uma
+# fila renomeada, ou um `estado` que deixou de se chamar como no glossario. E assim que as duas
+# series de `fiapx_videos_presos` ficam cobertas sem lista aqui: cada uma aparece num seletor do
+# arquivo.
+#
+# Os seletores saem do ARQUIVO, e quem os tira da expressao e o parser do proprio Prometheus
+# (`/api/v1/parse_query`), e nao uma regex daqui: PromQL tem funcao, agregacao, `on ()` e string
+# com chave, e uma regex que confundisse um deles com metrica reprovaria regra correta — ou
+# pularia a metrica que devia julgar.
+#
+# Ha espera, com teto, pelo mesmo motivo do passo 12: `fiapx_videos_presos` vem por OTLP a cada
+# 60 s, e so depois da primeira contagem. Numa stack de pe o laco passa na primeira volta; o teto
+# e o custo de um defeito de verdade, que so reprova depois dele.
+
+prometheus_api="$grafana_url/api/datasources/proxy/uid/prometheus/api/v1"
+
+# `uid<US>titulo<US>expr`, uma linha por query. A regra e identificada pelo `uid`, que o Grafana
+# exige unico, e nao pelo titulo: o `title:` zera a cada `uid:`, entao regra sem titulo aparece
+# sem titulo, em vez de herdar o da regra de cima. O `expr:` e sempre de uma linha e entre aspas
+# simples neste arquivo; outra forma reprova abaixo em vez de ser lida pela metade.
+queries_dos_alertas="$(awk '
+    /^ *- uid:/ { sub(/^ *- uid: */, ""); uid = $0; titulo = "" }
+    /^ *title:/ { sub(/^ *title: */, ""); titulo = $0 }
+    /^ *expr:/  { sub(/^ *expr: */, ""); print uid "\037" titulo "\037" $0 }
+' "$alertas")"
+[[ -n "$queries_dos_alertas" ]] || falha "nenhuma expr lida de $alertas"
+
+# Regra sem query lida e regra sem guarda, e a contagem e o que impede o awk de pula-la calado.
+regras_no_arquivo="$(grep -c '^ *- uid:' "$alertas" || true)"
+regras_lidas="$(cut -d $'\037' -f1 <<< "$queries_dos_alertas" | sort -u | grep -c . || true)"
+(( regras_lidas == regras_no_arquivo )) \
+    || falha "$alertas tem $regras_no_arquivo regras, e o passo leu expr de $regras_lidas"
+
+# `titulo<US>seletor`, um por linha. O seletor e remontado dos matchers da arvore, e o valor sai
+# por `tojson`, que escapa como a string do PromQL.
+seletores=""
+while IFS=$'\037' read -r uid titulo expr; do
+    titulo="${titulo:-$uid}"
+    [[ "$expr" == \'*\' ]] \
+        || falha "regra '$titulo': expr fora de aspas simples, que este passo não sabe ler: $expr"
+    expr="${expr:1:${#expr}-2}"
+    expr="${expr//\'\'/\'}"
+
+    arvore="$(curl -sS -G "$prometheus_api/parse_query" --data-urlencode "query=$expr" || true)"
+    status="$(jq -r '.status // empty' <<< "$arvore" 2>/dev/null || true)"
+    [[ -n "$status" ]] \
+        || falha "regra '$titulo': o Prometheus não respondeu ao parse_query em $prometheus_api"
+    [[ "$status" == success ]] \
+        || falha "regra '$titulo': o Prometheus não entendeu a expr ($(jq -r '.error' <<< "$arvore")): $expr"
+
+    da_regra="$(jq -r --arg t "$titulo" '[.. | objects | select(.type == "vectorSelector")
+        | ([.matchers[] | select(.name != "__name__" or .type != "=")
+            | "\(.name)\(.type)\(.value | tojson)"] | join(",")) as $rotulos
+        | if $rotulos == "" then .name else "\(.name){\($rotulos)}" end]
+        | unique[] | [$t, .] | join("\u001f")' <<< "$arvore")"
+    [[ -n "$da_regra" ]] \
+        || falha "regra '$titulo' não lê série nenhuma; o passo não tem o que julgar: $expr"
+    seletores+="$da_regra"$'\n'
+done <<< "$queries_dos_alertas"
+
+# Consulta instantanea, com o lookback de 5 min do Prometheus: e a mesma janela em que a regra
+# enxerga a serie quando o Grafana a avalia. Resposta nao-numerica e o Prometheus fora do ar, e
+# nao serie ausente — como no passo 12, as duas saidas reprovam, e sao defeitos diferentes.
+sem_serie() {
+    local titulo seletor series
+    while IFS=$'\037' read -r titulo seletor; do
+        [[ -n "$seletor" ]] || continue
+        series="$(curl -sS -G "$prometheus_api/query" --data-urlencode "query=count($seletor)" \
+            | jq '.data.result | length' 2>/dev/null || true)"
+        [[ "$series" =~ ^[0-9]+$ ]] \
+            || falha "regra '$titulo': o Prometheus não respondeu um número consultável para $seletor"
+        (( series > 0 )) || printf '%s\037%s\n' "$titulo" "$seletor"
+    done <<< "$seletores"
+}
+
+inicio=$SECONDS
+while :; do
+    faltando="$(sem_serie)" || exit 1
+    [[ -z "$faltando" ]] && break
+    if (( SECONDS - inicio > 90 )); then
+        while IFS=$'\037' read -r titulo seletor; do
+            echo "    ${vermelho}sem série${normal}  $seletor  (regra '$titulo')" >&2
+        done <<< "$faltando"
+        falha "regra de alerta lendo série que não existe no Prometheus 90s depois — a métrica ou o rótulo mudou de nome, e com noDataState: OK a regra ficaria inactive para sempre; corrija $alertas ou quem emite a série"
+    fi
+    printf '    ... aguardando %s seletor(es) sem série\n' "$(grep -c . <<< "$faltando")"
+    sleep 10
+done
+
+while IFS=$'\037' read -r titulo seletor; do
+    [[ -n "$seletor" ]] && printf '    %-75s %s\n' "$seletor" "$titulo"
+done <<< "$seletores"
+ok "$(grep -c . <<< "$seletores") seletores das $regras_no_arquivo regras de alerta, todos com série"
+
+# ---------------------------------------------------------------------------------------
 echo
 echo "${negrito}${verde}Smoke completo.${normal} Video concluido: $id | Video falho: $id_falha"
 echo "    Swagger UI:  $videos_url/q/swagger-ui"
 echo "    MailHog:     $mailhog_url"
-echo "    Grafana:     $grafana_url"
+echo "    Grafana:     $grafana_url  (o painel de infraestrutura e a home)"
 $derruba || echo "    A stack continua de pe. Para encerrar: docker compose down"

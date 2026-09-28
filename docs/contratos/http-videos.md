@@ -90,6 +90,29 @@ em `RECEBIDO`.
 comunicar é que o trabalho **não terminou** — e `202` admite explicitamente um `Location`
 como monitor de status. A escolha é reversível e não custa nada mudar.
 
+### O que o `202` promete
+
+**O `202` é o aceite, e o aceite é o commit da linha** (ticket 104). Quando ele sai, o arquivo
+está no MinIO e o Vídeo está no Postgres em `RECEBIDO`: o sistema assumiu o Vídeo e deve a ele
+um desfecho, `CONCLUIDO` ou `FALHOU`, observável pelo `Location`. Reenviar o mesmo arquivo cria
+**outro** Vídeo.
+
+O `202` **não** promete que o comando de Extração já chegou ao broker. O `videos` tenta
+publicar antes de responder, mas espera no máximo **2 s**
+(`fiapx.mensageria.teto-do-publish-no-envio`). Se o broker recusar ou não confirmar nesse
+prazo, o `POST` responde `202` do mesmo jeito e a
+[reconciliação do ADR 0003](../adr/0003-reconciliacao-por-varredura.md) publica o comando
+depois. Um publish que chega a ser confirmado depois do teto também conta: a marca é gravada
+e a varredura não o repete. Para o cliente, a diferença é só o tempo em `RECEBIDO`.
+
+Qualquer falha **antes** do commit continua sem `202`, e o Vídeo não existe. Se a falha é do
+armazenamento, a primeira escrita, sai `503` com `Retry-After` (ticket 108): nada foi gravado, e
+tentar de novo é seguro. Se é do `INSERT`, sai o `500` de "Erro interno", porque ali a falha pode
+ser ambígua.
+
+Somado ao teto, o `202` pode demorar até ~6 s no pior caso previsto: os 4 s de repetição do
+MinIO do [ADR 0001](../adr/0001-politica-de-falhas.md) mais os 2 s do publish.
+
 ### Rejeições na borda
 
 Este contrato fixa **quais rejeições existem e qual a forma delas**; os *valores* foram
@@ -100,6 +123,7 @@ fixados pelo ticket 011 e estão na tabela.
 | campo `arquivo` ausente ou vazio | `400` | — |
 | content-type ou extensão fora da lista | `415` | extensões `mp4`, `avi`, `mov`, `mkv`, `webm`; content-type `video/*` |
 | corpo acima do teto | `413` | `quarkus.http.limits.max-body-size=200M` |
+| réplica sem capacidade para o envio | `503` | teto de envios simultâneos e espaço livre do volume de uploads (ticket 108) |
 
 A validação da borda é **declarativa, não probatória**: ela pergunta "você quis mesmo mandar
 isso?". A prova de que o arquivo é um vídeo decodificável mora no `extracao`, porque medir
@@ -195,6 +219,8 @@ casos, que é exatamente o ponto.
 | Content-type ou extensão recusada | `415` | `Formato nao suportado` |
 | Campo `arquivo` ausente ou vazio | `400` | `Requisicao invalida` |
 | Corpo acima do teto | `413` | — gerado pelo Vert.x |
+| Réplica sem capacidade para o envio | `503` | `Capacidade esgotada` |
+| Armazenamento recusou a gravação do envio | `503` | `Armazenamento indisponivel` |
 | Qualquer outra | `500` | `Erro interno` |
 
 - `type` fixo em `about:blank`. O padrão permite, e inventar uma URI de tipo que não
@@ -208,6 +234,46 @@ português. A incoerência de língua fica confinada ao envelope de erro.
 **O `413` é a exceção que confirma a regra**: o Vert.x corta o corpo antes do JAX-RS, então
 ele não passa por `ExceptionMapper` e **não sai como problem+json**. Isso é uma
 inconsistência assumida, não um bug a caçar.
+
+### Recusa por capacidade
+
+O `POST /videos` pode sair `503` **antes de o corpo ser lido** (ticket 108). O corpo de até
+200 MB é gravado no volume de uploads antes de o `Resource` rodar, então decidir nele seria
+decidir com o disco já ocupado. A decisão usa só os cabeçalhos:
+
+- a réplica já tem o teto de envios em andamento. Sem configuração, o teto é o tamanho do
+  volume de uploads dividido pelos 200 MB. Envio sem `Content-Length` é contido por ele;
+- o `Content-Length` não cabe no espaço livre do volume, descontado o que os envios em andamento
+  ainda vão gravar.
+
+`Content-Length` acima de 200 MB não passa por essa conta, e continua `413`.
+
+A recusa sai com `Retry-After` e em problem+json. Ao contrário do `413`, esse ponto permite: quem
+responde é uma rota Vert.x do próprio `videos`, que escreve o corpo. Vale o mesmo para o `503` de
+armazenamento, que passa pelo `ExceptionMapper`. O `Retry-After` dos dois é **5 s**. É sugestão,
+não medida: a ordem de grandeza de um envio terminar, ou das repetições do MinIO do
+[ADR 0001](../adr/0001-politica-de-falhas.md) se esgotarem.
+
+Estas duas primeiras consequências foram mantidas deliberadamente pelo [ticket
+116](../wayfinder/tickets/116-decisoes-deixadas-pela-recusa-por-capacidade.md):
+
+- **A recusa vem antes da autenticação.** Um envio sem token, numa réplica sem vaga, recebe
+  `503`, e não `401`. O que se protege é o volume, e a vaga é decidida antes de qualquer leitura
+  do corpo, inclusive a de quem autentica. Mover a autenticação para antes da decisão poderia
+  deixar o corpo de um envio não autenticado ocupar o volume antes de a proteção agir; esse
+  preço foi recusado.
+- **O teto derivado continua sendo o default, sem orçamento fixo para o volume.** No Compose o
+  volume nomeado não tem cota própria, então o teto segue sendo o tamanho do volume dividido por
+  200 MB. O valor **2354**, observado num host de 460 GB durante a calibração, é um número daquela
+  máquina, não um limite do contrato. Quem protege o disco na prática é a conta do espaço livre,
+  descontadas as reservas dos envios em andamento. Implantações que precisarem de um teto
+  previsível podem usar `fiapx.borda.teto-de-envios-simultaneos`.
+- **A conta é por réplica.** Réplicas sobre o mesmo volume, como no overlay de carga, não
+  enxergam a reserva umas das outras, e cada uma deriva o teto do volume inteiro. No Compose o
+  volume nomeado não tem tamanho próprio: é o disco do host, e o teto derivado depende da máquina.
+- **Recusa não é Vídeo perdido.** Nada foi gravado e o sistema não assumiu o Vídeo. Cabe ao
+  cliente reenviar. A recusa é pelo recurso local da borda, e não pelo backlog da fila: a fila é o
+  amortecedor de pico, e recusar por ela trocaria "não perder" por "não aceitar" no pico.
 
 ## OpenAPI e Swagger UI
 

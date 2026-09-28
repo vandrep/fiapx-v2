@@ -183,7 +183,7 @@ class ReconciliarPublicacoesPendentesUseCaseTest {
         var id = UUID.randomUUID();
         return Video.reconstituir(
                 id, "ferias.mp4", 1_024L, DONO, id + "/original.mp4", EstadoVideo.RECEBIDO,
-                Instant.now().minus(quantidade, unidade), null, null, null, null, null);
+                Instant.now().minus(quantidade, unidade), null, null, null, null, null, null);
     }
 
     /**
@@ -195,7 +195,7 @@ class ReconciliarPublicacoesPendentesUseCaseTest {
         var falhouEm = Instant.now().minus(quantidade, unidade);
         return Video.reconstituir(
                 id, "ferias.mp4", 1_024L, DONO, id + "/original.mp4", EstadoVideo.FALHOU,
-                falhouEm.minus(1, ChronoUnit.HOURS), falhouEm, null, null, null,
+                falhouEm.minus(1, ChronoUnit.HOURS), null, falhouEm, null, null, null,
                 MotivoFalha.ARQUIVO_INVALIDO);
     }
 }

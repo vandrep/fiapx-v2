@@ -258,6 +258,105 @@ remove o bean `Meter` e derruba o build do `extracao`, pela mesma
   próprio consumidor. Está fechado, e o rótulo "com o SDK desligado" no título daquele ticket
   é o nome de uma correlação que a medição desfez.
 
+## Os três dashboards de fábrica, e o que cada um responde
+
+A imagem `grafana/otel-lgtm` **traz três dashboards sozinha** — dois deles provisionados desde o
+[ticket 101](../wayfinder/tickets/101-mediana-no-quantil-da-extracao-e-o-red-native-que-ninguem-le.md),
+que tirou o terceiro da lista; o parágrafo depois da tabela diz como. Este documento os ignorou
+até o [ticket 091](../wayfinder/tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md)
+— a camada foi registrada como se a exploração ad-hoc no *Explore* fosse a única superfície de
+leitura. Não era: havia três telas na home do Grafana, e as três respondiam *"No data"* sobre um
+sistema saudável.
+
+| Dashboard da imagem | Serve? | Por quê |
+|---|---|---|
+| *RED Metrics (classic histogram)* | **sim** | taxa e duração do HTTP dos três serviços |
+| *JVM Overview (OpenTelemetry)* | **sim** | heap, threads, classes e GC, uma série por container; o `Error %` dele é HTTP, e vazio em ciclo saudável |
+| *RED Metrics (native histogram)* | **não** | consulta histograma nativo; o Quarkus exporta clássico — e **desde o [ticket 101](../wayfinder/tickets/101-mediana-no-quantil-da-extracao-e-o-red-native-que-ninguem-le.md) ele não é mais provisionado** |
+
+O 091 deixou o terceiro de pé como fato conhecido, e o 101 o tirou da lista: um dashboard que
+responde *"No data"* inteiro sobre um sistema saudável é a mesma mentira silenciosa que aquele
+ticket perseguiu, e numa demo de dez minutos ninguém sabe qual das três telas é a morta. O que
+mudou foi a **lista**, não o JSON: `docker/observabilidade/grafana-dashboards.yaml` é derivado do
+homônimo da imagem menos um provider, e sobrescrevê-lo custa 500 bytes de YAML a rederivar no
+upgrade — duas ordens de grandeza abaixo dos 15,9 kB de JSON que este documento recusou
+sobrescrever quatro vezes, e o mesmo preço que o `otelcol-config.yaml` já paga. O motivo
+estrutural não mudou e não foi consertado: histograma nativo contra exportador clássico.
+Escolher a lista à mão erra calado nos dois sentidos — o dashboard morto voltando num upgrade sem
+rederivação, e um dashboard de fábrica novo que o override esconderia —, e quem conta é o passo 12
+do `scripts/smoke.sh`: o Grafana lista exatamente o painel curado e os dois linkados no topo dele.
+
+Os painéis de **erro** dos dois que servem — o `Error Rate` do *RED classic* e o `Error %` do
+*JVM Overview* — são os únicos que continuam podendo aparecer vazios, e isso não é defeito: os
+dois contam erro de servidor no status da resposta — `5..` no primeiro e `5.*` no segundo, a
+mesma pergunta em duas grafias, que é como cada JSON a escreve —, e num ciclo saudável não há
+nenhum. A ressalva era
+escrita só sobre o primeiro até o
+[ticket 098](../wayfinder/tickets/098-o-error-pct-do-jvm-overview-e-a-armadilha-do-or-vector-zero.md)
+medir o segundo: denominador com as quatro séries por `instance`, numerador `5..` vazio, razão
+vazia, e nenhum `5..` na retenção. Que os dois workers apareçam no denominador do `Error %` sem
+ter borda HTTP também não é defeito — é o health check em `:8080`. As demais séries dos dois
+dashboards **que servem** foram conferidas com as variáveis em "All" — GC inclusive, que tem
+`jvm_gc_duration_seconds_sum` por container.
+
+O que aquele "No data" **não** diz, e o
+[ticket 097](../wayfinder/tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md)
+mediu, é que a borda recusa bastante: 52 recusas `4..` numa corrida do `trafego.sh` — 415, 400,
+404 e 409, 13 de cada —, e nenhuma delas aparecia em painel algum. RED define erro como erro de
+servidor, então o dashboard de fábrica está certo em não contá-las; o vão é que ninguém mais as
+contava. **A leitura de recusa 4xx da borda mora no painel curado**, na linha *Borda* de
+`painel-infraestrutura.json`, junto com a taxa de 5xx — ver § *Um painel*, no fim deste
+documento. O título `Error Rate` do dashboard de fábrica continua sem qualificação e continua
+vazio em ciclo saudável: qualificá-lo exigiria sobrescrever 15,9 kB de JSON derivado da imagem,
+e quem desambigua é este parágrafo, não a tela. O mesmo vale para o `Error %` do *JVM Overview*,
+e o 098 recusou sobrescrever aquele JSON pela quarta vez: **a leitura de erro de servidor que
+mostra `0%` mora no painel curado**, na mesma linha *Borda*, e é ela que se abre numa demo.
+
+Os dois que servem passaram a servir porque as séries ganharam `instance`. O mecanismo é o
+oposto do intuitivo: quem traduz OTLP→Prometheus **não é o coletor, é o próprio Prometheus**, no
+`/api/v1/otlp`, e ele mapeia `service.name` → `job` e `service.instance.id` → `instance`. O
+primeiro chega; o segundo não era emitido por ninguém, e as três telas filtram toda query por
+`instance=~"$instance"` com `allValue: ".+"` — um matcher que **exige a etiqueta existir**. As
+únicas séries que a tinham eram as de *scrape* (`rabbitmq` e `otelcol-contrib`), que a setam
+nativamente. O conserto é um processador `transform` na pipeline de métrica do
+`docker/observabilidade/otelcol-config.yaml`, que monta `service.instance.id` como
+`<service.name>-<réplica>` — `fiapx-extracao-2` —, com uma guarda `== nil` que preserva quem já
+traz a sua. O valor precisa ser único por réplica, porque o `extracao` sobe com duas, e legível,
+porque as legendas do *JVM Overview* só mostram a `instance`: seis das oito queries agregam
+`by (instance)` e descartam o `job`. Consertar no valor da etiqueta, e não no JSON do dashboard,
+mantém o dashboard da imagem intocado — que é o que o deixa a custo zero de manutenção.
+
+O número da réplica não existe dentro do JVM: é o sufixo do nome que o Compose dá ao container
+(`fiapx-v2-extracao-2`), e de dentro do container a única porta para ele é a DNS do Docker, que
+responde o PTR do próprio IP. Por isso cada imagem sobe por um `entrypoint.sh` que pergunta esse
+nome e o declara como `container.name`, atributo de convenção do OTel, antes de dar `exec` no JVM
+([ticket 096](../wayfinder/tickets/096-legendas-do-jvm-overview-sem-id-de-container.md)). O
+valor chegou em três passos: `host.name` puro no 091, que é único mas ilegível;
+`<service.name>/<host.name>` no
+[095](../wayfinder/tickets/095-nome-do-servico-nas-legendas-do-jvm-overview.md); e o número da
+réplica no lugar do id no 096. O formato do 095 continua como **recuo**, para a série que chega
+sem `container.name` — imagem anterior ao 096, ou serviço rodando fora do Compose.
+
+O preço de tirar o id é que a `instance` passa a ser única por **réplica**, não por container.
+Um container recriado herda a `instance` do anterior, e por uns 5 min — o lookback do
+Prometheus, porque série OTLP não recebe marca de staleness — as duas gerações convivem: somam
+nos painéis que agregam `by (instance)` (*Threads* mediu 72 contra 32 e 40) e aparecem como duas
+linhas de mesma legenda nos que não agregam. É transitório e só acontece na recriação, não no
+restart. Foi aceito porque qualquer coisa que separe as gerações teria de estar na `instance`, e
+a `instance` é a legenda.
+
+O terceiro **continua morto, e é estrutural**: ele consulta
+`http_server_request_duration_seconds` como histograma nativo, sem sufixo, e o Quarkus exporta
+clássico (`_bucket`/`_count`/`_sum`). Nenhuma etiqueta conserta isso; só ligar histograma
+exponencial no exportador dos três serviços, para atender um dashboard que ninguém pediu. Fica
+registrado como fato conhecido, não como pendência.
+
+Isto **não reabre** a recusa de painel curado abaixo — é o argumento dela levado a sério. Dois
+dashboards mantidos pela imagem respondem HTTP e JVM a custo zero de manutenção, que é
+exatamente o que aquela recusa prefere a um painel nosso. O que o ticket 091 corrigiu foi a
+camada estar entregando esse ganho **desligado**, e o custo disso ser maior que o de não tê-lo:
+uma tela que diz "não há dados" quando há é pior que uma tela que não existe.
+
 ## Considered Options
 
 **Não instrumentar, e continuar registrando a ausência como limitação** era a posição até
@@ -272,6 +371,8 @@ argumento.
 responde as mesmas perguntas sem manutenção, e um painel é a parte que envelhece primeiro. Na
 demo ele seria pior ainda — um painel vazio prova menos que uma busca por `idVideo` que
 devolve os três serviços.
+*Revertido em parte pelo [ticket 092](../wayfinder/tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md)
+— ver § Um painel, e o que da recusa continua de pé, no fim deste documento.*
 
 **Canal de notificação de alerta** foi adiado, não recusado por mérito: é configuração de
 *contact point*, e sem ele **a detecção não mudou**. Está escrito como limitação, e não como
@@ -317,6 +418,8 @@ overlay de carga nem chega à stack, já que o overlay a desliga.
   ele, uma Extração que morre no teto de 300 s entraria na mesma distribuição das que
   terminaram, e a mediana mediria a mistura de duas populações. Vídeos-por-estado ficou de fora:
   o endpoint de listagem já responde, e um gauge exigiria varredura periódica no banco.
+  *Uma segunda métrica entrou no [ticket 106](../wayfinder/tickets/106-deteccao-de-video-preso-pelo-estado.md) —
+  ver § A segunda métrica, no fim deste documento.*
 - **Nomes têm duas origens e duas regras.** O que a auto-instrumentação emite fica **como o
   OTel emite** — é contrato com a ferramenta, e traduzir quebra o ecossistema. O que é nosso usa
   o vocabulário do [`CONTEXT.md`](../../CONTEXT.md): `Extração`, `concluida`, `falhou`,
@@ -330,3 +433,144 @@ overlay de carga nem chega à stack, já que o overlay a desliga.
   ciclo do Vídeo completa mesmo assim, religando-o por um `trap`. O console também não mudou:
   `docker logs` foi o que diagnosticou o incidente de 06/09, e o cenário em que ele mais importa
   é justamente aquele em que a stack de observabilidade é o que está quebrado.
+
+## Um painel, e o que da recusa continua de pé
+
+A recusa de painel curado acima é **revertida em parte** pelo
+[ticket 092](../wayfinder/tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md): existe
+**um** painel, `docker/observabilidade/painel-infraestrutura.json`, provisionado por arquivo e
+home do Grafana. Um, e não uma suíte. O parágrafo recusado fica onde está: painel curado esteve
+fora, e por que esteve é parte do registro.
+
+**Cai o argumento do Explore, e cai por quem é o leitor.** *"A exploração ad-hoc responde as
+mesmas perguntas"* pressupõe alguém que sabe o que perguntar. O público desta camada não é quem
+a escreveu: é o avaliador, nos dez minutos do vídeo, e ele não tem como saber que existe uma
+fila chamada `extracao.extrair.estacionamento` — não há consulta que ele possa formular no
+Explore. A diferença que o painel faz não é de eficiência; é entre *"está tudo verde"* e *"não
+sei o que perguntar"*.
+
+**Fica de pé o argumento do envelhecimento**, e por isso ele virou requisito em vez de ser
+dispensado. O passo 12 do `scripts/smoke.sh` lê as queries **do arquivo do painel** e reprova a
+que devolver série vazia num sistema que acabou de processar um Vídeo. É a mesma disciplina das
+três cópias do teste arquitetural e do `SdkDesligadoAindaGravaTest`: o que pode mentir em
+silêncio ganha quem o cobre. O passo roda **depois** do ciclo do Vídeo, e não antes, porque
+`fiapx.extracao.duracao` está legitimamente vazia até a primeira Extração — medido numa stack
+recém-subida: 88 nomes de métrica na base, zero com `durac`.
+
+**Fica de pé, e é o que decide o escopo, o "painel vazio prova menos".** O painel cobre só o
+**vão** — fila, Estacionamento, DLQ, consumidores e `fiapx.extracao.duracao` —, que é o que
+nenhum dashboard de fábrica olha. JVM fica de fora, e HTTP também ficava inteiro até o
+[ticket 097](../wayfinder/tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md)
+abrir uma exceção estreita, adiante: são dos dois dashboards que a
+imagem mantém e que o [ticket 091](../wayfinder/tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md)
+fez enxergar os três serviços, e o painel apenas linka para eles. Repetir aqui série que outro
+dashboard já mantém seria exatamente o envelhecimento que a recusa temia, com o agravante de
+que o dono do outro dashboard é a imagem, que muda sozinha no upgrade. Continua fora, e pelo
+motivo já registrado acima, **contagem de Vídeo por estado**: o endpoint de listagem responde, e
+um gauge exigiria varredura periódica no banco.
+
+**A exceção, e por que ela é estreita** ([ticket
+097](../wayfinder/tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md)). O
+painel ganhou uma linha *Borda*, com dois painéis de HTTP, e isso contraria a frase acima — de
+propósito, e só onde o argumento dela não alcança. O que a frase protege é "não repita série que
+outro dashboard já mantém", e o RED de fábrica **não** mantém `4..`: ele conta erro de servidor,
+que é a definição de RED, e as recusas do contrato — 415, 400, 404, 409, que
+`docs/contratos/http-videos.md` fixa, o teste de borda confere e o `trafego.sh` exercita — não
+apareciam em tela nenhuma. O painel mostra `4..`, e não aquelas quatro nomeadas, então o `401` sem
+token cai nele também: é recusa da borda igual, e o RED de fábrica também não a conta — a
+`description` do painel avisa quem o lê numa demo. O 5xx entra junto, e aí sim é repetição: ele existe para que a palavra
+"erro" tenha um título que diz de qual faixa fala, e para que ciclo saudável leia `0%` em vez de
+"No data", o que custa um `or vector(0)` no numerador — numerador vazio dividido por denominador
+é vetor vazio em PromQL, não um bug do Grafana. Taxa e duração do HTTP continuam fora, e o link
+do topo continua sendo a resposta para elas.
+
+**O `or vector(0)` só serve porque esta razão é agregada**, e essa ressalva é do
+[ticket 098](../wayfinder/tickets/098-o-error-pct-do-jvm-overview-e-a-armadilha-do-or-vector-zero.md).
+Aqui os dois lados são `sum(...)` sem `by`, então o `vector(0)` — que é uma série **sem etiqueta
+nenhuma** — casa com o denominador sem etiqueta. Numa razão **por** etiqueta, como o `Error %` do
+*JVM Overview* (`sum by (instance)(...) / on (instance) sum by (instance)(...)`), a mesma receita
+continua devolvendo vazio: o `vector(0)` entra sem `instance` e o `on (instance)` não acha par
+para ele. As duas formas foram medidas contra a stack de pé. Ali o zero tem de **nascer com a
+etiqueta**, e a forma curta é `numerador or (denominador * 0)`. Quem copiar esta receita para um
+painel novo olhe antes se a razão tem `by`.
+
+O que esta escolha **não** entrega, e fica dito: quem abrir o *RED Metrics (classic histogram)*
+direto continua vendo um `Error Rate` sem qualificação e vazio. A alternativa era sobrescrever
+aquele JSON por mount — a terceira reversão da mesma decisão que 091 e 095 recusaram, e 15,9 kB
+a rederivar a cada upgrade da `grafana/otel-lgtm` — para ganhar um título. O preço não compra o
+suficiente. O `Error %` do *JVM Overview* está na mesma situação, e o 098 respondeu igual: quem
+abrir aquele dashboard direto vê o painel vazio, e quem quer o `0%` abre a home.
+
+Três decisões de forma que o arquivo carrega, e o porquê de cada uma:
+
+- **As expressões de fila são derivadas das dos três alertas** de
+  `docker/observabilidade/alertas.yaml`, e não reinventadas. Duas verdades sobre a mesma
+  pergunta é como o painel começa a divergir do que alerta.
+- **A busca de trace herda a âncora do passo 10 do smoke**: `resource.service.name =
+  "fiapx-extracao"`, em **dois spansets ligados por `&&`**. Os dois motivos estão medidos em
+  *`idVideo` é a chave que o humano digita*, acima — sem a âncora a busca casa dezenas de traces
+  de uma linha, e num spanset só ela não casaria nada, porque o span do `ffmpeg` não carrega
+  `idVideo`.
+  Ela **serve a dois estados desde o
+  [ticket 100](../wayfinder/tickets/100-tabela-de-trace-vazia-e-as-travessias-recentes-que-ninguem-ve.md)**,
+  e por isso o filtro é regex em vez de igualdade: com o textbox vazio, `.idVideo =~ ".*$idVideo.*"`
+  vira `.*.*` e a tabela lista as travessias mais recentes — 6 numa janela de 2 h, contra as 17 que
+  a mesma query sem a âncora casaria, que é a medição acima refeita no estado novo; com um
+  `idVideo` inteiro digitado, o resultado é o mesmo da igualdade (medido). Antes disso a igualdade
+  contra string vazia não casava span nenhum, e o 092 havia respondido a isso no **título** do
+  painel (*preencha o idVideo no topo*) — mitigação que não sobrevive a quem abre a home numa demo
+  e vê uma tabela sem linha. O que guarda os dois estados são duas passagens do passo 12 do
+  `smoke.sh`: a do laço, com a variável resolvida para o Vídeo que concluiu, e uma segunda com a
+  variável **vazia**, que julga três coisas sobre a mesma busca: que ela lista algo, que a ordem
+  é decrescente — *a mais nova primeiro* é promessa do `description`, e nada no JSON a impõe — e
+  que **todo** trace listado tem span do `fiapx-extracao`. A terceira é a que cobre a âncora, e
+  ela não cabia numa contagem: perder a âncora **aumenta** o número de traces (19 contra 8 na
+  medição do 100), então a tela continuaria plausível, listando GET de acompanhamento no lugar
+  das travessias. As duas reversões foram vistas vermelhas.
+- **A duração aparece como média por `resultado` — e, desde o
+  [ticket 094](../wayfinder/tickets/094-limites-de-bucket-da-duracao-da-extracao.md), também como
+  quantil.** A média por `_sum / _count` é exata e não depende de bucket nenhum; ela nasceu como
+  contorno e fica por mérito, porque responde a duração típica. O quantil não cabia quando o 092
+  mediu: os limites de bucket eram os default do OpenTelemetry (0, 5, 10, 25 … 10000), pensados
+  para **milissegundos** sobre uma métrica gravada em **segundos**, e toda observação caía no
+  primeiro bucket — `histogram_quantile` ali é interpolação dentro de `[0, 5]`, e devolveu `NaN`
+  em todas as amostras de uma janela de uma hora. O 094 deu ao instrumento limites de segundos,
+  por `setExplicitBucketBoundariesAdvice` no `DuracaoDaExtracao` — a advice viaja com o
+  instrumento, e uma *view* no `application.properties` teria de nomear a métrica num arquivo
+  onde nada mais fala dela. A segunda medição do 092 continua de pé e moldou a expressão do
+  painel: quantil sobre `rate()` devolve `NaN` no volume da demo, porque numa janela sem Extração
+  nenhuma todos os buckets rendem zero — então o painel consulta o **contador acumulado**, e o
+  que se lê são os quantis desde que a réplica subiu, não os da janela do gráfico. O corte por
+  `resultado` — que é o ponto da métrica — sobrevive inteiro nas duas leituras. O
+  [ticket 101](../wayfinder/tickets/101-mediana-no-quantil-da-extracao-e-o-red-native-que-ninguem-le.md)
+  acrescentou a **p50** ao lado da p95 e da p99, e ela não repete a média: as duas juntas é que
+  dizem se a cauda está puxando o número. Nesta população isso não é hipótese — a moda é a recusa
+  do ffprobe, ~0,05 s, e a cauda é Extração de vídeo grande —, e média bem acima da mediana é
+  exatamente o caso em que a "duração típica" da média não é a de Extração nenhuma.
+
+## A segunda métrica, e por que ela não reabre Vídeos-por-estado
+
+O [ticket 106](../wayfinder/tickets/106-deteccao-de-video-preso-pelo-estado.md) acrescentou
+`fiapx.videos.presos`, um gauge do `videos` com o atributo `estado` (`PROCESSANDO`, `RECEBIDO`),
+alimentado por uma contagem no Postgres a cada minuto. Os três alertas de 058 olham **fila**, e um
+Vídeo pode ficar sem desfecho sem mensagem nenhuma parada: um `ack` sem transição, ou uma mensagem
+descartada. Só o banco sabe disso.
+
+A recusa de *Vídeos por estado* acima tinha dois argumentos, e nenhum alcança esta métrica. A
+listagem responde **por Dono**, e ninguém consegue perguntar a ela "há Vídeo preso de alguém". E o
+número não é "ninguém consulta em regime": um alerta o consulta a cada minuto. A varredura
+periódica, que era o custo, são duas contagens por minuto sobre dois índices parciais — metade
+do compasso da reconciliação do ADR 0003, que já varre a mesma tabela a cada 30 s. O que continua fora é o gauge de contagem por estado: esta série só
+conta o que passou do limiar, e não deve crescer para o resto.
+
+Três decisões de forma:
+
+- **O limiar mora no `videos`, não no alerta.** `fiapx.deteccao.limiar-de-video-preso=30m`, com a
+  derivação a partir dos tetos do `extracao` escrita ao lado do número. As regras 4 e 5 de
+  `alertas.yaml` só perguntam "> 0".
+- **A condição de fila do `RECEBIDO` mora no alerta, não no `videos`.** O `videos` não enxerga o
+  broker; o Prometheus enxerga os dois. A regra junta a série com
+  `rabbitmq_detailed_queue_messages_ready{queue="extracao.extrair"} == 0` por `and on ()`.
+- **Sem amostra, sem série.** Antes da primeira contagem, ou depois de uma que falhou, o gauge não
+  reporta nada, em vez de reportar zero. `noDataState: OK` faz o alerta calar nesse caso, como os
+  outros três quando a série some — e o `videos` sem banco já aparece no health check.

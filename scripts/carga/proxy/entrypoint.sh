@@ -36,7 +36,16 @@ while [ "$i" -le "$n" ]; do
 done
 
 {
-    echo "events {}"
+    # worker_connections e por worker, e sem `worker_processes` o nginx sobe um worker so; o
+    # default de 512 derrubou 137 de 400 envios da rajada padrao do borda.sh (ticket 114).
+    # Conta: cada envio em voo ocupa no maximo duas conexoes, a do cliente e a da replica —
+    # 400 x 2 = 800. Folga ate 1024 (+224, nao medida) para o healthcheck, a amostra do oraculo e
+    # o que o k6 abrir a mais. Acima de 400 envios simultaneos (FIAPX_VUS) a folga comeca a ser
+    # consumida e a conta precisa ser refeita. O descritor de arquivo nao e o gargalo: o
+    # `ulimit -n` do container passa de 10^9.
+    echo "events {"
+    echo "    worker_connections 1024;"
+    echo "}"
     echo "http {"
     echo "    access_log /dev/stdout;"
     echo "    error_log /dev/stderr warn;"

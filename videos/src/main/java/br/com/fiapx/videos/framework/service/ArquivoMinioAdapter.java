@@ -1,14 +1,15 @@
 package br.com.fiapx.videos.framework.service;
 
 import br.com.fiapx.videos.core.entities.FormatoDoArquivo;
+import br.com.fiapx.videos.core.exceptions.ArmazenamentoIndisponivelException;
 import br.com.fiapx.videos.core.interfaces.gateway.ArquivoGateway;
 import br.com.fiapx.videos.framework.observabilidade.Rastro;
+import br.com.fiapx.videos.framework.vertx.ContextoDeChamada;
 import io.smallrye.mutiny.Uni;
-import io.vertx.core.Context;
-import io.vertx.core.Vertx;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
@@ -33,13 +34,18 @@ import java.util.concurrent.Flow;
  * {@code @Retry}: o interceptor reagendava a chamada no contexto Vert.x do chamador e podia
  * prende-la la para sempre — ver o javadoc de la.
  *
- * <p>As duas idas ao MinIO ganham span (ticket 059): a extensao da AWS traz a instrumentacao do
- * SDK, mas nenhum span de S3 chegou ao Tempo num ciclo completo de Video, e sem estes dois o
+ * <p>A retencao do original tambem pousa aqui (ticket 105): o bucket {@code videos} so expira o
+ * que carrega a tag {@link #TAG_DO_DESFECHO}, gravada quando o Video chega a um estado terminal.
+ *
+ * <p>As idas ao MinIO ganham span (ticket 059): a extensao da AWS traz a instrumentacao do
+ * SDK, mas nenhum span de S3 chegou ao Tempo num ciclo completo de Video, e sem o da gravacao o
  * upload de um Video de 200 MB era um vao mudo dentro do span do POST. O span cobre a operacao
  * inteira, retentativas incluidas — que e o que interessa a quem investiga.
  */
 @ApplicationScoped
 public class ArquivoMinioAdapter implements ArquivoGateway {
+
+    private static final Logger LOG = Logger.getLogger(ArquivoMinioAdapter.class);
 
     @Inject
     ArquivoMinioClient minioClient;
@@ -58,7 +64,37 @@ public class ArquivoMinioAdapter implements ArquivoGateway {
         var chave = chaveDoVideo(idVideo, nome);
         return rastro.emTorno("videos.gravar-video", () -> noContextoDeChamada(Uni.createFrom()
                 .completionStage(() -> minioClient.gravar(bucketVideos, chave, arquivo))
+                .onFailure().transform(falha -> new ArmazenamentoIndisponivelException(
+                        "Nao foi possivel gravar o Video no armazenamento: chaveVideo=" + chave, falha))
                 .replaceWith(chave)));
+    }
+
+    /**
+     * A tag que a regra de ciclo de vida do bucket {@code videos} filtra
+     * ({@code docker/minio/seed.sh}). Os dois lados tem de dizer o mesmo par, e nada no build
+     * os amarra: quem confere e o {@code smoke.sh}.
+     */
+    static final String TAG_DO_DESFECHO = "desfecho";
+    static final String VALOR_DO_DESFECHO = "sim";
+
+    /**
+     * A falha fica registrada aqui porque o {@code core} a engole (ticket 105): o original sem
+     * marca nao expira nunca, e esta linha e o unico rastro do vazamento.
+     */
+    @Override
+    public CompletableFuture<Void> marcarDesfechoDoOriginal(String chaveVideo) {
+        return rastro.emTorno("videos.marcar-desfecho-do-original", () -> noContextoDeChamada(Uni.createFrom()
+                .completionStage(() -> minioClient.marcarComTag(bucketVideos, chaveVideo, TAG_DO_DESFECHO, VALOR_DO_DESFECHO))
+                .onFailure().invoke(falha -> LOG.warnf(falha,
+                        "Original sem a marca do desfecho, nao vai expirar: chaveVideo=%s", chaveVideo))));
+    }
+
+    @Override
+    public CompletableFuture<Void> apagarOriginal(String chaveVideo) {
+        return rastro.emTorno("videos.apagar-original", () -> noContextoDeChamada(Uni.createFrom()
+                .completionStage(() -> minioClient.apagar(bucketVideos, chaveVideo))
+                .onFailure().invoke(falha -> LOG.warnf(falha,
+                        "Original sem linha nao foi apagado, nao vai expirar: chaveVideo=%s", chaveVideo))));
     }
 
     @Override
@@ -75,21 +111,20 @@ public class ArquivoMinioAdapter implements ArquivoGateway {
     /**
      * Devolve a continuacao ao contexto Vert.x de quem chamou.
      *
-     * <p>O SDK da AWS completa seus futures na <b>propria</b> event loop — e o retry, quando
-     * dispara, retoma na thread do scheduler do fault tolerance —, e um passo seguinte que
-     * rode ali perde o contexto duplicado onde o Panache guarda a sessao: o
+     * <p>O SDK da AWS completa seus futures na <b>propria</b> event loop, e um passo seguinte
+     * que rode ali perde o contexto duplicado onde o Panache guarda a sessao: o
      * {@code EnviarVideoUseCase} grava no MinIO e so depois no banco, entao sem esta ponte o
      * INSERT morre com "No current Vertx context found". A alternativa seria o core saber a
      * ordem em que os gateways podem ser encadeados, que e exatamente o que ele nao deve saber.
+     *
+     * <p>A repeticao do {@link ArquivoMinioClient} fica <b>dentro</b> da {@code operacao} que
+     * chega aqui, entao seja qual for a thread em que ela retome, o {@code emitOn} desta ponte
+     * ainda a alcanca. Ate o ticket 090 este javadoc dizia que ela retomava "na thread do
+     * scheduler do fault tolerance": esse scheduler saiu com o {@code @Retry} no ticket 061, e a
+     * sexta regra do teste arquitetural proibe o interceptor desde entao.
      */
     private static <T> CompletableFuture<T> noContextoDeChamada(Uni<T> operacao) {
-        Context contexto = Vertx.currentContext();
-        if (contexto == null) {
-            return operacao.subscribeAsCompletionStage();
-        }
-        return operacao
-                .emitOn(comando -> contexto.runOnContext(ignorado -> comando.run()))
-                .subscribeAsCompletionStage();
+        return ContextoDeChamada.retomarNele(operacao).subscribeAsCompletionStage();
     }
 
     /**

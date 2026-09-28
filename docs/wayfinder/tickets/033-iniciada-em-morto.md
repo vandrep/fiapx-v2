@@ -54,3 +54,5 @@ Não foi criada coluna nem varredura. O ticket 029 fechou a perda silenciosa que
 precaução e tornou uma falha residual visível no Estacionamento, mas não trouxe medição que
 justifique reabrir o esquema. Sem esse número, persistir o instante criaria estado e um
 processo de recuperação especulativos, contrariando a condição de aceite deste ticket.
+
+*Revertido pelo [ticket 106](106-deteccao-de-video-preso-pelo-estado.md): o instante voltou a ser gravado como coluna, para o alerta de Vídeo preso.*

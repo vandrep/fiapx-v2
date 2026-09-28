@@ -7,6 +7,7 @@ import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoFalhouUseCase;
 import br.com.fiapx.videos.core.usecases.video.ProcessarExtracaoIniciadaUseCase;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -29,9 +30,14 @@ public class ExtracaoEventosController {
         this.processarExtracaoFalhouUseCase = processarExtracaoFalhouUseCase;
     }
 
-    public CompletableFuture<Void> processarIniciada(UUID idVideo) {
-        return processarExtracaoIniciadaUseCase.executar(
-                new ProcessarExtracaoIniciadaUseCase.Command(idVideo));
+    /**
+     * Leitura tolerante (docs/contratos/mensagens.md): um evento sem o instante nao pode virar
+     * nack, que gastaria as tres entregas por um campo de observacao, e a entidade o recusa. O
+     * recuo e o instante do consumo, que so atrasa o inicio pelo tempo em fila do evento.
+     */
+    public CompletableFuture<Void> processarIniciada(UUID idVideo, Instant iniciadaEm) {
+        return processarExtracaoIniciadaUseCase.executar(new ProcessarExtracaoIniciadaUseCase.Command(
+                idVideo, Objects.requireNonNullElseGet(iniciadaEm, Instant::now)));
     }
 
     public CompletableFuture<Void> processarConcluida(UUID idVideo, ResultadoExtracao resultado) {

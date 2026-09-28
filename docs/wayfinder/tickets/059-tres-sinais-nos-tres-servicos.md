@@ -204,3 +204,16 @@ execução.**
   vez de como garantia. O que **está** verificado é que as linhas emitidas dentro do escopo do
   consumidor chegam ao Loki com os dois campos, nos três serviços.
 - **Causa raiz do [061](061-travamento-raro-com-o-sdk-desligado.md)**, pelo motivo acima.
+
+## Correção (083)
+
+As onze condições acima seguem `[ ]`, e continuam assim: pela política fixada no
+[082](082-politica-de-reescrita-de-ticket-fechado.md), corpo de ticket fechado não se reescreve,
+e marcar a caixa é reescrever. A nota é o que faltava.
+
+**Este ticket nasceu fechado**, como o [071](071-agents-versionado-sem-justificativa.md): o
+arquivo foi criado em `d7ed9a6`, o commit que exportou os três sinais, já com `status: fechado` e
+`assignee` preenchido. O ciclo `aberto → reivindicado → fechado` do [`TRACKER.md`](../TRACKER.md)
+não foi percorrido, e por isso não houve momento em que as caixas seriam marcadas. As onze estão
+narradas como atendidas na `## Resolução`, e o que ficou de fora está em § *O que este ticket não
+entrega*, acima — não nas caixas.

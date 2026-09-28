@@ -45,7 +45,12 @@ ticket 034 fechou para `publish-confirms`.
 
 ## Critérios de aceite
 
-- [x] `grep -ri faulttolerance` fora de `docs/` não acha nada em código, config ou pom
+- [x] `grep -ril faulttolerance --include="*.java" --include="*.xml" --include="*.properties"`
+  só acha as três cópias de `ArchitectureConstraintsTest.java` — reformulado no ticket 076: a
+  redação original ("fora de `docs/`") também casava com o `AGENTS.md`, que documenta a regra
+  em prosa e fica fora de `docs/`; restringir aos tipos de arquivo que o critério sempre quis
+  dizer (código, config, pom) é mais honesto do que excluir caminho por caminho, e não exige
+  ofuscar a constante do guarda para escapar da busca
 - [x] O teste arquitetural reprova quando uma chave de Fault Tolerance é reintroduzida no `.properties`
 - [x] As três cópias do teste seguem idênticas; `./mvnw test` verde a partir da raiz
 
@@ -67,3 +72,10 @@ Validação final na raiz, com Docker, ffmpeg e ffprobe reais: `./mvnw test` pas
 testes, 0 falhas e 0 erros (139 em `videos`, 276 em `extracao`, 28 em `notificacao`). A primeira
 tentativa não chegou aos testes por timeout de inicialização do Keycloak; a repetição completa
 passou.
+
+**Reaberto em parte pelo ticket 076**: para fazer o critério do primeiro item passar de
+verdade, as constantes do guarda foram partidas por concatenação de string
+(`"fault" + "tolerance"`), o que tornou o próprio teste ilegível e ainda assim não fez o
+`grep` passar — o `AGENTS.md` cita o termo por extenso e casa com a busca de qualquer jeito.
+O 076 devolveu as constantes a literais e reformulou o critério acima para excluir o arquivo
+do guarda em vez de ofuscar o texto que ele contém.

@@ -33,7 +33,7 @@ class PublicarVideoFalhouTest {
         publicador = new PublicarVideoFalhou(notificacao, videos);
 
         video = Video.novo("ferias.mp4", 1_024L, DONO).armazenadoEm("id/original.mp4");
-        video.marcaComoIniciada();
+        video.marcaComoIniciada(Instant.now());
         video.marcaComoFalha(Instant.now(), MotivoFalha.ARQUIVO_INVALIDO);
     }
 

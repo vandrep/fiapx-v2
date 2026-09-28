@@ -1,6 +1,6 @@
-# Os tres alertas do ticket 058, provisionados no Grafana.
+# Os tres alertas do ticket 058, provisionados no Grafana, e os dois do ticket 106, no fim.
 #
-# Todos sao sobre FILA, e nenhum e sobre latencia ou taxa: sao condicoes que hoje so um humano
+# Os tres primeiros sao sobre FILA, e nenhum e sobre latencia ou taxa: sao condicoes que hoje so um humano
 # descobre abrindo o management UI — e o `CONTEXT.md` § Estacionamento diz isso com todas as
 # letras, que o desfecho "so um humano produz, olhando o management UI". Estes tres sao esse
 # humano sendo avisado.
@@ -18,6 +18,13 @@
 #
 # As metricas vem do plugin `rabbitmq_prometheus` em `/metrics/detailed` — o `/metrics` padrao
 # e agregado e nao tem rotulo de fila, e as tres perguntas aqui sao todas por fila.
+#
+# Os dois do grupo `videos-presos` olham o ESTADO, e nao a fila: um Video pode ficar sem desfecho
+# sem mensagem nenhuma parada, e so o Postgres sabe disso (ticket 106).
+#
+# As cinco declaram `noDataState: OK`, entao metrica ou rotulo renomeado cala a regra sem erro. O
+# passo 14 do `scripts/smoke.sh` le os seletores das `expr` DESTE arquivo e reprova o que nao tem
+# serie (ticket 112). Ele le `expr` de uma linha entre aspas simples; outra forma ele reprova.
 apiVersion: 1
 
 groups:
@@ -39,7 +46,8 @@ groups:
           summary: >-
             Ha mensagem no Estacionamento (`extracao.extrair.estacionamento`). E fila terminal:
             nada a tira dai sozinho. Provavelmente ha Video preso em PROCESSANDO do outro lado.
-            Ver CONTEXT.md § Estacionamento e ADR 0001.
+            Ver CONTEXT.md § Estacionamento e ADR 0001; resgate em
+            docs/operacao/resgate-de-video-preso.md.
         labels:
           severidade: humano-necessario
         data:
@@ -129,7 +137,9 @@ groups:
           summary: >-
             A fila {{ $labels.queue }} tem mensagem pronta e nenhum consumidor. Foi este o
             incidente de 06/09/2026: as duas replicas do extracao morreram em laco de
-            PRECONDITION_FAILED e todo Video enviado ficou em RECEBIDO por 14 minutos.
+            PRECONDITION_FAILED e todo Video enviado ficou em RECEBIDO por 14 minutos. Se a fila
+            for de fim de linha (`videos.dlq`, `notificacao.dlq`), ver
+            docs/operacao/resgate-de-video-preso.md.
         labels:
           severidade: humano-necessario
         data:
@@ -142,6 +152,126 @@ groups:
               instant: true
               range: false
               expr: 'rabbitmq_detailed_queue_messages_ready > 0 and rabbitmq_detailed_queue_consumers == 0'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: { from: 0, to: 0 }
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0] }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { type: last, params: [] }
+
+  # Ticket 106. A metrica `fiapx.videos.presos` vem do `videos`, que conta o Postgres a cada
+  # minuto; o limiar de 30 min e a derivacao dele moram em
+  # videos/src/main/resources/application.properties, e NAO aqui. A serie so conta o que ja
+  # passou do limiar, entao estas regras nao tem numero de tempo alem do `for`.
+  #
+  # `max`, e nao `sum`: cada replica do `videos` conta o mesmo banco e exporta o mesmo numero.
+  # `for: 1m` so para nao disparar numa amostra isolada; o tempo que importa ja esta na metrica.
+  #
+  # Sem resgate automatico, de proposito: republicar o comando durante um pico e a armadilha que
+  # o ADR 0003 recusou. O desfecho continua sendo de um humano (CONTEXT.md § Video perdido), pelo
+  # resgate manual do ticket 107 (docs/operacao/resgate-de-video-preso.md).
+  - orgId: 1
+    name: videos-presos
+    folder: FIAP X
+    interval: 1m
+    rules:
+      # 4. PROCESSANDO ha mais que o limiar desde o inicio da Extracao. O relogio e o da PRIMEIRA
+      #    tentativa, entao as tres entregas cabem dentro dele quando saem seguidas.
+      #
+      #    Crash de replica nao as separa, e isso foi medido (ticket 113): a entrega devolvida
+      #    pelo SIGKILL volta ao COMECO de extracao.extrair e e pega na hora, mesmo com 352
+      #    mensagens prontas atras dela. O falso positivo que sobra: os 420 s por tentativa nao
+      #    sao teto duro, porque o I/O nao tem timeout. A posicao do nack com requeue (falha
+      #    transitoria) tambem foi medida (ticket 119): com 400 Videos validos e 397 mensagens
+      #    prontas no snapshot do nack, a entrega voltou ao comeco (posicao 0), terminou 15 s
+      #    depois de iniciada_em e a contagem de presos ficou em zero. O ensaio usou uma replica
+      #    para identificar a unica tentativa em voo; a fila quorum nao apresentou a espera atras
+      #    do backlog. O alerta continua errando para o lado de chamar um humano, porque o inverso,
+      #    calar, e o Video perdido.
+      - uid: fiapx-video-preso-processando
+        title: Video preso em PROCESSANDO
+        condition: B
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: >-
+            Ha {{ $values.A.Value }} Video(s) em PROCESSANDO ha mais que o limiar
+            (`fiapx.deteccao.limiar-de-video-preso`, no videos) desde o inicio da Extracao, alem
+            do pior caso de tres tentativas seguidas. Procure no Postgres por
+            `estado = 'PROCESSANDO'` ordenado por `iniciada_em`, e o trace pelo idVideo. Resgate
+            em docs/operacao/resgate-de-video-preso.md; ver CONTEXT.md § Video perdido.
+        labels:
+          severidade: humano-necessario
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              range: false
+              expr: 'max(fiapx_videos_presos{estado="PROCESSANDO"}) > 0'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: { from: 0, to: 0 }
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0] }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { type: last, params: [] }
+
+      # 5. RECEBIDO com comando publicado ha mais que o limiar, ENQUANTO `extracao.extrair` esta
+      #    sem mensagem pronta. Idade sozinha dispararia em todo pico; com a fila drenada, um
+      #    comando que saiu ha 30 min ja devia ter virado PROCESSANDO. Durante o pico o alerta
+      #    espera o backlog acabar, e a espera e segura: o original nao expira antes do desfecho
+      #    (ticket 105, ADR 0005).
+      #
+      #    O limite conhecido: com o RabbitMQ fora do ar a serie da fila some e o `and on ()` nao
+      #    casa, entao este alerta cala. Fila sem consumidor tambem nao o dispara, porque ha
+      #    mensagem pronta — e o alerta 3 ja fala desse caso. E um falso positivo: com
+      #    `videos.extracao-iniciada` atrasada, o Video fica RECEBIDO com a Extracao ja em voo e a
+      #    fila de comando vazia; nao e Video perdido, mas o atraso tambem pede um humano.
+      - uid: fiapx-video-preso-recebido
+        title: Video preso em RECEBIDO com a fila vazia
+        condition: B
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: >-
+            Ha {{ $values.A.Value }} Video(s) em RECEBIDO com o ExtrairVideo publicado ha mais que o
+            limiar (`fiapx.deteccao.limiar-de-video-preso`, no videos), e `extracao.extrair` nao tem mensagem pronta: o comando nao esta esperando na
+            fila. Procure no Postgres por `estado = 'RECEBIDO'` ordenado por
+            `comando_publicado_em`. Resgate em docs/operacao/resgate-de-video-preso.md; ver
+            CONTEXT.md § Video perdido.
+        labels:
+          severidade: humano-necessario
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              range: false
+              expr: 'max(fiapx_videos_presos{estado="RECEBIDO"}) > 0 and on () (sum(rabbitmq_detailed_queue_messages_ready{queue="extracao.extrair"}) == 0)'
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange: { from: 0, to: 0 }

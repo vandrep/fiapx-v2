@@ -1,9 +1,9 @@
 # A falha definitiva do `extracao` tem confirmação e tem fundo
 
 - id: 029
-- label: wayfinder:task
+- label: wayfinder:bug
 - status: fechado
-- assignee: vandrep
+- assignee: codex
 - bloqueado-por:
 
 ## Question
@@ -210,7 +210,11 @@ Protege o mecanismo do qual todos os outros tickets desta rodada dependem. Fazer
 de segurança tem um buraco — e, agora que se sabe que o buraco é perda silenciosa e não loop, um
 buraco que nenhuma medição existente detectaria.
 
-## Resolução
+## Resolução (reconstruída em 2026-09-07)
+
+*Escrita a partir do código pelo [072](072-rastreador-contradiz-a-propria-convencao.md),
+não pela sessão que fechou o ticket. Marca acrescentada pelo
+[082](082-politica-de-reescrita-de-ticket-fechado.md).*
 
 A topologia decidida acima está no `application.properties` do `extracao`: o canal
 `extrair-video-dlq` tem `failure-strategy=reject` e DLQ própria, e o `reject` leva o comando à
@@ -231,3 +235,53 @@ do `conservacao.sh`, só conseguiu subir depois do
 do estacionamento **reprovado** por prazo: zero mensagens novas em 241 s, limite de 240 s. A
 garantia deste ticket, portanto, está construída e provada em teste, mas **não confirmada sob
 carga**; o 038 registra o número e o diagnóstico pendente.
+
+## Reabertura (075)
+
+O [075](075-confirmar-estacionamento-sob-carga.md) remediu `mata-publicacao` contra o HEAD
+atual e reproduziu a mesma reprovação (0/3 no estacionamento, 241 s, limite 240 s) — e desta
+vez com diagnóstico. A causa é **circulação**: para uma falha de extração já classificada como
+permanente (`FalhaPermanenteDeExtracaoException`), `ProcessarExtracaoUseCase.tratarFalha`
+devolve direto o futuro de `enviarFalhou(...)`; se essa publicação falhar — o defeito que este
+próprio ticket injeta para testar —, a falha sobe como se fosse transitória e
+`ExtrairVideoConsumer` reenfileira o comando no canal `extrair-video`, mandando o ffprobe rodar
+de novo sobre o mesmo arquivo. O `x-delivery-limit=3` da fila `extracao.extrair`, que deveria
+limitar esse loop e escalar ao DLQ (e daí ao estacionamento, pelo desenho deste ticket), não
+dispara: os headers da mensagem em voo mostraram `x-acquired-count` de 24-25 contra
+`x-delivery-count` de 1-2 — o contador que a fila usa para decidir quando esgotar não acompanha
+as tentativas reais. A mensagem nunca sai de `extracao.extrair`, e por isso nunca chega a
+`extracao.extrair.dlq` nem a `extracao.extrair.estacionamento`.
+
+A garantia que este ticket declara — "falha definitiva para no estacionamento" — **não vale**
+para o caminho de falha permanente detectada de imediato (a maioria dos casos reais: formato
+inválido, é o que o `mata-publicacao` exercita). Ela só foi provada em teste
+(`ExtracaoEstacionamentoTest`) porque aquele teste força o esgotamento via
+`x-delivery-limit` diretamente, sem passar pelo caminho de falha permanente do
+`ProcessarExtracaoUseCase`. Evidência completa em
+`scripts/carga/saida/075-mata-publicacao/`.
+
+## Resolução da reabertura
+
+A circulação foi cortada no ponto em que a classificação se perdia. Quando uma Extração já
+falhou permanentemente e a publicação de `ExtracaoFalhou` também falha,
+`ProcessarExtracaoUseCase` agora propaga `FalhaAoPublicarExtracaoFalhouException`, preservando
+que o trabalho já tem desfecho definitivo. `ExtrairVideoConsumer` reconhece essa causa e envia
+o nack com `RabbitMQRejectMetadata(false)`: o comando não volta a executar ffprobe/ffmpeg, segue
+direto para `extracao.extrair.dlq` e, se a publicação continuar indisponível, o consumidor da
+DLQ o rejeita para `extracao.extrair.estacionamento`. Falhas transitórias continuam usando o
+nack sem metadado e o `failure-strategy=requeue` anterior.
+
+O `AckManual` ganhou uma sobrecarga que aceita os metadados do nack; as três cópias deliberadas
+foram atualizadas juntas e continuam iguais fora da linha de pacote. A prova foi feita em três
+níveis: teste do use case para a preservação da classificação, teste do consumidor para
+`requeue=false` e `ExtracaoEstacionamentoTest` pela borda AMQP real, publicando em
+`fiapx.comandos` e observando o corpo original no Estacionamento. Esta última passou com
+RabbitMQ e MinIO reais em 92,94 s (dois cenários); como o host não tem ffprobe, a execução usou
+um executável determinístico que retorna exit code 1, ainda atravessando o adapter real e sua
+classificação de falha permanente.
+
+O aceite que havia reaberto o ticket também foi repetido contra a imagem local reconstruída:
+`scripts/carga/conservacao.sh mata-publicacao 3` aprovou os três critérios em 71 s — 3/3
+envios receberam 202, os 3/3 Vídeos permaneceram em `PROCESSANDO` como previsto para a falha
+injetada, e 3/3 mensagens novas chegaram a `extracao.extrair.estacionamento` acima da linha de
+base. Evidência em `scripts/carga/saida/029-mata-publicacao-final/`.

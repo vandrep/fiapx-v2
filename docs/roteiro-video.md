@@ -22,10 +22,10 @@ locução em português, ~145 palavras por minuto.
 | Bloco | Entra em | Duração | Palavras |
 |---|---|---|---|
 | 1. Abertura | 0:00 | 0:29 | 70 |
-| 2. Funcionando | 0:29 | 2:43 | 393 |
+| 2. Funcionando | 0:29 | 2:43 | 392 |
 | 3. Arquitetura | 3:12 | 4:10 | 605 |
 | 4. Fechamento | 7:22 | 2:19 | 336 |
-| **Total** | | **9:41** | **1.404** |
+| **Total** | | **9:41** | **1.403** |
 
 Os números acima são medidos, não estimados: são as palavras que estão de fato escritas
 abaixo. Se você editar a narração, remeça — o teto de dez minutos não perdoa.
@@ -74,7 +74,7 @@ projeto original antes dele — como *antes*, não como leitura de código.
 
 ---
 
-## Bloco 2 — O projeto funcionando (0:29–3:12, 393 palavras)
+## Bloco 2 — O projeto funcionando (0:29–3:12, 392 palavras)
 
 Um único take do `scripts/smoke.sh`, do passo 2 ao 10. Os passos 0 e 1 (dependências e
 Compose) não entram, e o 11 também não: derrubar a observabilidade para provar que o Vídeo
@@ -96,9 +96,9 @@ não depende dela é uma garantia que se afirma em uma frase e custaria meio min
 
 ### Tomada — passo 3, envio do vídeo
 
-> O envio responde **202 Accepted**, com o `Location` do recurso. Repare que ele responde
-> antes de qualquer trabalho de vídeo existir: o arquivo já está durável e o comando já está
-> na fila, mas nenhum frame foi extraído. Esse 202 é a peça central do desenho.
+> O envio responde **202 Accepted**, com o `Location` do recurso. Ele responde antes de
+> qualquer trabalho de vídeo existir: o arquivo e o registro já estão duráveis, e o vídeo não
+> se perde, mas nenhum frame foi extraído. Esse 202 é a peça central do desenho.
 
 ### Tomada — passo 4, processamento assíncrono *(acelerar 4×)*
 
@@ -115,10 +115,10 @@ não depende dela é uma garantia que se afirma em uma frase e custaria meio min
 
 > Agora o caminho de falha, que é o que o enunciado pede ao falar em notificar o usuário. O
 > script envia um arquivo que não é vídeo, com extensão mentirosa. A borda aceita — ela valida
-> extensão e content-type, não conteúdo —, e quem prova que aquilo não é vídeo é o ffmpeg,
-> três entregas depois. O vídeo termina em FALHOU com o motivo `ARQUIVO_INVALIDO`, o pedido do
-> pacote responde 409, e o e-mail chega ao MailHog. O script não conta e-mails: ele procura o
-> identificador deste vídeo dentro do corpo, porque a caixa de entrada sobrevive entre
+> extensão e content-type, não conteúdo —, e a prova é do `extracao`: o `ffprobe` recusa na
+> primeira entrega. O vídeo termina em FALHOU com o motivo `ARQUIVO_INVALIDO`, sem gastar
+> tentativas; o pacote responde 409, e o e-mail chega ao MailHog. O script não conta e-mails:
+> ele procura o identificador deste vídeo dentro do corpo, porque a caixa de entrada sobrevive entre
 > execuções e contar daria falso verde.
 
 ### Tomada — passos 9 e 10, propriedade do vídeo e o rastro *(a espera do 10, acelerada 4×)*
@@ -169,18 +169,18 @@ Encaixar aqui, por ~10s, a árvore de pacotes versionada do módulo `videos`.
 > E isso não é aspiração documentada. O `ArchitectureConstraintsTest` verifica o layout dos
 > pacotes, os imports proibidos e onde cada anotação pode aparecer; ele roda no `verify` e
 > reprova o build. O ganho é medível nos testes: o `core` inteiro roda com dublês em memória.
-> Dos cento e trinta testes do projeto, noventa e seis não sobem container nenhum.
+> Dos quinhentos e doze testes do projeto, quatrocentos e dezoito não sobem container nenhum.
 
 ### Tomada — sequência do caminho feliz (50s)
 
-> O caminho feliz, em ordem. O `videos` grava o arquivo no MinIO, insere a linha no Postgres
-> em RECEBIDO, e só então responde 202 — passo quatro. Do passo cinco em diante o usuário já
-> não está mais lá. O comando `ExtrairVideo` vai para a fila; o `extracao` pega, anuncia que
-> começou, baixa o vídeo, valida a duração com `ffprobe`, extrai um frame por segundo com
-> ffmpeg, empacota e grava o pacote de volta. Cada anúncio dele volta ao `videos`, que é quem
-> move o estado — os workers relatam, o dono do estado decide. O download, no fim, é stream de
-> ponta a ponta. Presigned URL foi recusada: é um bearer token na query string, e o host entra
-> na assinatura.
+> O caminho feliz, em ordem. O `videos` grava o arquivo no MinIO, insere a linha no Postgres em
+> RECEBIDO, publica o `ExtrairVideo` e responde 202 quando o broker confirma, ou em dois
+> segundos — a varredura cobre o resto. Dali em diante o usuário foi embora; o `extracao` pega,
+> anuncia que começou, baixa o vídeo, valida a duração com `ffprobe`, extrai um frame por
+> segundo com ffmpeg, empacota e grava o pacote de volta. Cada anúncio dele volta ao `videos`,
+> que é quem move o estado — os workers relatam, o dono do estado decide. O download, no fim, é
+> stream de ponta a ponta. Presigned URL foi recusada: é um bearer token na query string, e o
+> host entra na assinatura.
 
 ### Tomada — sequência do caminho de falha (73s)
 
@@ -220,7 +220,7 @@ Encaixar aqui, por ~10s, a árvore de pacotes versionada do módulo `videos`.
 ### Tomada — run verde do GitHub Actions (25s)
 
 > Qualidade e CI/CD na mesma tela. Cada push roda `verify` na raiz, e a `main` é protegida:
-> só entra por pull request. São cento e trinta testes — unitários do `core` com dublês,
+> só entra por pull request. São quinhentos e doze testes — unitários do `core` com dublês,
 > Cucumber pela borda HTTP, o teste arquitetural, e ffmpeg de verdade contra um vídeo real no
 > `extracao`. Passando, o mesmo pipeline publica as três imagens multi-arquitetura no GHCR.
 

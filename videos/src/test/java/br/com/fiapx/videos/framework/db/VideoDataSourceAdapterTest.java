@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -55,6 +56,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class VideoDataSourceAdapterTest {
 
     private static final Dono DONO = new Dono("sub-adapter", "adapter@exemplo.com");
+    /**
+     * Folgado de proposito: estes cenarios julgam a ordem entre commit e publish, e precisam que
+     * o envio espere o consumidor simulado terminar — o teto do ticket 104 nao esta em jogo.
+     */
+    private static final Duration TETO_DO_PUBLISH = Duration.ofSeconds(30);
+    private static final Instant INICIADA_EM = Instant.parse("2026-09-14T10:00:00Z");
 
     @Test
     @RunOnVertxContext
@@ -65,7 +72,7 @@ class VideoDataSourceAdapterTest {
         carregarEsperado(asserter, id, esperado);
 
         asserter.execute(() -> {
-            esperado[0].marcaComoIniciada();
+            esperado[0].marcaComoIniciada(INICIADA_EM);
             return iniciar(id[0]);
         });
         asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
@@ -105,6 +112,42 @@ class VideoDataSourceAdapterTest {
         asserter.assertThat(() -> videoDe(id[0]), atual -> assertVideoIgual(esperado[0], atual));
     }
 
+    /**
+     * As duas contagens do ticket 106 em HQL contra o Postgres. Os instantes sao de 1999 para
+     * que nenhuma linha de outro cenario da mesma base caia antes do corte: a contagem e global,
+     * nao por Video.
+     */
+    @Test
+    @RunOnVertxContext
+    void contagemDePresosJulgaAColunaCertaDeCadaEstado(UniAsserter asserter) {
+        var antigo = Instant.parse("1999-01-01T00:00:00Z");
+        var corte = antigo.plus(Duration.ofDays(1));
+        var processando = new UUID[1];
+        var recebido = new UUID[1];
+        var concluido = new UUID[1];
+        gravarRecebido(asserter, processando);
+        gravarRecebido(asserter, recebido);
+        gravarRecebido(asserter, concluido);
+
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.marcarIniciada(processando[0], antigo)));
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.marcarComandoPublicado(recebido[0], antigo)));
+        // Comando antigo e terminal: nao conta, e o PROCESSANDO com marca antiga tambem nao
+        // entra na contagem de RECEBIDO.
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.marcarComandoPublicado(concluido[0], antigo)));
+        asserter.execute(() -> Uni.createFrom().completionStage(() -> adapter.marcarComandoPublicado(processando[0], antigo)));
+        asserter.execute(() -> concluir(concluido[0]));
+
+        asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.contarProcessandoIniciadosAntesDe(corte)),
+                total -> assertEquals(1L, total));
+        asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.contarRecebidosComComandoPublicadoAntesDe(corte)),
+                total -> assertEquals(1L, total));
+        // Estrito: no proprio instante ainda nao passou do limiar.
+        asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.contarProcessandoIniciadosAntesDe(antigo)),
+                total -> assertEquals(0L, total));
+        asserter.assertThat(() -> Uni.createFrom().completionStage(() -> adapter.contarRecebidosComComandoPublicadoAntesDe(antigo)),
+                total -> assertEquals(0L, total));
+    }
+
     private void carregarEsperado(UniAsserter asserter, UUID[] id, Video[] esperado) {
         asserter.execute(() -> videoDe(id[0]).invoke(video -> esperado[0] = video));
     }
@@ -117,6 +160,7 @@ class VideoDataSourceAdapterTest {
         assertEquals(esperado.chaveVideo(), atual.chaveVideo());
         assertEquals(esperado.estado(), atual.estado());
         assertEquals(esperado.recebidoEm(), atual.recebidoEm());
+        assertEquals(esperado.iniciadaEm(), atual.iniciadaEm());
         assertEquals(esperado.finalizadoEm(), atual.finalizadoEm());
         assertEquals(esperado.chavePacote(), atual.chavePacote());
         assertEquals(esperado.quantidadeFrames(), atual.quantidadeFrames());
@@ -225,6 +269,40 @@ class VideoDataSourceAdapterTest {
                         "passada a folga, a falha perdida tem de voltar a ser alcancada"));
     }
 
+    /**
+     * O predicado do resgate (ticket 107): {@code PROCESSANDO} sem marca volta a ser pendente,
+     * e so o resgate apaga a marca de um {@code PROCESSANDO}. Com marca ele fica de fora, e o
+     * terminal sem marca tambem, porque terminal e terminal.
+     */
+    @Test
+    @RunOnVertxContext
+    void processandoSemMarcaEPendenteEComMarcaNao(UniAsserter asserter) {
+        var semMarca = new UUID[1];
+        var comMarca = new UUID[1];
+        var concluidoSemMarca = new UUID[1];
+        gravarRecebido(asserter, semMarca);
+        gravarRecebido(asserter, comMarca);
+        gravarRecebido(asserter, concluidoSemMarca);
+        asserter.execute(() -> iniciar(semMarca[0]));
+        asserter.execute(() -> iniciar(comMarca[0]));
+        asserter.execute(() -> Uni.createFrom().completionStage(
+                () -> adapter.marcarComandoPublicado(comMarca[0], Instant.now())));
+        asserter.execute(() -> concluir(concluidoSemMarca[0]));
+
+        var corte = Instant.now().plus(Duration.ofDays(1));
+        asserter.assertThat(() -> comandosPendentesAntesDe(corte), pendentes -> {
+            assertTrue(contem(pendentes, semMarca[0]), "PROCESSANDO sem marca tem de ser republicado");
+            assertFalse(contem(pendentes, comMarca[0]), "PROCESSANDO com marca ja tem comando");
+            assertFalse(contem(pendentes, concluidoSemMarca[0]), "terminal nao recebe comando");
+        });
+    }
+
+    /** Lote largo de proposito: a tabela do teste acumula linhas de outros cenarios. */
+    private Uni<List<Video>> comandosPendentesAntesDe(Instant recebidosAntesDe) {
+        return Uni.createFrom().completionStage(
+                () -> adapter.buscarComandosPendentes(recebidosAntesDe, 1_000));
+    }
+
     /** Lote largo de proposito: a tabela do teste acumula linhas de outros cenarios. */
     private Uni<List<Video>> falhasPendentesAntesDe(Instant falhadosAntesDe) {
         return Uni.createFrom().completionStage(
@@ -246,7 +324,8 @@ class VideoDataSourceAdapterTest {
     void confirmacaoDeEventoRapidoEnxergaOVideoEProduzFalha(UniAsserter asserter) {
         var arquivo = new ArquivoGatewayDeTeste();
         NotificacaoSender notificacao = (id, dono, nome, motivo, ocorridoEm) -> CompletableFuture.completedFuture(null);
-        var processarFalha = new ProcessarExtracaoFalhouUseCase(adapter, new PublicarVideoFalhou(notificacao, adapter));
+        var processarFalha = new ProcessarExtracaoFalhouUseCase(adapter, arquivo,
+                new PublicarVideoFalhou(notificacao, adapter));
         ExtracaoSender extracao = (id, chaveVideo, chaveDestinoPacote) -> adapter.buscarPorId(id)
                 .thenCompose(encontrado -> {
                     assertTrue(encontrado.isPresent(),
@@ -256,7 +335,7 @@ class VideoDataSourceAdapterTest {
                 });
         VideoPresenter presenter = video -> { };
         var envio = new EnviarVideoUseCase(arquivo, adapter,
-                new PublicarExtrairVideo(arquivo, extracao, adapter), presenter);
+                new PublicarExtrairVideo(arquivo, extracao, adapter), presenter, TETO_DO_PUBLISH);
         var id = new UUID[1];
 
         asserter.execute(() -> Uni.createFrom().completionStage(() -> envio.executar(
@@ -317,7 +396,7 @@ class VideoDataSourceAdapterTest {
                         .subscribeAsCompletionStage();
         VideoPresenter presenter = video -> { };
         return new EnviarVideoUseCase(arquivo, adapter,
-                new PublicarExtrairVideo(arquivo, consumidor, adapter), presenter);
+                new PublicarExtrairVideo(arquivo, consumidor, adapter), presenter, TETO_DO_PUBLISH);
     }
 
     private static EnviarVideoUseCase.Command envioDe(String nome) {
@@ -340,6 +419,16 @@ class VideoDataSourceAdapterTest {
         }
 
         @Override
+        public CompletableFuture<Void> marcarDesfechoDoOriginal(String chaveVideo) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> apagarOriginal(String chaveVideo) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
         public String chaveDoPacote(UUID idVideo) {
             return idVideo + ".zip";
         }
@@ -359,7 +448,7 @@ class VideoDataSourceAdapterTest {
     }
 
     private Uni<Boolean> iniciar(UUID id) {
-        return Uni.createFrom().completionStage(() -> adapter.marcarIniciada(id));
+        return Uni.createFrom().completionStage(() -> adapter.marcarIniciada(id, INICIADA_EM));
     }
 
     private Uni<Boolean> concluir(UUID id) {

@@ -1,0 +1,923 @@
+{
+  "uid": "fiapx-infraestrutura",
+  "title": "FIAP X — a infraestrutura está saudável?",
+  "description": "O único painel curado do projeto (ticket 092). Ele cobre o VÃO: fila, Estacionamento, DLQ, consumidores e a duração da Extração — tudo que nenhum dashboard de fábrica da imagem olha. JVM fica de fora de propósito, e HTTP fica quase todo de fora: taxa e duração estão no RED Metrics de fábrica, linkado no topo, e repetir aqui série que outro dashboard já mantém é o envelhecimento que o ADR 0004 teme. A exceção é a linha da Borda, aberta estreita pelo ticket 097: as recusas 4xx do contrato não estão em dashboard de fábrica nenhum, porque o RED conta só `5..`, e o 5xx as acompanha aqui com `or vector(0)` para que ciclo saudável leia 0% em vez de 'No data'. As expressões de fila são derivadas das dos três alertas de docker/observabilidade/alertas.yaml, e não reinventadas.",
+  "tags": [
+    "fiapx"
+  ],
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 41,
+  "version": 4,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "links": [
+    {
+      "title": "RED Metrics (classic histogram) — HTTP dos três serviços",
+      "type": "link",
+      "url": "/d/f543a537-cb96-470d-a349-660ad1513136",
+      "icon": "external link",
+      "tooltip": "Taxa, erro e duração do HTTP. Mantido pela imagem grafana/otel-lgtm, não por nós.",
+      "tags": [],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    },
+    {
+      "title": "JVM Overview (OpenTelemetry) — heap, threads e GC",
+      "type": "link",
+      "url": "/d/b91844d7-121e-4d0a-93b8-a9c1a05703b3",
+      "icon": "external link",
+      "tooltip": "Uma série por container. Mantido pela imagem grafana/otel-lgtm, não por nós.",
+      "tags": [],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "servico",
+        "label": "Serviço",
+        "description": "Filtra o stream de log. O valor de All é fiapx-.+, e não .*: o Loki desta stack só tem os três serviços, mas um matcher largo passaria a casar qualquer coisa que a imagem venha a emitir.",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "label": "service_name",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "type": 1
+        },
+        "refresh": 1,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "fiapx-.+",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": []
+      },
+      {
+        "name": "idVideo",
+        "label": "idVideo",
+        "description": "Opcional: vazio, a tabela de trace lista as travessias mais recentes. Preenchido, filtra por este id — o que o POST /videos devolveu no corpo do 202. É a chave que o humano tem em mãos; o trace_id não sai do sistema (ADR 0004).",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Estacionamento",
+      "description": "Fila terminal: mensagem que chegou nela esgotou até o fundo da própria DLQ, e nada mais a move. Qualquer valor acima de zero é trabalho humano pendente, e provavelmente há Vídeo preso em PROCESSANDO do outro lado (CONTEXT.md § Estacionamento). Mesma expressão do alerta fiapx-estacionamento-nao-vazio.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "rabbitmq_detailed_queue_messages{queue=\"extracao.extrair.estacionamento\"}",
+          "legendFormat": "mensagens",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "DLQs",
+      "description": "As três DLQs do contrato. É a união de dois alertas, e não a cópia de um: o alerta fiapx-dlq-extracao-com-mensagem nomeia só a extracao.extrair.dlq, porque ela é a única DLQ do contrato com consumidor próprio — acúmulo nela significa que a republicação também está falhando, e o próximo salto é o Estacionamento. As de videos e notificacao são terminais por desenho e quem as cobra é o alerta fiapx-fila-sem-consumidor, que vale para qualquer fila sem enumerar nome. Um stat que mostrasse só a primeira deixaria mensagem parada nas outras duas fora da tela, e mensagem em fila terminal é sempre trabalho humano pendente.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "rabbitmq_detailed_queue_messages{queue=~\".+\\\\.dlq\"}",
+          "legendFormat": "{{queue}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Filas com mensagem e zero consumidores",
+      "description": "O incidente de 06/09/2026, contado como número: por 14 minutos a extracao.extrair teve mensagem pronta e nenhum consumidor, e todo Vídeo enviado ficou em RECEBIDO. Derivado do alerta fiapx-fila-sem-consumidor, que vale para qualquer fila sem enumerar nome. O `or vector(0)` não é enfeite: sem ele o count() de um conjunto vazio some, e o painel diria No data justamente quando o sistema está saudável — que é a mentira que este painel existe para não contar. O preço é que este é o único painel daqui que o passo 12 do smoke.sh não consegue cobrar, porque ele nunca volta vazio; o que ficaria descoberto são as duas métricas que ele usa, e as duas aparecem cruas nos painéis de prontas/não-confirmadas e de consumidores por fila, que o passo cobra.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "count(rabbitmq_detailed_queue_messages_ready > 0 and rabbitmq_detailed_queue_consumers == 0) or vector(0)",
+          "legendFormat": "filas",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Consumidores da extracao.extrair",
+      "description": "Quantos consumidores estão pendurados na fila de comando do worker. Este é o único painel que nomeia uma fila sem ter alerta que a nomeie, e é deliberado: o Compose sobe o extracao com duas réplicas desde o ticket 049, então o número saudável é dois — um por réplica —, e esse é um número que só quem conhece a topologia sabe conferir. A pergunta sem nome de fila é a do painel ao lado, derivada do alerta fiapx-fila-sem-consumidor; a lista completa está em Consumidores por fila. Zero aqui, com mensagem do outro lado, é o incidente de 06/09.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rabbitmq_detailed_queue_consumers{queue=\"extracao.extrair\"})",
+          "legendFormat": "consumidores",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Fila — profundidade por fila",
+      "description": "Total de mensagens em cada fila do contrato, prontas e não-confirmadas somadas. Vem do plugin rabbitmq_prometheus em /metrics/detailed, e não do /metrics padrão: o padrão é agregado e não tem rótulo de fila.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "rabbitmq_detailed_queue_messages",
+          "legendFormat": "{{queue}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Fila — prontas e não-confirmadas",
+      "description": "A separação que a profundidade total esconde: pronta é mensagem que ninguém pegou, não-confirmada é mensagem que um consumidor pegou e ainda não confirmou. Fila que só acumula não-confirmadas tem consumidor vivo e travado — o defeito que o scripts/carga/travamento.sh persegue —, e fila que só acumula prontas não tem quem a pegue.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "rabbitmq_detailed_queue_messages_ready",
+          "legendFormat": "{{queue}} — prontas",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "rabbitmq_detailed_queue_messages_unacked",
+          "legendFormat": "{{queue}} — não-confirmadas",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Consumidores por fila",
+      "description": "Uma linha por fila. As DLQs terminais (videos.dlq, notificacao.dlq) nascem com zero consumidores por desenho, e isso é desejado; o que importa aqui é a extracao.extrair cair de dois para zero, e a extracao.extrair.dlq — a única DLQ do contrato com consumidor próprio — não ficar sem ele.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "rabbitmq_detailed_queue_consumers",
+          "legendFormat": "{{queue}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Extração — duração média, por resultado",
+      "description": "A única métrica nossa (ADR 0004): fiapx.extracao.duracao, em segundos, cronometrando o trecho que roda fora do JVM e que nenhuma auto-instrumentação enxerga. O corte por `resultado` não é decoração — sem ele, uma Extração que morre no teto de 300 s entra na mesma distribuição das que terminaram, e a média passa a medir a mistura de duas populações. Média por _sum / _count, que é exata e não depende de bucket nenhum: o painel de quantil, mais abaixo, responde a outra pergunta, a da cauda, e os dois convivem de propósito. Foi esta expressão que contornou o defeito do ticket 092 — limites de bucket de milissegundos sobre uma métrica em segundos —, corrigido no 094; ela fica porque continua sendo a leitura exata da duração típica.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "always",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (resultado) (fiapx_extracao_duracao_seconds_sum) / sum by (resultado) (fiapx_extracao_duracao_seconds_count)",
+          "legendFormat": "{{resultado}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Extração — tentativas por resultado",
+      "description": "O denominador da média ao lado: quantas Extrações terminaram desde que a réplica subiu, separadas em concluida e falhou — as palavras do CONTEXT.md, não success/error. É a contagem acumulada, e não um increase() por janela: a retenção desta stack é efêmera e morre no `down`, então o acumulado já é 'desde que a demo começou'. Numa stack recém-subida este painel é legitimamente vazio até a primeira Extração, e é por isso que o passo do smoke.sh que o cobra roda DEPOIS do ciclo do Vídeo.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (resultado) (fiapx_extracao_duracao_seconds_count)",
+          "legendFormat": "{{resultado}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Trace da travessia — as mais recentes, ou filtre por idVideo no topo",
+      "description": "Sem nada no topo, lista as travessias mais recentes — a mais nova primeiro, no limite de 20. Preencha o idVideo para filtrar: é o que o POST /videos devolveu no 202. O filtro é regex e não igualdade porque é a regex que serve aos dois estados — com o textbox vazio a condição vira .*.*, que casa todo span que TEM o atributo; com um UUID inteiro dá o mesmo resultado que a igualdade (ticket 100). O valor entra cru na regex, então metacaractere digitado no topo (um parêntese, por exemplo) vira erro de query em vez de filtro — um UUID não tem nenhum, e por isso o preço ficou aceito. Dois spansets ligados por &&, e não duas condições dentro de um: o span do ffmpeg NÃO carrega idVideo (o adapter não conhece o Vídeo, e não deve), então a forma de um spanset só exigiria os dois atributos no MESMO span e não casaria nunca. A âncora em resource.service.name é o outro defeito medido no ADR 0004: sem ela, a busca casa dezenas de traces de uma linha, porque o atributo marca também o span de cada GET de acompanhamento.",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{ .idVideo =~ \".*$idVideo.*\" } && { resource.service.name = \"fiapx-extracao\" } | select(.idVideo)",
+          "limit": 20,
+          "tableType": "traces"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Extração — p50, p95 e p99 da duração, por resultado",
+      "description": "A mediana e a cauda, lado a lado. A p50 é a mesma pergunta que a média acima faz, por outro caminho, e as duas juntas dizem mais do que qualquer uma sozinha: média bem acima da mediana é cauda puxando o número, e é assim que se lê que a duração 'típica' da média não é a da maioria das Extrações. Sobre a cauda, que nenhuma das duas responde: a partir dos buckets de fiapx.extracao.duracao, cujos limites são de segundos desde o ticket 094 — doze deles, de 0,1 s a 420 s, com o porquê de cada faixa no javadoc de DuracaoDaExtracao — e não os default do OpenTelemetry, que são de milissegundos e faziam toda observação cair no primeiro bucket. Sobre o contador ACUMULADO, e não sobre rate(): a retenção desta stack é efêmera e morre no `down`, então o acumulado já é 'desde que a demo começou' — e um quantil sobre rate() devolve NaN no volume da demo, porque numa janela sem Extração nenhuma todos os buckets rendem zero. Por isso o que se lê aqui são os três quantis desde que a réplica subiu, e não da janela do gráfico. Um degrau até perto de 420 s no `falhou` é Extração morrendo no teto do ffmpeg — mas o quantil não distingue quem morreu no teto de quem passou dele: 330 s interpola dentro de (300, 420] e o caso +Inf devolve exatamente 420, porque é assim que o Prometheus responde quando o quantil cai no último bucket. Quem separa os dois é a série crua (fiapx_extracao_duracao_seconds_bucket com le='420' contra le='+Inf'), e é para ela que existe o 12º limite; aqui em cima, leia qualquer coisa perto de 420 como 'bateu no teto ou passou dele' e vá conferir lá. E leia o `falhou` baixo como teto, não como medida — nos três quantis, a p50 inclusive: recusa do ffprobe leva ~0,05 s e cai inteira no primeiro bucket, então o que o quantil diz ali é 'menos de 0,1 s'.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "always",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.5, sum by (le, resultado) (fiapx_extracao_duracao_seconds_bucket))",
+          "legendFormat": "p50 {{resultado}}",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, resultado) (fiapx_extracao_duracao_seconds_bucket))",
+          "legendFormat": "p95 {{resultado}}",
+          "range": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le, resultado) (fiapx_extracao_duracao_seconds_bucket))",
+          "legendFormat": "p99 {{resultado}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Borda — recusas do contrato (4xx), por status",
+      "description": "A borda recusando o que o contrato manda recusar (ticket 097), com as palavras de docs/contratos/http-videos.md: 415 de content-type ou extensão fora da lista, 400 de campo `arquivo` ausente ou vazio, 404 de Vídeo que não é seu ou não existe — o mesmo 404 para os dois, de propósito, para não confirmar que aquele id existe —, e 409 de Pacote pedido com o Vídeo fora de CONCLUIDO, que é o 'ainda não' que se distingue do 404 'nunca'. São as quatro que o teste de borda confere e que o cenário `erro` do scripts/trafego.js exercita. Elas não apareciam em painel NENHUM: o RED Metrics de fábrica conta só `5..`, porque RED define erro como erro de servidor, e uma recusa 4xx é a borda funcionando. Este painel é a exceção estreita que o ticket 097 abriu na recusa do 092 de repetir HTTP aqui, e ela é estreita por construção — cobre exatamente o que o dashboard de fábrica NÃO cobre, e nada além. UMA quinta faixa aparece aqui e não é do contrato de recurso: 401 sem token, que é o OIDC funcionando — medido virando série própria. Taxa por segundo, e não o acumulado: o que se lê é 'está recusando agora', e uma classe subindo sozinha é sintoma — 415 em rajada é cliente mandando o tipo errado, 409 em rajada é alguém baixando Pacote antes da hora. Linha em zero é o normal fora do tráfego sintético.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count{job=\"fiapx-videos\", http_response_status_code=~\"4..\"}[5m]))",
+          "legendFormat": "{{http_response_status_code}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Borda — erros de servidor (5xx), taxa sobre o total",
+      "description": "A leitura de erro de SERVIDOR da borda, que é a do RED: `5..` sobre o total. O `or vector(0)` não é enfeite — sem ele, numerador vazio dividido por denominador é vetor vazio em PromQL, e o painel diz 'No data' justamente quando o sistema está saudável. Ele funciona aqui porque esta razão é AGREGADA, e `vector(0)` é série sem etiqueta nenhuma: numa razão por etiqueta (`sum by (instance)(...) / on (instance) ...`, que é a forma do `Error %` do JVM Overview) o mesmo truque devolve vazio de novo, e ali o zero tem de nascer com a etiqueta — `numerador or (denominador * 0)`, ticket 098. É o que o Error Rate do dashboard de fábrica faz, e o que o ticket 097 veio consertar sem tocar naquele JSON, que é de 15,9 kB e se rederiva a cada upgrade da imagem. Aqui, ciclo saudável lê 0%, que é uma afirmação, e não um silêncio ambíguo. O 5xx mora neste painel curado só como companhia do painel ao lado: sozinho ele já estava respondido de fábrica, mas sem ele a palavra 'erro' ficaria com dois donos e nenhum título dizendo de qual faixa de status fala. Ele ainda pode ficar vazio num caso, e é legítimo: borda 100% ociosa por mais de 5 min zera também o DENOMINADOR, e razão sem denominador não existe.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "always",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum(rate(http_server_request_duration_seconds_count{job=\"fiapx-videos\", http_response_status_code=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_server_request_duration_seconds_count{job=\"fiapx-videos\"}[5m]))",
+          "legendFormat": "5xx / total",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "logs",
+      "title": "Log dos três serviços",
+      "description": "Stream do Loki filtrado por service_name. Para achar um Vídeo específico, some um filtro de linha ao seletor de serviço: idVideo é campo estruturado de log em todo serviço que o conhece (ADR 0004).",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "queryType": "range",
+          "expr": "{service_name=~\"$servico\"}"
+        }
+      ]
+    }
+  ]
+}

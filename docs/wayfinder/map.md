@@ -17,6 +17,8 @@ o tempo do CI/CD, que é requisito. A premissa expirou: o CI/CD está entregue (
 fronteira ficou vazia e restam 23 dias. Pela regra do wayfinder, trabalho fora de escopo não
 gradua — ele só volta se o destino for redesenhado, e então como esforço novo. É o que esta
 linha faz. O que **não** entra continua fora: painel curado e canal de notificação de alerta.
+*O painel curado voltou em parte no [ticket 092](tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md),
+e como esforço novo, pela mesma regra que esta linha invoca. O canal de notificação continua fora.*
 
 Este mapa carrega **decisões e execução**: as decisões de arquitetura vêm primeiro, e os
 tickets de implementação graduam da névoa conforme cada decisão fecha.
@@ -47,14 +49,14 @@ test-first por construção); `writing-for-agents` ao editar `AGENTS.md`.
 | Dono do status | `videos` é o dono; `extracao` é worker sem estado que publica eventos |
 | Estados do Vídeo | `RECEBIDO` → `PROCESSANDO` → `CONCLUIDO` \| `FALHOU` |
 | Falhas | Fila quorum, `x-delivery-limit=3` (conta **entregas**, crash incluído), `failure-strategy=requeue`, `@Retry` com backoff de segundos nos adapters de I/O. `extracao` consome a própria DLQ; DLQs de `videos` e `notificacao` são terminais. Unicidade da notificação na transição de estado em `videos`. E-mail é *pelo menos uma vez*. Ver [ADR 0001](../adr/0001-politica-de-falhas.md) e, para as janelas não-atômicas entre gravar e publicar, [ADR 0003](../adr/0003-reconciliacao-por-varredura.md) |
-| RabbitMQ | `rabbitmq:4.3.5-management-alpine` fixado nos Dev Services e no Compose; policy `dead-letter-strategy=at-least-once` só no Compose (é policy de broker, não queue argument) |
+| RabbitMQ | `rabbitmq:4.3.5-management-alpine` fixado nos Dev Services e no Compose; policy `dead-letter-strategy=at-least-once` + `overflow=reject-publish` só no Compose (é policy de broker, não queue argument; sem o `overflow` o regime cai para *at-most-once*, ticket 103) |
 | Autenticação | Keycloak, bearer-only via `quarkus-oidc`; dono do vídeo vem do `sub` do token, nunca do request |
 | Notificação | SMTP com MailHog no Compose |
 | Health checks | Sim (`quarkus-smallrye-health`), para `depends_on: service_healthy` |
 | CI/CD | GitHub Actions: `verify` + build das imagens + push para o GHCR, tag do commit **e `latest`**, `amd64`+`arm64` (ticket 013). `main` protegida por ruleset: PR obrigatório, zero aprovações |
 | Escalabilidade | Medida ([026](tickets/026-linearidade-horizontal.md)): `extracao` linear até **6 réplicas** nesta máquina (eficiência 0,88, critério 0,80), 15,6 Vídeo/min; `ffmpeg` é 98,2% do tempo de serviço, e desde o [027](tickets/027-melhorias-medidas.md) roda com `-threads` derivado da cota do cgroup (−31,6%). Borda medida com réplicas atrás de proxy ([028](tickets/028-escala-da-borda.md), máquina diferente — 6 vCPU): mediana do `202` cai 5,5× (N=1→N=3); matar uma réplica de N=3 custa 39/400 recusados (9,75%) contra 361/400 (90,25%) com réplica única — não zero, por design do nginx contra `POST` não-idempotente |
 | Conservação | Medida e reprovada no [025](tickets/025-carga-conservacao.md), corrigida e remedida no [027](tickets/027-melhorias-medidas.md): **0 presos** em 400 sob pico e em 133 com a borda derrubada. Terminal aceita `RECEBIDO` ou `PROCESSANDO` ([ADR 0002](../adr/0002-maquina-de-estados-em-duas-camadas.md)); `publish-confirms=true` faz a marca do [ADR 0003](../adr/0003-reconciliacao-por-varredura.md) parar de mentir |
-| Testes | **144 (103 sem Docker)**. Por serviço e isolado (unitário do `core`, Cucumber pela borda HTTP, `ArchitectureConstraintsTest`); fluxo ponta-a-ponta por script de smoke versionado, não automatizado no CI |
+| Testes | **512 (418 sem Docker)**, contados no [111](tickets/111-diagramas-e-narracao-coerentes-com-o-codigo.md). Por serviço e isolado (unitário do `core`, Cucumber pela borda HTTP, `ArchitectureConstraintsTest`); fluxo ponta-a-ponta por script de smoke versionado, não automatizado no CI |
 
 **Base de código**: template em `/home/vandrep/projetos/oficina-soat/quarkus-clean-architecture-template`
 (leia o `AGENTS.md` dele antes de escrever qualquer classe — as regras de camada são
@@ -146,6 +148,9 @@ verificadas por teste, não são sugestão). Projeto original em
   código**: o original **não** é apagado após sucesso, ao contrário do `main.go`. Volumes
   nomeados para o `uploads-directory` e para o scratch do `extracao`, que orça **4 GB** e
   limpa em duas camadas, porque ali o worker morre no meio por desenho
+  *Revertido em parte pelo [ticket 105](tickets/105-original-so-expira-depois-do-desfecho.md): no
+  bucket `videos` só expira o original marcado no desfecho, e a retenção deixou de ser zero
+  código. A do `pacotes` vale.*
 
 - [Transactional outbox no videos, ou conviver com o Vídeo órfão](tickets/018-outbox-transacional.md)
   — **nem uma coisa nem outra: a tabela `video` é o outbox**. Duas colunas marcadoras
@@ -448,6 +453,11 @@ verificadas por teste, não são sugestão). Projeto original em
   este ticket compra. Achado no processo, não no código: o defeito de `publish-confirms` já
   tinha acontecido um serviço abaixo (027, no `videos`) e se repetiu aqui sem guarda nenhuma
   — motivo do [034](tickets/034-publish-confirms-sem-guarda.md), aberto na mesma revisão.
+  Reaberto pelo [075](tickets/075-confirmar-estacionamento-sob-carga.md) após a carga provar
+  circulação no caminho de falha permanente imediata, foi fechado de novo preservando essa
+  classificação até a borda: falha ao publicar `ExtracaoFalhou` vira nack com
+  `RabbitMQRejectMetadata(false)`, salta direto à DLQ e chega ao Estacionamento sem reexecutar
+  ffprobe/ffmpeg. A prova agora começa em `fiapx.comandos`, não injeta direto na DLQ.
 
 - [Deploy não gasta tentativa da Extração](tickets/030-deploy-nao-gasta-tentativa.md) — a
   pergunta central tem resposta e é **não**: o conector cancela a assinatura e fecha o canal
@@ -531,6 +541,8 @@ verificadas por teste, não são sugestão). Projeto original em
   perda silenciosa que motivava a precaução e tornou a falha residual visível no Estacionamento,
   mas não trouxe medição que justifique reabrir o esquema, e sem esse número persistir o instante
   criaria estado e recuperação especulativos.
+  *Revertido pelo [ticket 106](tickets/106-deteccao-de-video-preso-pelo-estado.md): o instante
+  voltou como coluna, agora com a medição dos tetos do `extracao` que faltou aqui.*
 
 - [A Extração em voo é drenada antes do `SIGTERM`](tickets/035-drenar-extracao-antes-do-sigterm.md)
   — nasceu do 030, na mesma sessão que o fechou: a leitura do código-fonte do conector e do
@@ -963,6 +975,631 @@ verificadas por teste, não são sugestão). Projeto original em
   de correção do 027 — aceitou 41 antes de matar o `videos` e fechou os 41 em 11s, zero preso.
   O § Rodar perdeu a frase da reprovação esperada e passou a apontar para cá.
 
+- [`mata-publicacao` reprova de novo, agora com causa](tickets/075-confirmar-estacionamento-sob-carga.md)
+  — remedido contra o HEAD (imagens reconstruídas, digest idêntico ao do 073: nenhum código
+  mudou), a mesma reprovação do 038 se repetiu — 0/3 no estacionamento, 241 s, limite 240 s —
+  mas desta vez com diagnóstico, não só número. Causa: **circulação**. Para uma falha de
+  extração já classificada como permanente, `ProcessarExtracaoUseCase.tratarFalha` devolve
+  direto o futuro de `enviarFalhou`; se essa publicação falhar (o defeito que o modo injeta),
+  a falha sobe como transitória e `ExtrairVideoConsumer` reenfileira o comando, mandando o
+  ffprobe rodar de novo sobre o mesmo arquivo inválido. O `x-delivery-limit=3` que deveria
+  limitar esse loop não dispara: os headers da mensagem em voo mostraram `x-acquired-count` de
+  24-25 contra `x-delivery-count` de 1-2 — o contador que a fila usa para decidir quando
+  esgotar não acompanha as tentativas reais, e a mensagem nunca sai de `extracao.extrair`, nunca
+  chega à DLQ nem ao estacionamento. A garantia do [029](tickets/029-terminal-na-dlq-do-extracao.md)
+  não vale para o caminho de falha permanente detectada de imediato — a maioria dos casos
+  reais —, só para o esgotamento por `x-delivery-limit` que o `@QuarkusTest` de topologia força
+  diretamente. O 029 **reabriu** com o diagnóstico anexado; a correção é trabalho novo, fora
+  deste ticket.
+
+- [Lacunas e ofuscação na guarda de tolerância a falhas](tickets/076-lacunas-da-guarda-de-fault-tolerance.md)
+  — a regra do 064 ganhou o namespace `smallrye.faulttolerance` ao lado de
+  `quarkus.fault-tolerance`, com o mesmo ciclo vermelho/verde à mão que a regra original teve.
+  O alcance sobre variável de ambiente ficou recusado por escrito, não implícito: mesmo limite
+  que o 034 documentou para `publish-confirms`, mas aqui sem um caso real hoje, porque a
+  extensão saiu dos três `pom.xml` no 061. As duas constantes partidas por concatenação para
+  escapar de uma busca textual (`"fault" + "tolerance"`) voltaram a literais — o truque nem
+  funcionava, porque o `AGENTS.md` cita o termo em prosa e fica fora de `docs/` do mesmo jeito.
+  O critério de aceite do 064 que motivava o truque foi reformulado nele mesmo, para restringir
+  a busca a código, config e pom em vez de excluir caminho por caminho.
+
+- [`AckManual` é a quinta cópia deliberada, e ganha guarda como o
+  `ArchitectureConstraintsTest`](tickets/077-ackmanual-fora-do-registro-de-copias.md)
+  — as três cópias de `AckManual` são idênticas byte a byte fora do `package`, ao contrário das
+  outras quatro famílias do § *As cópias deliberadas entre serviços*, que têm divergência local
+  legítima e por isso ficam sem guarda. `AGENTS.md` passa a listar cinco famílias e nomeia
+  `AckManual` como a segunda exceção com verificação automática. A guarda
+  (`scripts/verifica-ackmanual.sh`) roda no agregador, ao lado do
+  `verifica-testes-arquiteturais.sh`, e reprova o build quando uma cópia diverge.
+
+- [A série do § *As três cópias do teste arquitetural* ganha a sétima e a oitava
+  regra](tickets/078-regras-do-teste-arquitetural-sem-linha-no-agents.md) — `AGENTS.md` narrava
+  seis regras em prosa e o teste já cobrava oito; as duas que a revisão acrescentara
+  (`toleranciaAFalhasNaoPodeSerConfigurada` do 064, `workersNaoDevemDeclararPacoteDeBordaHttp`
+  do 068) ficavam sem o *porquê* que só a prosa registra. A série continua no mesmo formato,
+  nomeando o ticket de origem de cada uma.
+
+- [Ramo morto no adapter de ffmpeg depois do
+  066](tickets/079-ramo-morto-no-adapter-de-ffmpeg.md) — o 066 removeu a bandeira
+  `capturarStdout`, e com ela fora `stdout()` nunca mais volta `null`; sobraram um `catch` de
+  `NullPointerException` inalcançável e uma guarda `== null` sempre falsa. Os dois saíram; a
+  classificação por exit code e por stdout vazio (`SEM_FLUXO_DE_VIDEO`) ficou idêntica.
+
+- [O custo de teste do blip voltou a ser pago por
+  configuração](tickets/080-custo-de-teste-do-blip-sem-substituto.md) — o 064 removeu com razão
+  duas chaves órfãs de interceptor, mas o efeito que o 048 comprava foi junto, e o cenário voltou
+  a pagar a espera de produção. **Medido: 26,46 s → 6,17 s na classe, 20,3 s parados**, e o número
+  bate com a aritmética da política (3 repetições × 2 s nos dois cenários persistentes, 2 × 2 s
+  nos dois de blip). A espera virou `fiapx.armazenamento.espera-entre-repeticoes`, com default de
+  2 s **no código** e `1ms` no `%test` do `videos` — configuração do bean, no namespace `fiapx.`,
+  não chave de tolerância a falhas por interceptor, então a guarda do 064 segue verde. `0s` não
+  serve: o Mutiny recusa backoff zero na subscrição, e a recusa sai como 500 na borda. A contagem
+  continua constante — ela é a política do ADR 0001; a espera é o preço dela. Fica medido e não
+  corrigido que as outras duas cópias de `comRepeticao` pagam o mesmo (14,30 s no `extracao`,
+  10,19 s no `notificacao`), fora do escopo deste ticket.
+
+- [A raiz de composição volta a ter um nome
+  só](tickets/081-raiz-de-composicao-com-dois-nomes.md) — o 068 moveu `ExtracaoConfiguration` e
+  `NotificacaoConfiguration` para `framework.configuration` e deixou `VideosConfiguration` sozinha
+  em `framework.web`; os três serviços passaram a nomear o mesmo papel de dois jeitos. O argumento
+  do 068 não dependia de o serviço ser worker, e sim de a classe não ser web, então ele valia para
+  as três: `VideosConfiguration` acompanhou. Movimentação pura — a classe é produtora CDI
+  descoberta por scan e não é importada por ninguém, nenhum `import` mudou. `framework.web` no
+  `videos` fica para a borda HTTP de verdade. Nenhuma regra nova: a convenção entrou em prosa no
+  `AGENTS.md`, porque uma guarda cobraria layout com um exemplo por serviço.
+
+- [`bordaNaoPodeBuscarVideoSemDono` ganha o
+  *porquê*](tickets/084-bordanaopodebuscarvideosemdono-sem-porque.md) — nona entrada da série do
+  § *As três cópias do teste arquitetural*, e a única sobre **autorização** em vez de dependência
+  entre camadas. O motivo não foi reconstruído: já existia partido entre o javadoc do
+  `VideoGateway` (o *o quê*, citando o 031) e `docs/contratos/http-videos.md` (o *por quê*, sem
+  nomear a regra). Ficou escrito o efeito mais forte, que nenhum dos dois dizia: filtrar por dono
+  **na consulta** faz "não é seu" e "não existe" chegarem à borda como o mesmo `Optional.empty()`,
+  então o `404` que não vaza existência é estrutural, e não disciplina de quem escreve o
+  `Resource`. O ordinal é de registro, não de chegada — a regra é mais velha que quatro das que a
+  precedem na série, e renumerar invalidaria o registro do 078.
+
+- [Ticket fechado é registro da época, não retrato do
+  código](tickets/082-politica-de-reescrita-de-ticket-fechado.md) — o 074 proibiu reescrever
+  ticket fechado e o 072, no commit anterior, reescrevera catorze. Não eram políticas opostas
+  sobre a mesma coisa: normalizar `status`, renomear cabeçalho sobre texto intacto e **escrever
+  uma `## Resolução` do zero** são três atos diferentes, e o rastreador não os separava. Ficou
+  em `TRACKER.md` § *O que pode mudar num ticket `fechado`*: metadados e links quebrados mudam;
+  corpo narrativo e `## Resolução` já escritos, não — erro descoberto depois vira seção nova,
+  porque o parágrafo errado é parte do que aconteceu. Reconstruir resolução ausente a partir do
+  código continua permitido, e agora **marcado**: proibir deixaria dez fechados invisíveis para
+  as duas consultas, que foi o defeito que o 072 saiu para consertar, e permitir sem marcar
+  transforma inferência em memória. A resposta do 074 sobre reversão virou regra geral: mapa
+  mais ticket novo, ponteiro de uma linha no revertido. Os 029, 031 e 032 ganharam a marca
+  retroativa — adição, não reversão, e sem ela o 029 seguiria afirmando um veredito de carga com
+  a autoridade de quem estava lá.
+
+- [Cinco tickets fechados ganham a nota que faltava nas
+  caixas](tickets/083-registro-do-071-que-nasceu-fechado.md) — o
+  [071](tickets/071-agents-versionado-sem-justificativa.md) nasceu fechado: o arquivo foi criado
+  no mesmo commit que executou o [074](tickets/074-remover-o-ferramental-de-agente-versionado.md),
+  já com `status: fechado` e `assignee`, então o ciclo `aberto → reivindicado → fechado` nunca
+  correu e ninguém marcou os critérios. O ticket supunha que ele fosse o único assim; não era.
+  Os [057](tickets/057-retry-transitorio-no-postgres.md),
+  [058](tickets/058-piso-de-observabilidade.md) e
+  [059](tickets/059-tres-sinais-nos-tres-servicos.md) nasceram fechados do mesmo jeito, no commit
+  que os implementou, e o [053](tickets/053-unificar-a-forma-dos-use-cases-de-extracao.md) nasceu
+  aberto e fechou com as caixas por marcar. Pela regra do
+  [082](tickets/082-politica-de-reescrita-de-ticket-fechado.md), as caixas **não** foram marcadas
+  — marcá-las é reescrever corpo de ticket fechado. Cada um dos cinco ganhou uma
+  `## Correção (083)` no fim, dizendo como nasceu e onde os critérios foram atendidos. Um achado
+  do levantamento ficou registrado ali em vez de escondido: o oitavo critério do 057 **não** foi
+  atendido — o `smoke.sh` e o ensaio de conservação não rodaram —, e a resolução dele já dizia
+  por quê. Ticket fechado sem caixa marcada não é o mesmo que critério não atendido, e agora o
+  registro distingue os dois.
+
+- [A espera do retry ficou igual nas três
+  cópias](tickets/085-espera-do-retry-nas-outras-duas-copias.md) — o
+  [080](tickets/080-custo-de-teste-do-blip-sem-substituto.md) mediu que as outras duas cópias de
+  `comRepeticao` pagavam a mesma espera fixa e deixou registrado como fora de escopo; este ticket
+  aplicou. A espera saiu de `private static final Duration.ofSeconds(2)` e virou
+  `fiapx.armazenamento.espera-entre-repeticoes` no `extracao` e
+  `fiapx.notificacao.espera-entre-repeticoes` no `notificacao`, com default de 2 s **no código**,
+  como no `videos`. **Medido: `RepeticaoNoMinioTest` 14,34 s → 0,25 s e `RepeticaoNoSmtpTest`
+  10,18 s → 0,15 s, 24,1 s a menos de relógio na suíte.** As duas classes só asseveram contagem
+  de chamadas e tipo de exceção — nenhuma mede a espera, então nenhuma paga por ela; os 2 s do
+  ADR 0001 seguem guardados pelo default do `@ConfigProperty`, e a contagem de repetições
+  continua constante nas três. As duas **não** ganharam `%test.` no `.properties`: os dois testes
+  montam o bean à mão e nenhum `@QuarkusTest` desses serviços injeta blip, então a chave não teria
+  leitor — e essa diferença, que é de `.properties` e não de código, ficou escrita no `AGENTS.md`
+  § *As cópias deliberadas entre serviços*. A forma das três cópias voltou a ser a mesma, e a
+  divergência de código que o 080 introduziu fechou.
+
+- [A contagem do ADR 0001 virou uma
+  só](tickets/086-contagem-de-repeticoes-em-dois-numeros.md) — quatro lugares citavam a mesma
+  frase do ADR ("três tentativas") e a implementavam em dois números: as três cópias de
+  `comRepeticao` faziam **4** chamadas ao recurso, o `PostgresRetry` fazia **3**. A raiz era
+  vocabular — o ADR gastava *tentativa*, que o `CONTEXT.md` reserva para a *entrega* do
+  trabalho ao `extracao`, para contar repetições de I/O. **Decidido: três chamadas ao recurso,
+  a primeira mais duas repetições, `atMost(2)` nos quatro**; as três cópias de `comRepeticao`
+  passaram de `MAXIMO_DE_REPETICOES = 3` para `2`. O motivo é o custo: o número multiplica a
+  espera de 2 s, e quatro chamadas seguram o chamador por 6 s contra 4 s — a quarta só compra o
+  blip que durou mais que duas esperas, e o que segura indisponibilidade mais longa é o
+  `x-delivery-limit=3` da fila. A aritmética está escrita **uma vez**, numa emenda nova do
+  ADR 0001, e os quatro javadocs a citam na mesma palavra; a frase antiga do 061 ficou de pé,
+  com um parêntese que manda ler *três chamadas ao recurso*. O `CONTEXT.md` não precisou de
+  emenda. `RepeticaoNoMinioTest`, `RepeticaoNoSmtpTest` e `PostgresRetryTest` cobram a contagem
+  decidida, e o comentário do Postgres no `application.properties` do `videos` passou a apontar
+  para `framework/db/PostgresRetry`, que é onde o limite mora.
+
+- [A segunda cópia da repetição do ADR 0001 ficou
+  registrada](tickets/087-postgresretry-diverge-das-copias-de-comrepeticao.md) — o `videos`
+  carrega **duas** implementações da mesma forma reativa, e nenhum registro dizia isso. Os cinco
+  pontos do ticket foram decididos um a um. **Convergiram quatro:** o vocabulário (a classe virou
+  `RepeticaoNoPostgres`, o teste `RepeticaoNoPostgresTest` ao lado de `RepeticaoNoMinioTest` e
+  `RepeticaoNoSmtpTest`, e os campos passaram a `MAXIMO_DE_REPETICOES` e
+  `esperaEntreRepeticoes`); a costura de configuração, que virou
+  `@ConfigProperty("fiapx.banco.espera-entre-repeticoes")` com default de 2 s no código, no lugar
+  do construtor package-private que só o teste chamava; o jitter de 10%, que faltava e que pesa
+  mais aqui do que no MinIO, porque um pool de conexões compartilhado é onde repetições
+  sincronizadas se empilham; e a classificação de falha, que decidia por
+  `getClass().getName().endsWith(...)` e passou a `instanceof` com import — as duas exceções do
+  Hibernate estavam no classpath o tempo todo, e a terceira,
+  `CannotCreateTransactionException`, é do **Spring** e nunca esteve, então o ramo dela era
+  morto. Um teste novo fixa isso: uma classe homônima de outro pacote não é mais tratada como
+  falha transitória. **Ficou registrada uma divergência**, que é a razão de as duas existirem: o
+  filtro de falha — o MinIO repete qualquer `Exception`, o Postgres só a indisponibilidade
+  transitória, e o `deferred(Supplier)` existe para reabrir a sessão que o Hibernate abortou.
+  **As três travessias de `getCause()` não viraram família:** elas fazem perguntas diferentes
+  (tirar envelopes até o fim, tirar um nível, varrer procurando um tipo); o que havia de
+  repetição de fato era o `causaRaiz` escrito duas vezes dentro do
+  `ProcessarExtracaoUseCase`, e essa unificou. A sexta família fica **declaradamente sem
+  guarda**: `verifica-ackmanual.sh` compara texto e exige identidade, e o que diverge aqui
+  diverge de propósito.
+
+- [Cada `Rastro` passou a descrever os recursos do seu
+  serviço](tickets/088-rastro-do-notificacao-descreve-recursos-alheios.md) — o `AGENTS.md` §
+  *As cópias deliberadas* já dava o `Rastro` como exemplo de cópia que "documenta recursos
+  externos diferentes", e a do `notificacao` não tinha feito essa parte: a seção *Onde `emTorno`
+  vale a pena* chegou do `extracao` inteira, com Postgres e MinIO num serviço que não tem nem um
+  nem outro. Defeito de registro — nenhum span mudou. A seção foi reescrita para os dois
+  recursos que o serviço alcança: a mensageria do lado coberto (o conector abre o span de
+  recebimento sozinho; o que falta nele é duração, e disso cuida `naMensagem`), o SMTP do lado
+  sem dono. A frase do SMTP ficou, e a medição alheia — "verificado no `smoke.sh`" — deu lugar a
+  uma razão conferível **neste** serviço: não há artefato de instrumentação de mail no classpath
+  dele, e nenhum `opentelemetry-aws-sdk-2.2`, que é o que mostra de onde o parágrafo veio — e a
+  prova é o **app aumentado** (`target/quarkus-app/lib/main`), não o `dependency:list`: o
+  `aws-sdk-2.2` é dependência condicional da extensão da AWS e só aparece depois da augmentação,
+  então some do `dependency:list` até no `extracao`, onde ele de fato está. Mais
+  dois trechos do mesmo arquivo descreviam serviço alheio e foram junto — o javadoc de `emTorno`
+  prometia borda HTTP, e a frase dos saltos de thread citava `@Blocking`, SDK da AWS e a sessão
+  do Panache. **A conferência que o ticket pediu virou dois achados.** No `videos`, o parágrafo
+  estava certo por edição e não por acidente (ele cita `POST /videos` e o vão mudo do upload de
+  200 MB), mas o javadoc de `emTorno` prometia SMTP, que o `videos` não fala. No `extracao` — que
+  o ticket não mandou conferir, e é a origem do parágrafo copiado — estava o **mesmo** defeito:
+  "a mensageria e o Postgres aparecem sozinhos", num serviço cuja linha de banco também é
+  nenhum. O ticket citou esse trecho como se fosse do serviço certo. Os dois foram corrigidos no
+  mesmo commit. **Fica um achado sem conserto, e ele é só do `videos`:** o `extracao` **tem**
+  `@Blocking` no `ExtrairVideoConsumer`, então a menção ao worker pool na cópia dele está certa;
+  o `videos` não tem a anotação em produção nenhuma, e a mesma frase no `Rastro` dele pode estar
+  tão desatualizada quanto a que saiu do `notificacao`. Confirmar exige ler o roteamento de
+  thread do `videos`, que é outra investigação — virou o
+  [090](tickets/090-saltos-de-thread-do-rastro-do-videos.md).
+
+- [*Repetição* e *chamada ao recurso* ganharam
+  verbete](tickets/089-repeticao-e-chamada-ao-recurso-sem-verbete.md) — a lacuna que o 086 abriu
+  ao fechar: ele tirou *tentativa* de cima da contagem de I/O e pôs no lugar duas palavras que
+  já eram canônicas em nove arquivos (ADR 0001, quatro javadocs, `MAXIMO_DE_REPETICOES`, duas
+  chaves `espera-entre-repeticoes`, dois nomes de classe de teste e este mapa), sem verbete
+  nenhum. Quem chegasse pelo código encontrava três palavras para coisas próximas — *tentativa*,
+  *repetição*, *chamada* — e só a primeira explicada. **Decidido: seção própria no `CONTEXT.md`,
+  e não um parágrafo dentro de § *Extração*** — repetição acontece igual no `videos`, que não
+  executa Extração nenhuma, e hospedá-la lá daria ao conceito um dono que ele não tem. O verbete
+  define repetição como nova ida ao mesmo recurso externo dentro de **uma** tentativa, e chamada
+  ao recurso como a unidade em que o ADR 0001 conta a política; a aritmética continua morando
+  **só** no ADR, porque este arquivo é glossário. O verbete de *tentativa* ficou intocado, e a
+  relação entre os dois está dita: cada tentativa pode gastar várias chamadas ao recurso. Os
+  dois limites valerem 3 está registrado como **coincidência**, com o ponteiro para o 086 — que
+  é o preço já pago por ela. Nenhuma constante, contagem ou teste mudou. **A revisão corrigiu o
+  verbete em três pontos, todos do mesmo tipo — ele afirmava mais do que o código faz:** "dentro
+  de uma tentativa" não vale na borda HTTP do `videos`, que não consome entrega nenhuma (virou
+  "dentro de uma unidade de trabalho", e o defeito era herdado dos javadocs do próprio serviço);
+  "repete do mesmo jeito" apagava o filtro de falha, que o 087 registrou como divergência
+  deliberada; e "falhou de forma transitória" descrevia a intenção da política, não o
+  `Exception` que as três cópias de fato repetem. O que conta como falha passageira ficou dito
+  como decisão **de cada recurso**. A aritmética (`atMost(2)`, o porquê de três e não quatro)
+  ficou **fora** do glossário de propósito, contra o pedido literal do ticket: ela mora no ADR,
+  e o verbete aponta.
+
+- [O `Rastro` do `videos` passou a descrever os saltos de thread que ele de fato
+  dá](tickets/090-saltos-de-thread-do-rastro-do-videos.md) — e a resposta medida é que **não há
+  nenhum**. O achado que o 088 deixou de pé foi confirmado e ampliado: no `videos`, o consumo
+  inteiro (entrada do `@Incoming`, `UPDATE` de transição, publish do `VideoFalhou`, `UPDATE` da
+  marca, ack) roda na **mesma event loop**, medido por sonda temporária de nome de thread no
+  `ExtracaoRapidaPelaBordaTest`. Os dois mecanismos que o javadoc creditava caíram: nenhum dos
+  três consumidores tem `@Blocking`, e o SDK da AWS nem entra na cadeia — as duas idas ao MinIO
+  só são chamadas pelo `EnviarVideoUseCase` e pelo `BaixarPacoteUseCase`, ambos da borda HTTP, e
+  o terceiro chamador do gateway (`PublicarExtrairVideo`, que a reconciliação também usa) pede só
+  a `chaveDoPacote`, string pura; quando o SDK aparece, o `noContextoDeChamada` existe para
+  **sair** da thread dele, que é quase o oposto do que a frase dizia. **O que a
+  medição acrescentou é o que salva a § seguinte**: sem salto de thread, o contexto duplicado
+  ainda é quem carrega o span porque a cadeia *se interrompe* sem mudar de thread — a espera de
+  2 s da repetição do `RepeticaoNoPostgres` retoma no mesmo contexto duplicado, medido, e no
+  intervalo não há pilha onde o contexto pudesse estar preso. As cópias do `extracao` e do
+  `notificacao` ficaram como estão, pela autorização do `AGENTS.md` § *As cópias deliberadas*.
+  Defeito de registro: nenhum span mudou. Foi junto o achado vizinho — o javadoc de
+  `ArquivoMinioAdapter.noContextoDeChamada` ainda citava "a thread do scheduler do fault
+  tolerance", que não existe desde o [061](tickets/061-travamento-raro-com-o-sdk-desligado.md).
+
+- [Dois dos três dashboards de fábrica da imagem passaram a enxergar os três
+  serviços](tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md) — e o
+  terceiro não tem conserto por etiqueta. A `grafana/otel-lgtm` provisiona três
+  dashboards que ninguém tinha registrado, e os três respondiam **"No data"** sobre um sistema
+  saudável: eles filtram toda query por `instance=~"$instance"` com `allValue: ".+"`, um matcher
+  que **exige a etiqueta existir**, e nenhuma série nossa a tinha. O mecanismo é o oposto do
+  intuitivo — quem traduz OTLP→Prometheus **não é o coletor, é o próprio Prometheus**, em
+  `/api/v1/otlp`, mapeando `service.name`→`job` e `service.instance.id`→`instance`; o primeiro
+  chegava, o segundo não era emitido por ninguém. A correção é uma **segunda** adição ao
+  `otelcol-config.yaml` derivado da imagem (a primeira é o receiver do RabbitMQ, do 058): um
+  processador `transform` que copia `host.name` — id do container, único por réplica — para
+  `service.instance.id`, com guarda `== nil` que preserva a `instance` nativa das séries de
+  *scrape*. Medido contra a stack: as duas réplicas do `extracao` dão **duas** `instance`
+  distintas, *RED Metrics (classic)* e *JVM Overview* respondem com as variáveis em "All", e
+  `rabbitmq` e `otelcol-contrib` ficam inalterados. *RED Metrics (native histogram)* **continua
+  morto e é estrutural**: ele consulta histograma nativo e o Quarkus exporta clássico — fato
+  conhecido, não pendência. O ADR 0004 ganhou a seção que faltava; a recusa de painel curado
+  **não** foi reaberta aqui, e é o [092](tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md)
+  que a discute.
+
+- [Um painel do vão, e a reversão parcial da recusa de painel
+  curado](tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md) — **reversão parcial** de
+  decisão registrada, e não acréscimo: painel curado estava em *Fora de escopo* e o ADR 0004 o
+  recusava por mérito. Cai **um** dos dois argumentos daquela recusa, e cai por quem é o leitor:
+  *"a exploração ad-hoc no Explore responde as mesmas perguntas"* pressupõe alguém que sabe o que
+  perguntar, e o público real é o avaliador nos dez minutos do vídeo — ele não tem como saber que
+  existe uma fila chamada `extracao.extrair.estacionamento`. O outro argumento — um painel é a
+  parte que envelhece primeiro — **fica de pé, e virou requisito**: o passo 12 do `scripts/smoke.sh`
+  lê as queries **do arquivo do painel** e reprova a que devolver série vazia num sistema que
+  acabou de processar um Vídeo; ele roda **depois** do ciclo porque `fiapx.extracao.duracao` está
+  legitimamente vazia até a primeira Extração. É **um** painel, não uma suíte
+  (`docker/observabilidade/painel-infraestrutura.json`, provisionado por arquivo e home do
+  Grafana por `GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`), e cobre só o **vão**: fila,
+  Estacionamento, DLQ, consumidores e `fiapx.extracao.duracao` com `resultado`, mais log e trace.
+  HTTP e JVM ficam fora e são linkados — são dos dois dashboards que o
+  [091](tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md) fez enxergar os
+  três serviços, e repeti-los aqui seria o envelhecimento que a recusa temia. As expressões de
+  fila são derivadas das dos três alertas do `alertas.yaml`, e a busca de trace herda a âncora em
+  `resource.service.name` e os dois spansets ligados por `&&` do passo 10. Contagem de Vídeo por
+  estado **continua fora**. Medido ao escrever: a duração aparece como média por `resultado`, e
+  não como quantil, porque os limites de bucket default do OpenTelemetry são de milissegundos e a
+  Extração do fixture leva ~0,19 s — todo mundo cai no primeiro bucket, e um quantil ali é
+  interpolação, não medida.
+
+- [Tráfego sintético para alimentar os painéis](tickets/093-trafego-sintetico-para-alimentar-os-paineis.md)
+  — o painel do 092 e os dois de fábrica do 091 existem, mas numa stack recém-subida o que eles
+  mostram é um Vídeo. `scripts/trafego.sh` + `scripts/trafego.js` geram uso da API **contra o
+  Compose principal, com a observabilidade de pé** — o oposto exato do
+  `docker-compose.carga.yml`, e é por isso que eles moram em `scripts/` e não ao lado dos scripts
+  de carga. É o **primeiro script executável do repositório que não reprova nada**: ele produz
+  sinal e relata, e a única falha que se permite é a da infraestrutura que o tornaria inútil —
+  duas guardas, o ambiente dos containers (acusa o overlay de carga pelo nome) e a pergunta ao
+  Prometheus. Vinte minutos em blocos de 5 min que **alternam** chegada sustentada (6 Vídeo/min,
+  38% da capacidade medida no 026) e rajada (tudo em t=0, o resto do bloco drenando — a drenagem
+  é o sinal dos painéis de fila), começando pela sustentada porque a rajada sem linha de base não
+  significa nada; em paralelo, pela corrida inteira, o ciclo de quem está olhando (listagem
+  filtrada e paginada, consulta, download inteiro do Pacote em 30% dos `CONCLUIDO`) e um cenário
+  de erro com as quatro rejeições de borda. Mistura de três fixtures para espalhar a duração e
+  produzir `resultado=falhou`; dois donos; censo e amostra pelo `oraculo.sh` **intocado**. Medido
+  em 20 min: 203 aceitos e 0 recusados, 194 `CONCLUIDO` e 9 `FALHOU`, os seis status no
+  Prometheus (202, 200, 404, 400, 415, 409), `extracao.extrair` em 32 mensagens de pico, os dois
+  valores de `resultado` povoados (média 1,00 s contra os 0,19 s do 092 — é a mistura funcionando)
+  e Estacionamento e DLQs em zero, que é a leitura correta. Três suposições caíram ao rodar: o
+  409 não é determinístico (a Extração de 3 s cabe entre o `202` e o `GET`), a amostra pela API
+  acusava o contrato funcionando nos Vídeos do outro dono, e dois defeitos do caminho de relatar
+  escondiam em silêncio em vez de quebrar. Nada em `scripts/carga/` foi tocado.
+
+- [Os limites de bucket da duração da
+  Extração](tickets/094-limites-de-bucket-da-duracao-da-extracao.md) — `fiapx.extracao.duracao` é
+  gravada em **segundos** e herdava os limites *default* do OpenTelemetry, que são de
+  **milissegundos**: toda observação caía no primeiro bucket e o `histogram_quantile` devolveu
+  `NaN` em todas as amostras de uma janela de uma hora (medido no 092, contornado lá com
+  `_sum / _count`). Agora são doze limites próprios, por `setExplicitBucketBoundariesAdvice` no
+  `DuracaoDaExtracao` — no instrumento, e não numa *view* do `application.properties`, que teria
+  de nomear a métrica num arquivo onde nada mais fala dela. A escala é `0,1 · 0,25 · 0,5 · 1 ·
+  2,5 · 5 · 10 · 30 · 60 · 120 · 300 · 420`, e os dois extremos são decisão: o piso em 0,1 deixa a
+  recusa do ffprobe (~0,05 s) inteira no primeiro bucket, porque um limite em 0,05 partiria a moda
+  daquela população — o preço é que quantil de `falhou` ali é teto, não medida, e o painel diz
+  isso —; e o topo ganhou 420 (o `dreno-timeout-segundos`) porque com 300 no topo quem morre no
+  teto do ffmpeg cai no `+Inf` junto com quem passou de todo teto conhecido — separação que mora
+  na **série**, não no quantil, porque `histogram_quantile` devolve 420 cravado nos dois casos. O painel **ganhou** o
+  quantil de volta, ao lado da média, que fica: a média é exata e responde a duração típica, o
+  quantil responde a cauda. Sobre o contador **acumulado** e não sobre `rate()` — a outra medição
+  do 092 continua de pé —, então o que se lê é o p95/p99 desde que a réplica subiu. O passo 12 do
+  `smoke.sh` não precisou de código: ele já contava amostras não-`NaN` sobre as queries do
+  arquivo. Medido com os limites novos, numa corrida de 20 min do `trafego.sh`: 193 concluídas em
+  **seis** buckets, p50 0,42 s, p90 5,2 s, p95 7,6 s, p99 9,5 s, contra o `NaN` de antes. As 10
+  falhas ficaram todas no primeiro bucket e os cinco limites acima de 10 s ficaram vazios — os dois
+  são o esperado, e estão registrados como tal em vez de corrigidos.
+
+- [O nome do serviço nas legendas do *JVM
+  Overview*](tickets/095-nome-do-servico-nas-legendas-do-jvm-overview.md) — as legendas daquele
+  dashboard só mostram a `instance` (seis das oito queries agregam `by (instance)` e descartam o
+  `job`), e a `instance` era só o id do container. O conserto mora na **etiqueta**, não no dashboard: o `transform/instancia` do 091
+  passa a montar `service.instance.id` como `<service.name>/<host.name>`
+  (`fiapx-videos/3de6f12673fe`), e o JSON da imagem continua intocado — sobrescrevê-lo custaria
+  rederivá-lo a cada upgrade, que é justamente o custo que tornou os dashboards de fábrica
+  aceitáveis no ADR 0004. A `instance` segue única por réplica, e `rabbitmq` e `otelcol-contrib`
+  ficam inalterados. O *RED classic* não muda nas legendas — toda query dele soma as instâncias
+  numa linha só —, só na lista suspensa `$instance`.
+
+- [As legendas do *JVM Overview* sem id de
+  container](tickets/096-legendas-do-jvm-overview-sem-id-de-container.md) — a `instance` passa a
+  ser `<service.name>-<réplica>` (`fiapx-extracao-2`). O número da réplica só existe no nome que o
+  Compose dá ao container, e de dentro dele a única porta é a DNS do Docker; por isso as três
+  imagens ganham um `entrypoint.sh` que declara esse nome como `container.name` (convenção do OTel)
+  e dá `exec` no JVM, e o coletor aproveita só o sufixo numérico, porque o prefixo muda com o
+  diretório do projeto. O formato do 095 fica como recuo para série sem `container.name`. O preço,
+  aceito: a `instance` fica única por réplica e não por container, então por ~5 min depois de
+  **recriar** um serviço as duas gerações somam nos painéis que agregam (*Threads* mediu 72 contra
+  32/40). As três
+  cópias do script têm guarda no `validate` (`scripts/verifica-entrypoint.sh`). O "só alguns têm
+  o nome" que abriu o ticket era histórico, não defeito: as séries anteriores continuam na janela
+  de 1 h do dashboard, e só recriar o container `observabilidade` as tira antes — ao preço de
+  zerar todo o histórico.
+
+- [As recusas 4xx da borda, e o *Error Rate* que só conta
+  5xx](tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md) — o diagnóstico não
+  achou defeito: o *Error Rate* do *RED classic* conta `5..`, o sistema não produz nenhum, e o
+  painel vazio é a verdade. O vão era vizinho — as 52 recusas do contrato que o `trafego.sh` gera
+  (415, 400, 404, 409) não apareciam em painel algum. **Decidido o caminho B**: a leitura de erro
+  da borda vai para o painel curado, numa linha *Borda* com dois painéis, e o JSON de fábrica fica
+  intocado. Isto abre uma exceção estreita na recusa do 092 de repetir HTTP, e ela é estreita pelo
+  próprio argumento da recusa: o RED **não** mantém `4..`, então não há série repetida; o 5xx
+  entra junto só para a razão ter sentido e para dar à palavra "erro" um título que diz de qual
+  faixa fala. O `0%` no lugar de "No data" custa um `or vector(0)` no numerador — numerador vazio
+  dividido por denominador é vetor vazio em PromQL, não bug do Grafana. **O caminho A foi
+  recusado pela terceira vez** (091, 095, 097): sobrescrever 15,9 kB de JSON derivado da imagem, a
+  rederivar a cada upgrade, para ganhar um título. O preço do B, dito por escrito: quem abrir o
+  *RED classic* direto continua vendo `Error Rate` sem qualificação e vazio, e quem o desambigua é
+  o ADR 0004, não a tela.
+
+- [O *Error %* do *JVM Overview*, e a armadilha do `or
+  vector(0)`](tickets/098-o-error-pct-do-jvm-overview-e-a-armadilha-do-or-vector-zero.md) — o
+  segundo diagnóstico seguido que não achou defeito, e pela mesma causa do 097: o painel conta
+  `5..`, não há nenhum na retenção, e razão sem numerador é vetor vazio. **Decidido o caminho B
+  de novo, e o A recusado pela quarta vez** (091, 095, 097, 098) — o `0%` na tela daquele
+  dashboard custaria sobrescrever mais um JSON derivado da imagem, e a leitura de erro de servidor
+  que mostra `0%` já existe desde o 097, no painel curado, que é a home. O achado que fez o ticket
+  valer é sobre o **conserto**, não sobre o sintoma: o `or vector(0)` do 097 **não** serviria
+  aqui, porque esta razão é por `instance` e o zero precisa nascer com a etiqueta — o mecanismo
+  está no ADR 0004 § *Um painel*, que passou a carregá-lo, junto com a ressalva de que o
+  `Error %` vazio não é defeito; ela estava escrita só sobre o *RED classic*.
+
+- [A pasta *FIAP X* vazia, e o painel que morava fora
+  dela](tickets/099-a-pasta-fiap-x-vazia-e-o-painel-que-mora-fora-dela.md) — o terceiro
+  diagnóstico seguido sobre a mesma stack, e o primeiro que mudou alguma coisa fora de
+  documentação. A pasta não vinha de JSON nenhum: quem a declara é o `alertas.yaml`, onde ela
+  agrupa as três regras — e no Grafana pasta de alerta e pasta de dashboard são a **mesma**
+  entidade, então ela aparecia na lista de Dashboards carregando só alerta. Apagá-la não era
+  opção (`folder` é obrigatório em regra provisionada). **Decidido mover o painel curado para
+  dentro dela** (`folder: "FIAP X"` no `dashboards.yaml`), o que **reverte o "pasta raiz de
+  propósito" do 092**: aquele argumento existia para o painel ser fácil de achar, e a home já
+  entrega isso — `GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH` lê arquivo do disco, não pasta. O
+  painel passa a morar ao lado dos três alertas de que ele deriva as expressões de fila. Achado
+  de método: `docker compose restart` **não** move o painel — o provisionador pula arquivo que
+  não mudou, e quem move é base nova (`up -d --force-recreate`). O título da pasta é contrato entre
+  os dois arquivos de provisionamento, e divergência ali cria uma segunda pasta em silêncio: o
+  passo 12 do `smoke.sh` passou a cobri-la.
+
+- [A tabela de trace vazia, e as travessias recentes que ninguém
+  via](tickets/100-tabela-de-trace-vazia-e-as-travessias-recentes-que-ninguem-ve.md) — o quarto
+  pedido seguido sobre painel vazio, e o primeiro que **não** é sobre painel de erro nem termina
+  em "não é defeito": a tabela de trace do painel curado nascia sem linha porque a query exigia um
+  `idVideo` que ninguém havia digitado, e `= ""` não casa span nenhum (medido: 0). **Decidido
+  servir os dois estados com uma query só**, por regex — `.idVideo =~ ".*$idVideo.*"`: vazio lista
+  as travessias recentes (6 numa janela de 2 h, contra 17 traces sem a âncora), preenchido filtra
+  igual a antes (o mesmo 1 trace que a igualdade). Recusados um segundo target no mesmo painel
+  (duas verdades sobre a mesma pergunta) e um painel novo só de travessias recentes (é a **suíte**
+  que a recusa do 092 barra). Isto **substitui a mitigação por título do 092**, que respondia ao
+  mesmo defeito com um *"preencha o idVideo no topo"* no nome do painel. O preço, por escrito: a
+  condição passa a significar "contém" em vez de "igual a" — com UUID inteiro dá no mesmo, com um
+  pedaço colado dá match parcial, e isso ajuda mais do que atrapalha. O estado de textbox vazio é
+  o que a demo abre e ficou com guarda própria no passo 12 do `smoke.sh`, vista vermelha antes de
+  verde.
+
+- [A mediana no quantil da Extração, e o *RED native* que ninguém
+  lê](tickets/101-mediana-no-quantil-da-extracao-e-o-red-native-que-ninguem-le.md) — duas mudanças
+  de tela, e a segunda é **reversão de decisão registrada**. A p50 entra ao lado da p95 e da p99
+  no painel curado, e não repete a média que está no painel acima: média bem acima da mediana é a
+  cauda puxando o número, e nesta população — moda na recusa do ffprobe (~0,05 s), cauda em vídeo
+  grande — é o caso provável, não hipótese. A segunda tira o *RED Metrics (native histogram)* da
+  lista de dashboards: o [091](tickets/091-series-otlp-sem-instance-cegam-os-dashboards-de-fabrica.md)
+  o deixou de pé como *fato conhecido* e o ADR 0004 registrou o **não** dele numa tabela, mas
+  decidir não **consertá-lo** (histograma nativo contra exportador clássico, o que exigiria mudar
+  os três exportadores) não é decidir mantê-lo na tela. Cai também o *"o `grafana-dashboards.yaml`
+  da imagem não é tocado"* do `dashboards.yaml`: o override são **500 bytes** de YAML a rederivar
+  no upgrade, contra os 15,9 kB de JSON que o ADR recusou sobrescrever quatro vezes — mesmo tipo
+  de custo, duas ordens de grandeza menor. Escolher a lista de dashboards à mão erra calado nos
+  dois sentidos (o morto que volta num upgrade sem rederivação, o de fábrica novo que o override
+  esconde), e por isso o passo 12 do `smoke.sh` passou a contar: o Grafana lista exatamente o
+  painel curado e os dois linkados no topo dele.
+
+- [Posse do arquivo no download do Vídeo e limpeza dos
+  parciais](tickets/102-posse-do-arquivo-no-download-e-limpeza-dos-parciais.md) — a premissa foi
+  **desmentida por medição**: no SDK 2.41.18 um blip depois de bytes em disco já baixava de novo com
+  conteúdo exato, porque o `toFile` apaga o destino na falha. O comentário que dizia o contrário
+  saiu. O defeito real era outro, em dois pedaços: essa exclusão não olha quem criou o arquivo
+  (apaga o destino preexistente) e, quando falha, só vira log. Cada chamada ao recurso agora toma
+  posse do destino por `Files.createFile` atômico, o SDK escreve com `LEAVE` e o descarte do parcial
+  é do `ArquivoMinioClient`. Colisão falha sem repetir e sem apagar; falha ao descartar interrompe
+  com as duas falhas em `LimpezaDoParcialFalhouException`. A política do ADR 0001 é a mesma, e o
+  filtro que exclui esses dois casos é só do download — divergência registrada no `AGENTS.md`. A
+  posse vale pelo caminho, não pelo arquivo: troca deliberada dentro do diretório exclusivo da
+  tentativa fica fora da guarda.
+
+- [O dead-lettering at-least-once que não estava
+  ligado](tickets/103-dead-lettering-at-least-once-sem-reject-publish.md) — a policy do Compose
+  definia só `dead-letter-strategy`, e sem `overflow=reject-publish` o RabbitMQ volta a
+  *at-most-once*, que é o regime que o ADR 0001 recusou. A policy ganhou o segundo campo, e não
+  foi preciso recriar fila, porque policy é dinâmica. As DLQs classic não recebem a policy: no
+  RabbitMQ 4.3, uma chave que a fila classic não suporta faz a policy inteira deixar de casar com
+  ela. `reject-publish` não dispara, porque nenhuma fila tem limite de tamanho. O risco ficou
+  registrado na emenda do ADR 0001: **tirar qualquer dos dois campos descarta** as mensagens
+  dead-lettered retidas. O ticket fechou depois do 110.
+
+- [O passo 12 do smoke julga o painel antes da segunda
+  exportação](tickets/110-passo-12-do-smoke-antes-da-segunda-exportacao.md) — o defeito é
+  anterior ao 103, e isso foi medido com a policy antiga. O `videos` exporta métrica a cada 60 s, e
+  numa stack recém-criada o smoke inteiro cabia na primeira janela. O `rate()` da linha *Borda*
+  ficava vazio num sistema saudável, e o painel só passava na segunda corrida. O passo 12 agora
+  espera, até 150 s, duas amostras de alguma série 4xx crua antes de julgar as queries. O
+  intervalo do SDK não mudou. O 404 do passo 9, que às vezes não entra no contador, continua sem
+  explicação.
+
+- [O Vídeo é aceito no commit da linha, não no
+  publish](tickets/104-aceite-do-video-no-commit-da-linha.md) — depois do `INSERT`, a varredura do
+  ADR 0003 já garante o comando, então o publish que falha ou não confirma não falha mais o `POST`:
+  ele responde `202` com a marca nula. O publish no envio espera no máximo **2 s**, e o teto limita
+  a espera, não o publish, porque o que for confirmado tarde ainda grava a marca. A leitura do
+  ticket previa `500`, mas a medição com o broker em alarme de disco mostrou coisa pior: a
+  requisição **pendurava** 60 s sem resposta. Com o teto, o envio respondeu `202` em 2,03 s e o
+  Vídeo chegou a `CONCLUIDO` no desbloqueio, sem republicação. Depois do teto, a continuação sai na
+  thread do timer do JDK, e a borda vazava o `idVideo` no MDC dela, o defeito do 063. A ponte do
+  `VideosResource` agora devolve a continuação ao contexto Vert.x, pelo mesmo helper
+  (`framework/vertx/ContextoDeChamada`) que o adapter do MinIO já usava em cópia própria. Emenda no
+  ADR 0003 e seção nova no contrato HTTP.
+
+- [O original só expira depois do
+  desfecho](tickets/105-original-so-expira-depois-do-desfecho.md) — reverte em parte a retenção
+  do 011. O `videos` grava a tag `desfecho=sim` no original quando o Vídeo chega a `CONCLUIDO`
+  ou `FALHOU`, e a regra do bucket `videos` expira só o que tem a tag. Original sem tag nunca
+  expira, e é isso que torna um Vídeo preso recuperável. A marca não reverte nem segura a
+  transição: se falhar, sobra objeto, nenhum Vídeo se perde. O envio que falha no `INSERT` apaga
+  o original **só depois de confirmar que a linha não existe**, porque o `INSERT` pode falhar
+  depois de commitar, e aí apagar seria perder o Vídeo. O seed trocou `mc ilm rule add`, que
+  acumulava uma regra por execução, por `mc ilm import`. Objetos de antes do deploy ficam sem tag
+  e sem backfill. Registrado no [ADR 0005](../adr/0005-retencao-do-original.md).
+
+- [Detecção de Vídeo preso pelo estado, não pelas
+  filas](tickets/106-deteccao-de-video-preso-pelo-estado.md) — reverte o 033: `iniciada_em` volta
+  como coluna, gravado com o instante da primeira tentativa. O `videos` exporta
+  `fiapx.videos.presos`, que conta o Postgres a cada minuto: `PROCESSANDO` há mais de 30 min desde o
+  início, e `RECEBIDO` há mais de 30 min desde a marca do comando. Dois alertas novos leem a métrica,
+  e o de `RECEBIDO` só dispara com `extracao.extrair` sem mensagem pronta. Os 30 min derivam dos
+  tetos do `extracao` (3 × 420 s + aviso), com a derivação ao lado do número. Sem resgate
+  automático. A métrica passa pela recusa de *Vídeos por estado* do ADR 0004: a listagem é por
+  Dono, e quem consulta em regime é um alerta. Falso positivo aceito e escrito: entrega devolvida
+  por crash espera atrás do backlog.
+  *Medido pelo [ticket 113](tickets/113-falso-positivo-de-video-preso-em-processando-sob-pico.md):
+  a entrega devolvida por crash volta ao começo da fila, e esse falso positivo não se realiza.*
+
+- [Resgate de Vídeo preso pela marca de
+  publicação](tickets/107-resgate-de-video-preso-pela-marca.md) — resgate é apagar a marca.
+  `scripts/resgata-video.sh` zera `comando_publicado_em` de um Vídeo `RECEBIDO` ou `PROCESSANDO`,
+  e a varredura do ADR 0003 republica o `ExtrairVideo` pelo caminho do envio. Vídeo com desfecho é
+  recusado. O predicado da varredura passou a aceitar `PROCESSANDO`. `FALHOU` sem aviso já era
+  pendente, e o script só o reporta. O runbook `docs/operacao/resgate-de-video-preso.md` é para onde
+  os alertas apontam, e inclui a purga da mensagem residual. Recusados: mover mensagens por shovel
+  ou UI e endpoint administrativo. Provado no Compose por `scripts/resgate-ponta-a-ponta.sh`.
+
+- [Recusa por capacidade antes de receber o
+  corpo](tickets/108-recusa-por-capacidade-antes-do-corpo.md) — o `POST /videos` sai `503` com
+  `Retry-After` e em problem+json **antes de o corpo ser lido**, por uma rota Vert.x ordenada à
+  frente de quem lê o multipart. A recusa é pelo recurso local da borda, e não pelo backlog da
+  fila, que é o amortecedor de pico. São duas perguntas: se a réplica já tem o teto de envios em
+  andamento, e se o `Content-Length` cabe no espaço livre do volume de uploads descontado o que os
+  envios em andamento ainda vão gravar. O teto é derivado, tamanho do volume / 200 MB, e pode ser
+  configurado. `Content-Length` acima de 200 MB continua `413`. A falha do MinIO na primeira
+  escrita do envio também vira `503`; a do `INSERT` continua `500`. A recusa vem antes da
+  autenticação, e recusa não é Vídeo perdido. Cota por Dono e fila justa ficam para o 109.
+
+- [Limitações da conservação no documento de
+  arquitetura](tickets/109-limitacoes-da-conservacao-no-documento-de-arquitetura.md) — "nenhum
+  Vídeo perdido" vale dentro de um modelo de falha, e três pontos ficam escritos como fora dele,
+  cada um com o que o cobriria. Perda do volume do Postgres, do MinIO, do RabbitMQ ou do
+  Keycloak, que no Compose são nó único sem backup: a fila quorum é durável, mas com um nó não
+  replica. Falta de cota por Dono, que é equidade e não conservação. `POST /videos` sem
+  idempotência: o reenvio depois de uma conexão caída pode duplicar o Vídeo, e duplicar não é
+  perder. A linha "Não perder requisição em pico" da tabela de requisitos passou a se ler pelo termo
+  do glossário e a citar 103–108. Em todo o documento, os 39 `502` do 028 deixaram de ser
+  chamados de perda ou de recusa, e viraram envios sem `202`; a tabela de § *O que impede a perda* deixou de chamar a fila
+  de replicada.
+
+- [Diagramas e narração coerentes com o
+  código](tickets/111-diagramas-e-narracao-coerentes-com-o-codigo.md) — o caminho feliz mostra o
+  `202` depois do publish tentado, com o teto de 2 s, a marca tardia e a varredura. O caminho de
+  falha mostra os dois predecessores e `EstadoVideo.predecessores()`, e troca o motivo da DLQ para
+  `TENTATIVAS_ESGOTADAS`. Os dois ganharam a tag de desfecho do 105. Nenhum texto cita mais número
+  de passo. As contagens vêm de uma execução nova: 512 testes, 418 sem container. O roteiro
+  mantém 393/605/336 palavras. Ficou aberta a tomada dos passos 6 a 8, que ainda diz "três
+  entregas depois" para uma falha permanente.
+
+- [As séries que os alertas leem, conferidas no
+  smoke](tickets/112-series-dos-alertas-conferidas-no-smoke.md) — o passo 14 do `smoke.sh` manda
+  cada `expr` de `alertas.yaml` ao `parse_query` do Prometheus e confere que cada seletor, com nome
+  e rótulos, tem série. Reprova com a regra e o seletor que faltam. As duas séries de `estado` de
+  `fiapx_videos_presos` ficam cobertas pelos seletores do arquivo, sem lista no script. Visto
+  reprovar com uma métrica e uma fila renomeadas, e verde de novo depois de desfazer.
+
+- [O falso positivo de Vídeo preso em `PROCESSANDO` sob
+  pico](tickets/113-falso-positivo-de-video-preso-em-processando-sob-pico.md) — medido, e não se
+  realiza para crash de réplica. A entrega devolvida pelo `SIGKILL` volta ao **começo** da fila
+  quorum. Isso deu posição 2 com 360 mensagens prontas, e posição 3 com 352 num pico de 400
+  Vídeos de 2 min, com desfecho 30 s depois do `iniciada_em` e zero presos. As tentativas interrompidas foram
+  identificadas pelo órfão no scratch. Critérios fixados antes de rodar, e o modo `mata-extracao`
+  do `conservacao.sh` passou a medir isso. Os textos do limite foram corrigidos no `alertas.yaml`,
+  ao lado do limiar, no runbook e numa `## Correção (113)` do 106. Ficam de pé os 420 s sem teto
+  duro; a posição do `nack` com requeue ficou para o ticket 119.
+
+- [A posição do `nack` com requeue sob
+  pico](tickets/119-posicao-do-nack-com-requeue-sob-pico.md) — medida com 400 Vídeos válidos:
+  `redeliver` 0→1 (delta 1), 397 mensagens prontas no snapshot do nack, posição 0 no começo da
+  fila, intervalo `iniciada_em`→desfecho de 15 s e zero presos em `PROCESSANDO`. A única tentativa
+  em voo foi identificada com uma réplica; todos os 400 chegaram a `CONCLUIDO`, sem `FALHOU`, e a
+  injeção não alcançou a terceira entrega. O limite não se realiza nesse regime; ficam escritos o
+  teto não duro de 420 s e a ressalva de não extrapolar para múltiplas falhas em voo.
+
+- [O proxy de carga aguenta a rajada
+  padrão](tickets/114-proxy-de-carga-aguenta-a-rajada-padrao.md) — o `nginx.conf` gerado declara
+  `worker_connections 1024`, com a conta ao lado: 400 envios × 2 conexões, mais folga. Com o
+  default de 400 conexões, `borda.sh escala 1` deu 400/400 `202`, zero falhas de conexão, os seis
+  critérios verdes e nenhuma linha `worker_connections are not enough` no proxy. A mediana do
+  `202` foi para 14,0 s, sem causa investigada; o indício é partida a frio, com event loops do
+  `videos` bloqueados por até 4,3 s no começo da rajada.
+
+- [Recusa por capacidade com várias réplicas da
+  borda](tickets/115-recusa-por-capacidade-com-varias-replicas-da-borda.md) — com N=3 e teto 1,
+  86/400 envios receberam `202` e 314 receberam `503` (70/75/169 por réplica), sem o proxy
+  desabilitar réplicas pela recusa. Com teto derivado de 2354 por réplica, 400/400 `202` e
+  nenhuma recusa. Mantido `http_503`: no caminho de resposta HTTP do `POST` já enviado,
+  a ausência de `non_idempotent` impede também a contabilização da falha. A reserva de
+  uploads continua local a cada réplica sobre volume compartilhado; essa limitação entrou
+  na arquitetura. Método e limites em
+  [`capacidade-borda-replicas.md`](../pesquisa/capacidade-borda-replicas.md).
+
+- [Decisões deixadas pela recusa por capacidade](tickets/116-decisoes-deixadas-pela-recusa-por-capacidade.md)
+  — a recusa continua antes da autenticação para decidir pelos cabeçalhos antes de o corpo ocupar
+  o volume; o custo aceito é `503` para um envio sem token quando não há vaga. O teto derivado
+  continua o default: **2354** foi só o valor observado no host de 460 GB, não um limite do
+  contrato, porque o volume nomeado não tem cota própria. A conta de espaço livre com reserva é
+  a proteção efetiva, e um teto previsível continua disponível por configuração. Nenhum código
+  mudou.
+
+- [A tomada do caminho de falha sem três entregas](tickets/117-tomada-do-caminho-de-falha-sem-tres-entregas.md)
+  — a falha do arquivo inválido é permanente: o `ffprobe` a recusa na primeira entrega, sem
+  gastar tentativas, e o motivo é `ARQUIVO_INVALIDO`. O Bloco 2 do roteiro foi atualizado para
+  **392 palavras** (o total, **1.403**); as três entregas continuam apenas no caminho transitório
+  descrito no Bloco 3.
+
+- [Os alertas do smoke e do painel sem contagem frágil](tickets/118-tres-alertas-desatualizados-no-smoke.md)
+  — os comentários do `smoke.sh` falam em **os alertas** e **as regras provisionadas**, sem
+  repetir o total de regras. O `dashboards.yaml` especifica **as três regras de fila daquele
+  arquivo**, que são as expressões derivadas pelo painel, sem confundir essa quantidade com a
+  pasta compartilhada por todas as regras.
+
+- [Event loops do `videos` bloqueados no começo de uma rajada](tickets/120-event-loops-bloqueados-no-primeiro-envio-sob-rajada.md)
+  — a comparação controlada confirmou partida a frio do `S3AsyncClient`: 4 avisos do
+  `BlockedThreadChecker` na rajada sem aquecimento, com `202` mediana de 25,310 ms, contra zero
+  avisos e 1,101 ms depois de cinco envios sequenciais e 10 s de pausa. Os stacks frios ficam na
+  criação lazy do bean e na carga de classes do SDK; não há evidência de handshake de rede. A
+  única mudança foi o harness de medição, e a antecipação da inicialização de produção ficou
+  para decisão do mantenedor.
+
 ## Ainda não especificado
 
 <!-- O 024 fechou o caminho até o *destino*: tudo que o enunciado cobra está entregue. A
@@ -1006,6 +1643,30 @@ verificadas por teste, não são sugestão). Projeto original em
      próprio 045 já registra isso como escolha barata deliberada, e reabrir seria refazer
      decisão registrada. -->
 
+<!-- A fronteira reabriu em 2026-09-12, com um ticket só e por um diagnóstico que NÃO achou
+     defeito: o [097](tickets/097-recusas-4xx-invisiveis-e-o-error-rate-que-so-conta-5xx.md)
+     nasceu da pergunta "por que o *Error Rate* do *RED classic* está sem dados", cuja resposta
+     é que ele conta `5..` e o sistema não produz nenhum — o que 091 e o ADR 0004 já registravam.
+     O que o diagnóstico achou foi o vão vizinho: as 52 recusas 4xx que o `trafego.sh` gera de
+     propósito (415, 400, 404, 409) não apareciam em painel nenhum. A decisão que ele carregava
+     saiu na mesma sessão, pelo caminho recomendado — painel curado, JSON de fábrica intocado —,
+     e o ticket fechou; a linha dele está em Decisões até aqui, com o preço do B por escrito.
+     A fronteira voltou a ficar vazia.
+
+     Reabriu e fechou de novo na mesma data, pelo mesmo padrão: o
+     [098](tickets/098-o-error-pct-do-jvm-overview-e-a-armadilha-do-or-vector-zero.md) nasceu da
+     mesma pergunta feita sobre o *JVM Overview*, teve a mesma resposta — não é defeito — e a
+     mesma decisão (B, JSON de fábrica intocado). O que ele acrescenta é uma ressalva sobre a
+     receita do 097, que não vale para razão por etiqueta. Dois diagnósticos seguidos sem defeito
+     sobre painel de erro vazio sugerem que o registro tinha razão e a tela é que não explica;
+     terceiro pedido igual, olhe primeiro o ADR 0004 § Os três dashboards de fábrica. A fronteira
+     está vazia de novo. -->
+
+<!-- Reabriu e fechou de novo em 2026-09-12, com o
+     [100](tickets/100-tabela-de-trace-vazia-e-as-travessias-recentes-que-ninguem-ve.md): quarto
+     pedido seguido sobre painel vazio, e o primeiro que era defeito — a tabela de trace do painel
+     curado exigia um idVideo digitado. A fronteira está vazia de novo. -->
+
 ## Fora de escopo
 
 <!-- ruled beyond the destination; nunca gradua -->
@@ -1021,6 +1682,10 @@ verificadas por teste, não são sugestão). Projeto original em
   de alerta** (os alertas existem e guardam histórico; entregá-los por e-mail é configuração
   de *contact point*, adiada conscientemente — a detecção não muda, e isso está registrado
   em Limitações conhecidas).
+  *Revertido em parte pelo [ticket 092](tickets/092-painel-do-vao-e-a-reversao-parcial-da-recusa.md):
+  existe **um** painel, e só sobre o vão que nenhum dashboard de fábrica olha — ver Decisões até
+  aqui. O canal de notificação continua fora. O item acima não se reescreve: painel curado esteve
+  fora, e por que esteve continua sendo parte do registro.*
 - **Manifests Kubernetes** — o enunciado aceita "Docker Compose **ou** Kubernetes";
   Compose garante a demo.
 - **Interface web** — o projeto original tinha HTML embutido; a demo será por Swagger UI e

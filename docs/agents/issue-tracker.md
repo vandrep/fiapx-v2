@@ -32,3 +32,21 @@ Não use `.scratch/`.
   sem bloqueios abertos e sem `assignee`; em caso de empate, o menor ID vem primeiro.
 - **Marcar fora de escopo**: usar `status: fechado`,
   `label: wayfinder:fora-de-escopo` e registrar a decisão no mapa.
+
+## Ticket fechado
+
+Registro do que se decidiu na época, não documentação do estado atual.
+
+- **Pode mudar**: metadados (`label`, `status`, `assignee`, `bloqueado-por`,
+  `prioridade`) e links quebrados por arquivo movido.
+- **Não se reescreve nem se apaga**: corpo narrativo e `## Resolução` já
+  escritos. Erro descoberto depois vira seção nova no fim (`## Correção (NNN)`).
+- **Resolução ausente** pode ser reconstruída a partir do código, marcada como
+  `## Resolução (reconstruída em AAAA-MM-DD)` e com a primeira linha dizendo que
+  não foi escrita pela sessão que fechou o ticket. Renomear cabeçalho sobre
+  conteúdo que já existe não é reconstrução e não leva marca.
+- **Reversão de decisão**: mora no mapa e num ticket novo; o ticket revertido
+  ganha no máximo um ponteiro de uma linha.
+
+Detalhe em [`TRACKER.md`](../wayfinder/TRACKER.md) § *O que pode mudar num
+ticket `fechado`*.
